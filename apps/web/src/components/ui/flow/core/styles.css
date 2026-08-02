@@ -1,0 +1,117 @@
+@import "@xyflow/react/dist/style.css";
+
+/**
+ * Bridge XYFlow's --xy-* defaults to the app design tokens so Controls,
+ * MiniMap, edges, and default nodes follow light/dark with next-themes.
+ */
+.react-flow {
+  --xy-edge-stroke-default: var(--muted-foreground);
+  --xy-edge-stroke-selected-default: var(--foreground);
+  --xy-connectionline-stroke-default: var(--muted-foreground);
+
+  --xy-attribution-background-color-default: color-mix(
+    in oklab,
+    var(--background) 70%,
+    transparent
+  );
+
+  --xy-minimap-background-color-default: var(--card);
+  --xy-minimap-mask-background-color-default: color-mix(
+    in oklab,
+    var(--background) 60%,
+    transparent
+  );
+  --xy-minimap-node-background-color-default: var(--muted);
+
+  --xy-background-color-default: transparent;
+  --xy-background-pattern-dots-color-default: var(--muted-foreground);
+  --xy-background-pattern-lines-color-default: var(--border);
+  --xy-background-pattern-cross-color-default: var(--border);
+
+  --xy-node-color-default: var(--card-foreground);
+  --xy-node-border-default: 1px solid var(--border);
+  --xy-node-background-color-default: var(--card);
+  --xy-node-group-background-color-default: color-mix(
+    in oklab,
+    var(--muted) 40%,
+    transparent
+  );
+  --xy-node-boxshadow-selected-default: 0 0 0 0.5px var(--foreground);
+
+  --xy-handle-background-color-default: var(--foreground);
+  --xy-handle-border-color-default: var(--background);
+
+  --xy-selection-background-color-default: color-mix(
+    in oklab,
+    var(--primary) 12%,
+    transparent
+  );
+  --xy-selection-border-default: 1px dotted
+    color-mix(in oklab, var(--primary) 80%, transparent);
+
+  --xy-controls-button-background-color-default: var(--card);
+  --xy-controls-button-background-color-hover-default: var(--muted);
+  --xy-controls-button-color-default: var(--foreground);
+  --xy-controls-button-color-hover-default: var(--foreground);
+  --xy-controls-button-border-color-default: var(--border);
+
+  --xy-edge-label-background-color-default: var(--background);
+  --xy-edge-label-color-default: var(--foreground);
+  --xy-resize-background-color-default: var(--primary);
+}
+
+.react-flow.dark {
+  --xy-edge-stroke-default: var(--muted-foreground);
+  --xy-edge-stroke-selected-default: var(--foreground);
+  --xy-connectionline-stroke-default: var(--muted-foreground);
+
+  --xy-attribution-background-color-default: color-mix(
+    in oklab,
+    var(--muted) 50%,
+    transparent
+  );
+
+  --xy-minimap-background-color-default: var(--card);
+  --xy-minimap-mask-background-color-default: color-mix(
+    in oklab,
+    var(--background) 60%,
+    transparent
+  );
+  --xy-minimap-node-background-color-default: var(--muted);
+
+  --xy-background-color-default: transparent;
+  --xy-background-pattern-dots-color-default: var(--muted-foreground);
+  --xy-background-pattern-lines-color-default: var(--border);
+  --xy-background-pattern-cross-color-default: var(--border);
+
+  --xy-node-color-default: var(--card-foreground);
+  --xy-node-border-default: 1px solid var(--border);
+  --xy-node-background-color-default: var(--card);
+  --xy-node-group-background-color-default: color-mix(
+    in oklab,
+    var(--muted) 40%,
+    transparent
+  );
+  --xy-node-boxshadow-selected-default: 0 0 0 0.5px var(--muted-foreground);
+
+  --xy-handle-background-color-default: var(--muted-foreground);
+  --xy-handle-border-color-default: var(--card);
+
+  --xy-selection-background-color-default: color-mix(
+    in oklab,
+    var(--primary) 12%,
+    transparent
+  );
+  --xy-selection-border-default: 1px dotted
+    color-mix(in oklab, var(--primary) 80%, transparent);
+
+  --xy-controls-button-background-color-default: var(--card);
+  --xy-controls-button-background-color-hover-default: var(--muted);
+  --xy-controls-button-color-default: var(--foreground);
+  --xy-controls-button-color-hover-default: var(--foreground);
+  --xy-controls-button-border-color-default: var(--border);
+
+  --xy-edge-label-background-color-default: var(--background);
+  --xy-edge-label-color-default: var(--foreground);
+  --xy-resize-background-color-default: var(--primary);
+}

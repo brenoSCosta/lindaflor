@@ -1,0 +1,42 @@
+{
+  "name": "@lindaflor/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": {
+      "default": "./src/*.ts"
+    },
+    "./schemas/tankage": {
+      "default": "./src/schemas/tankage/index.ts"
+    },
+    "./lib/ability": {
+      "default": "./src/lib/ability/index.ts"
+    },
+    "./constants": {
+      "default": "./src/constants/index.ts"
+    }
+  },
+  "scripts": {
+    "clean": "rm -rf node_modules .turbo dist",
+    "check-types": "tsc --noEmit",
+    "test": "bun test",
+    "build": "tsdown"
+  },
+  "dependencies": {
+    "@casl/ability": "catalog:",
+    "@tanstack/react-table": "catalog:",
+    "better-auth": "catalog:",
+    "date-fns": "catalog:",
+    "date-fns-tz": "catalog:",
+    "effect": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@lindaflor/config": "workspace:*",
+    "@tanstack/table-core": "8.21.3",
+    "@types/bun": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  }
+}

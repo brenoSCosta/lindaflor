@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+  pull_request:
+    branches:
+      - main
+      - dev
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    env:
+      # Required for env validation during testing
+      BETTER_AUTH_SECRET: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+      BETTER_AUTH_URL: http://localhost:9000
+      WEB_ORIGIN: http://localhost:9001
+      CORS_ORIGINS: http://localhost:9001,http://localhost:3000
+      DATABASE_URL: postgres://postgres:postgres@localhost:5490/lindaflor
+      VALKEY_URL: redis://localhost:6379
+      SERVER_PORT: 9000
+      SERVER_HOST: 0.0.0.0
+      RESEND_API_KEY: re_test
+      MAIL_FROM: test@example.com
+      GOOGLE_CLIENT_ID: test.apps.googleusercontent.com
+      GOOGLE_CLIENT_SECRET: GOCSPX-test
+      NODE_ENV: test
+      S3_ENDPOINT: http://localhost:9002
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      S3_BUCKET: lindaflor
+      S3_PUBLIC_URL: http://localhost:9002/lindaflor
+      YOUTUBE_API_KEY: test-key
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Lint
+        run: bun run check
+
+      - name: Type check
+        run: bun run check-types
+
+      - name: Test
+        run: bun test
+
+      - name: Check changeset status
+        id: changeset-status
+        run: bunx changeset status --since=origin/main
+        continue-on-error: true
+
+      - name: No changesets warning
+        if: steps.changeset-status.outcome == 'failure'
+        run: |
+          echo "::warning::No new changesets found for this PR. Changelog will not be generated unless commits use a known scope (e.g. feat(api): ...). See docs/CHANGESETS.md."

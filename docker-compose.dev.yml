@@ -1,0 +1,98 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: lindaflor-postgres
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-lindaflor}
+    ports:
+      - "${POSTGRES_PORT:-5491}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-lindaflor}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - lindaflor-network
+    restart: unless-stopped
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: lindaflor-valkey
+    env_file:
+      - .env
+    command:
+      [
+        "valkey-server",
+        "--appendonly",
+        "yes",
+        "--save",
+        "60",
+        "1",
+        "--requirepass",
+        "${VALKEY_PASSWORD:-password}",
+      ]
+    ports:
+      - "${VALKEY_PORT:-6380}:6379"
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "valkey-cli",
+          "--no-auth-warning",
+          "-a",
+          "${VALKEY_PASSWORD:-password}",
+          "ping",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - lindaflor-network
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: lindaflor-minio
+    env_file:
+      - .env
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-minioadmin}
+    command: server /data --console-address ":9001"
+    ports:
+      - "${S3_PORT:-9012}:9000"
+      - "${S3_CONSOLE_PORT:-9013}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - lindaflor-network
+    restart: unless-stopped
+
+networks:
+  lindaflor-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  valkey_data:
+  minio_data:

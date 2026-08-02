@@ -1,0 +1,41 @@
+{
+  "name": "@lindaflor/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "clean": "rm -rf node_modules .turbo dist",
+    "check-types": "tsc --noEmit",
+    "test": "bun test",
+    "build": "tsdown"
+  },
+  "dependencies": {
+    "@casl/ability": "catalog:",
+    "@lindaflor/auth": "workspace:*",
+    "@lindaflor/db": "workspace:*",
+    "@lindaflor/env": "workspace:*",
+    "@lindaflor/mail": "workspace:*",
+    "@lindaflor/s3": "workspace:*",
+    "@lindaflor/shared": "workspace:*",
+    "@lindaflor/valkey": "workspace:*",
+    "@orpc/server": "catalog:",
+    "date-fns": "catalog:",
+    "date-fns-tz": "catalog:",
+    "drizzle-orm": "catalog:",
+    "effect": "catalog:",
+    "uuid": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@lindaflor/config": "workspace:*",
+    "@types/bun": "catalog:",
+    "@types/uuid": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  }
+}

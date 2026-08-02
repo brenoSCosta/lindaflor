@@ -1,0 +1,33 @@
+{
+  "name": "@lindaflor/valkey",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "clean": "rm -rf node_modules .turbo dist",
+    "check-types": "tsc --noEmit",
+    "test": "bun test",
+    "build": "tsdown"
+  },
+  "dependencies": {
+    "@lindaflor/env": "workspace:*",
+    "@orpc/experimental-ratelimit": "catalog:",
+    "better-auth": "catalog:",
+    "effect": "catalog:",
+    "iovalkey": "catalog:"
+  },
+  "devDependencies": {
+    "@lindaflor/config": "workspace:*",
+    "@types/bun": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  }
+}

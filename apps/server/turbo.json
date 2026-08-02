@@ -1,0 +1,12 @@
+{
+  "tags": ["server"],
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "outputs": ["dist/server"]
+    },
+    "db-randomize-stock": {
+      "cache": false
+    }
+  }
+}

@@ -1,0 +1,47 @@
+@import url("https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,500;0,6..96,600;1,6..96,400&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=Outfit:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap");
+
+.store-example-editorial {
+  --ex-bg: #faf6f0;
+  --ex-ink: #1a1218;
+  --ex-muted: #7a6b72;
+  --ex-pink: #d4147a;
+  --ex-pink-deep: #b01062;
+  --ex-gold: #c5a059;
+  --ex-cream-dark: #f0e8dc;
+  --ex-display: "Playfair Display", "Cormorant Garamond", serif;
+  --ex-body: "Outfit", "Jost", sans-serif;
+}
+
+.store-example-bodoni {
+  --ex-bg: #faf9f6;
+  --ex-ink: #1a1c1a;
+  --ex-muted: #636262;
+  --ex-pink: #d4147a;
+  --ex-pink-deep: #ab0060;
+  --ex-border: #e5e4e0;
+  --ex-display: "Bodoni Moda", "Cormorant Garamond", serif;
+  --ex-body: "Inter", "Jost", ui-sans-serif, sans-serif;
+}
+
+.store-example-bossa {
+  --ex-bg: #fcf9f4;
+  --ex-ink: #1c1c19;
+  --ex-muted: #594048;
+  --ex-pink: #d4147a;
+  --ex-pink-deep: #ab0060;
+  --ex-sand: #e5dace;
+  --ex-display: "Playfair Display", "Cormorant Garamond", serif;
+  --ex-body: "DM Sans", "Jost", sans-serif;
+}
+
+.store-example-editorial .font-ex-display,
+.store-example-bodoni .font-ex-display,
+.store-example-bossa .font-ex-display {
+  font-family: var(--ex-display);
+}
+
+.store-example-editorial .font-ex-body,
+.store-example-bodoni .font-ex-body,
+.store-example-bossa .font-ex-body {
+  font-family: var(--ex-body);
+}

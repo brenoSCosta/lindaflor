@@ -1,0 +1,204 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: lindaflor-postgres
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-lindaflor}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+    command:
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./powersync/init-dbs.sql:/docker-entrypoint-initdb.d/init-dbs.sql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-lindaflor}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - lindaflor-network
+    restart: unless-stopped
+
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: lindaflor-valkey
+    env_file:
+      - .env
+    command:
+      [
+        "valkey-server",
+        "--appendonly",
+        "yes",
+        "--save",
+        "60",
+        "1",
+        "--requirepass",
+        "${VALKEY_PASSWORD:-password}",
+      ]
+    # Not published to the host in production; only the server container reaches
+    # Valkey over the internal network.
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "valkey-cli",
+          "--no-auth-warning",
+          "-a",
+          "${VALKEY_PASSWORD:-password}",
+          "ping",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks:
+      - lindaflor-network
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: lindaflor-minio
+    env_file:
+      - .env
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-minioadmin}
+    command: server /data --console-address ":9001"
+    # Not published to the host in production; only the server container reaches
+    # MinIO over the internal network.
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - lindaflor-network
+    restart: unless-stopped
+
+  powersync:
+    image: journeyapps/powersync-service:latest
+    container_name: lindaflor-powersync
+    env_file:
+      - .env
+    environment:
+      PS_DATA_SOURCE_URI: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-lindaflor}
+      PS_STORAGE_URI: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/powersync_storage
+      PS_JWKS_URI: http://server:9000/api/auth/.well-known/jwks.json
+      PS_ADMIN_TOKEN: ${PS_ADMIN_TOKEN:-powersync-dev-token}
+      PS_PORT: 8080
+      PS_URL: http://localhost:${PS_PORT:-8080}
+    ports:
+      - "${PS_PORT:-8080}:8080"
+    volumes:
+      - ./powersync:/config:ro
+    command: ["start", "-c", "/config/service.yaml"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      server:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /app/.probes/poll"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - lindaflor-network
+    restart: unless-stopped
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    env_file:
+      - .env
+    environment:
+      SERVER_PORT: ${SERVER_PORT:-9000}
+      SERVER_HOST: ${SERVER_HOST:-0.0.0.0}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-lindaflor}
+      VALKEY_URL: redis://:${VALKEY_PASSWORD:-password}@valkey:6379
+      S3_ENDPOINT: http://minio:9000
+    ports:
+      - "${SERVER_PORT:-9000}:9000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    # Healthcheck removed - distroless doesn't have curl/wget
+    # Server health can be checked via HTTP GET to http://localhost:9000/ from outside
+    # The server has a / endpoint that returns 'OK'
+    networks:
+      - lindaflor-network
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # External URL that browsers will use to connect to the server
+        # This is embedded at build time by Vite
+        # Default: http://localhost:9000 (server's exposed port)
+        # For production, set this to your domain (e.g., https://api.example.com)
+        # Note: Set VITE_SERVER_URL in .env file to override
+        VITE_SERVER_URL: ${VITE_SERVER_URL:-http://localhost:9000}
+        VITE_WEB_PORT: ${VITE_WEB_PORT:-9001}
+    container_name: lindaflor-web
+    env_file:
+      - .env
+    environment:
+      # Runtime environment variables (build-time vars are set via build args above)
+      NODE_ENV: production
+      SERVER_PORT: 9001
+    ports:
+      - "${VITE_WEB_PORT:-9001}:9001"
+    depends_on:
+      server:
+        condition: service_started
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "--fail",
+          "--silent",
+          "--output",
+          "/dev/null",
+          "http://localhost:9001/",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks:
+      - lindaflor-network
+    restart: unless-stopped
+
+networks:
+  lindaflor-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  valkey_data:
+  minio_data:

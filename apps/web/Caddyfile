@@ -1,0 +1,26 @@
+{
+	admin off
+	auto_https off
+	persist_config off
+	servers {
+		trusted_proxies static private_ranges 100.0.0.0/8
+	}
+}
+
+# Serve the static SvelteKit build (adapter-static output dir).
+# Default port matches the container's exposed port and the compose healthcheck.
+:{$VITE_WEB_PORT:5175} {
+	root * /srv
+	encode zstd gzip
+
+	# Hashed assets never change — cache them aggressively.
+	header /_app/immutable/* Cache-Control "public, max-age=31536000, immutable"
+
+	# Serve the file if it exists, otherwise fall back to the prerendered index.
+	try_files {path} {path}/ {path}.html /index.html
+	file_server
+
+	log {
+		format console
+	}
+}

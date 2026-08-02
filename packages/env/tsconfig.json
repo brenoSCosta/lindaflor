@@ -1,0 +1,9 @@
+{
+  "extends": "@lindaflor/config/tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "paths": {
+      "@lindaflor/env/*": ["./src/*"]
+    }
+  }
+}

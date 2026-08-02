@@ -1,0 +1,48 @@
+{
+  "name": "@lindaflor/db",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    },
+    "./schema": {
+      "default": "./src/schema/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsdown",
+    "check-types": "tsc --noEmit",
+    "clean": "rm -rf node_modules .turbo dist",
+    "db-gen": "drizzle-kit generate",
+    "db-migrate": "drizzle-kit migrate",
+    "db-migrate:run": "bun run src/migrate.ts",
+    "db-push": "drizzle-kit push",
+    "db-check": "drizzle-kit check",
+    "db-studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@casl/ability": "catalog:",
+    "@lindaflor/env": "workspace:*",
+    "@lindaflor/shared": "workspace:*",
+    "@ucast/core": "catalog:",
+    "dotenv": "catalog:",
+    "drizzle-orm": "catalog:",
+    "effect": "catalog:",
+    "pg": "8.22.0",
+    "uuid": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@lindaflor/config": "workspace:*",
+    "@types/pg": "catalog:",
+    "@types/uuid": "catalog:",
+    "drizzle-kit": "0.31.10",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  }
+}

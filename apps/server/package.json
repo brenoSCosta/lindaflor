@@ -1,0 +1,46 @@
+{
+  "name": "@lindaflor/server",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "clean": "rm -rf node_modules .turbo dist",
+    "build": "bun build --compile --minify-whitespace --minify-syntax --minify-identifiers --production --target bun --outfile dist/server ./src/index.ts",
+    "check-types": "tsc --noEmit",
+    "dev": "bun run --hot src/index.ts",
+    "db-seed": "bun run src/seed/script.ts",
+    "db-randomize-stock": "bun run src/seed/randomize-inventory.ts",
+    "start": "./dist/server",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@elysiajs/cors": "1.4.2",
+    "@lindaflor/api": "workspace:*",
+    "@lindaflor/auth": "workspace:*",
+    "@lindaflor/core": "workspace:*",
+    "@lindaflor/db": "workspace:*",
+    "@lindaflor/env": "workspace:*",
+    "@lindaflor/s3": "workspace:*",
+    "@lindaflor/shared": "workspace:*",
+    "@lindaflor/valkey": "workspace:*",
+    "@orpc/experimental-ratelimit": "catalog:",
+    "@orpc/openapi": "catalog:",
+    "@orpc/server": "catalog:",
+    "@orpc/zod": "catalog:",
+    "better-auth": "catalog:",
+    "dotenv": "catalog:",
+    "effect": "catalog:",
+    "elysia": "catalog:",
+    "uuid": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@lindaflor/config": "workspace:*",
+    "@types/bun": "catalog:",
+    "@types/uuid": "catalog:",
+    "drizzle-orm": "catalog:",
+    "drizzle-seed": "0.3.1",
+    "typescript": "catalog:"
+  }
+}

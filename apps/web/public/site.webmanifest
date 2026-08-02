@@ -1,0 +1,15 @@
+{
+  "name": "Linda Flor Moda Praia",
+  "short_name": "Linda Flor",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ],
+  "theme_color": "#e8a0b0",
+  "background_color": "#faf7f2",
+  "display": "standalone",
+  "lang": "pt-BR"
+}

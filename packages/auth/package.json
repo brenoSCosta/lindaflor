@@ -1,0 +1,40 @@
+{
+  "name": "@lindaflor/auth",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "clean": "rm -rf node_modules .turbo dist",
+    "check-types": "tsc --noEmit",
+    "test": "bun test",
+    "build": "tsdown"
+  },
+  "dependencies": {
+    "@casl/ability": "catalog:",
+    "@lindaflor/db": "workspace:*",
+    "@lindaflor/env": "workspace:*",
+    "@lindaflor/mail": "workspace:*",
+    "@lindaflor/shared": "workspace:*",
+    "@lindaflor/valkey": "workspace:*",
+    "better-auth": "catalog:",
+    "dotenv": "catalog:",
+    "drizzle-orm": "catalog:",
+    "effect": "catalog:",
+    "uuid": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@lindaflor/config": "workspace:*",
+    "@types/uuid": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  }
+}

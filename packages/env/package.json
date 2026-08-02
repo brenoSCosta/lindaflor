@@ -1,0 +1,27 @@
+{
+  "name": "@lindaflor/env",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./native": "./src/native.ts",
+    "./server": "./src/server.ts",
+    "./web": "./src/web.ts"
+  },
+  "scripts": {
+    "clean": "rm -rf node_modules .turbo dist",
+    "check-types": "tsc --noEmit",
+    "build": "tsdown"
+  },
+  "dependencies": {
+    "@t3-oss/env-core": "0.13.11",
+    "dotenv": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@lindaflor/config": "workspace:*",
+    "@types/bun": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  }
+}

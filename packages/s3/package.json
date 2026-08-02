@@ -1,0 +1,32 @@
+{
+  "name": "@lindaflor/s3",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    }
+  },
+  "scripts": {
+    "clean": "rm -rf node_modules .turbo dist",
+    "check-types": "tsc --noEmit",
+    "build": "tsdown"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1081.0",
+    "@aws-sdk/lib-storage": "3.1081.0",
+    "@aws-sdk/s3-request-presigner": "3.1081.0",
+    "@lindaflor/env": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@lindaflor/config": "workspace:*",
+    "@types/bun": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  }
+}

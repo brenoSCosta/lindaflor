@@ -1,0 +1,259 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "ui": "tui",
+  "concurrency": "14",
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "outputs": ["dist/**"]
+    },
+    "clean": {
+      "cache": false,
+      "persistent": true
+    },
+    "test": {
+      "cache": false,
+      "persistent": false,
+      "dependsOn": ["^test"]
+    },
+    "test-e2e": {
+      "cache": false,
+      "persistent": false
+    },
+    "test-screenshots": {
+      "cache": false,
+      "persistent": false
+    },
+    "test-video": {
+      "cache": false,
+      "persistent": false
+    },
+    "contract-gen": {
+      "cache": false,
+      "persistent": false
+    },
+    "lint": {
+      "dependsOn": ["^lint"]
+    },
+    "check-types": {
+      "dependsOn": ["^check-types"]
+    },
+    "android": {
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": ["ANDROID_HOME", "ANDROID_SDK_ROOT"]
+    },
+    "prebuild": {
+      "cache": false,
+      "persistent": true
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "native": {
+      "cache": false,
+      "persistent": true
+    },
+    "db-push": {
+      "cache": false
+    },
+    "db-studio": {
+      "cache": false,
+      "persistent": true
+    },
+    "docker-db": {
+      "cache": false
+    },
+    "docker-build": {
+      "cache": false
+    },
+    "docker-down": {
+      "cache": false
+    },
+    "db-migrate": {
+      "cache": false
+    },
+    "db-check": {
+      "cache": false
+    },
+    "db-migrate:run": {
+      "cache": false
+    },
+    "db-gen": {
+      "cache": false
+    },
+    "db-seed": {
+      "cache": false
+    },
+    "db-randomize-stock": {
+      "cache": false
+    }
+  },
+  "boundaries": {
+    "tags": {
+      "e2e": {
+        "dependencies": {
+          "deny": [
+            "db",
+            "mail",
+            "valkey",
+            "auth",
+            "api",
+            "core",
+            "shared",
+            "web",
+            "server",
+            "s3",
+            "native"
+          ]
+        }
+      },
+      "config": {
+        "dependencies": {
+          "deny": [
+            "env",
+            "db",
+            "auth",
+            "api",
+            "core",
+            "shared",
+            "web",
+            "server",
+            "mail",
+            "s3",
+            "native"
+          ]
+        }
+      },
+      "env": {
+        "dependencies": {
+          "deny": [
+            "db",
+            "mail",
+            "valkey",
+            "auth",
+            "api",
+            "core",
+            "shared",
+            "web",
+            "server",
+            "s3",
+            "native"
+          ]
+        }
+      },
+      "shared": {
+        "dependencies": {
+          "deny": [
+            "env",
+            "db",
+            "mail",
+            "valkey",
+            "auth",
+            "api",
+            "core",
+            "web",
+            "server",
+            "s3",
+            "native",
+            "e2e"
+          ]
+        }
+      },
+      "valkey": {
+        "dependencies": {
+          "deny": [
+            "db",
+            "mail",
+            "auth",
+            "api",
+            "core",
+            "shared",
+            "web",
+            "server",
+            "s3",
+            "native"
+          ]
+        }
+      },
+      "s3": {
+        "dependencies": {
+          "deny": [
+            "db",
+            "mail",
+            "auth",
+            "api",
+            "core",
+            "shared",
+            "web",
+            "server",
+            "native"
+          ]
+        }
+      },
+      "mail": {
+        "dependencies": {
+          "deny": [
+            "db",
+            "valkey",
+            "auth",
+            "api",
+            "core",
+            "shared",
+            "web",
+            "server",
+            "s3",
+            "native"
+          ]
+        }
+      },
+      "db": {
+        "dependencies": {
+          "deny": [
+            "mail",
+            "valkey",
+            "auth",
+            "api",
+            "core",
+            "web",
+            "server",
+            "s3",
+            "native"
+          ]
+        }
+      },
+      "auth": {
+        "dependencies": {
+          "deny": ["api", "core", "web", "server", "s3", "native"]
+        }
+      },
+      "core": {
+        "dependencies": {
+          "deny": ["api", "web", "server", "native", "e2e"]
+        }
+      },
+      "api": {
+        "dependencies": {
+          "deny": ["web", "server", "native"]
+        }
+      },
+      "web": {
+        "dependencies": {
+          "deny": ["server", "native"]
+        }
+      },
+      "server": {
+        "dependencies": {
+          "deny": ["web", "native"]
+        }
+      },
+      "native": {
+        "dependencies": {
+          "deny": ["server", "web"]
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "name": "@lindaflor/api",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "default": "./src/index.ts"
+    },
+    "./*": {
+      "default": "./src/*.ts"
+    },
+    "./routers/tankage": {
+      "default": "./src/routers/tankage/index.ts"
+    },
+    "./routers/tankage/*": {
+      "default": "./src/routers/tankage/*.ts"
+    },
+    "./routers": {
+      "default": "./src/routers/index.ts"
+    },
+    "./middlewares": {
+      "default": "./src/middlewares/index.ts"
+    }
+  },
+  "scripts": {
+    "dev": "node --watch src/contract/script.ts",
+    "test": "bun test",
+    "clean": "rm -rf node_modules .turbo dist",
+    "check-types": "tsc --noEmit",
+    "contract-gen": "node src/contract/script.ts",
+    "build": "tsdown"
+  },
+  "dependencies": {
+    "@casl/ability": "catalog:",
+    "@lindaflor/auth": "workspace:*",
+    "@lindaflor/core": "workspace:*",
+    "@lindaflor/db": "workspace:*",
+    "@lindaflor/env": "workspace:*",
+    "@lindaflor/s3": "workspace:*",
+    "@lindaflor/shared": "workspace:*",
+    "@lindaflor/valkey": "workspace:*",
+    "@orpc/client": "catalog:",
+    "@orpc/contract": "catalog:",
+    "@orpc/experimental-ratelimit": "catalog:",
+    "@orpc/openapi": "catalog:",
+    "@orpc/server": "catalog:",
+    "@orpc/zod": "catalog:",
+    "date-fns": "catalog:",
+    "date-fns-tz": "catalog:",
+    "dotenv": "catalog:",
+    "drizzle-orm": "catalog:",
+    "effect": "catalog:",
+    "elysia": "catalog:",
+    "uuid": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@lindaflor/config": "workspace:*",
+    "@types/pg": "catalog:",
+    "@types/uuid": "catalog:",
+    "tsdown": "catalog:",
+    "typescript": "catalog:"
+  }
+}

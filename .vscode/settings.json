@@ -1,0 +1,66 @@
+{
+  "editor.defaultFormatter": "oxc.oxc-vscode",
+  "[javascript]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[javascriptreact]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[json]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[jsonc]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[markdown]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "editor.codeActionsOnSave": {
+    "source.fixAll.oxc": "always",
+    "source.organizeImports": "always",
+    "source.removeUnusedImports": "always"
+  },
+  "editor.formatOnSave": true,
+  "editor.quickSuggestions": {
+    "strings": "on"
+  },
+  "explorer.fileNesting.patterns": {
+    "*.ts": "$(capture).*.ts, $(capture).*.tsx",
+    "*.tsx": "$(capture).*.ts, $(capture).*.tsx",
+    "package.json": ".*, *.md, *.json, *.mjs, *.lock, *.html, *.ts, LICENSE, docker*, Dockerfile*, tsconfig.*, *.toml, *.js, *.css, Caddyfile"
+  },
+  "files.associations": {
+    "*.css": "tailwindcss"
+  },
+  "files.readonlyInclude": {
+    "**/routeTree.gen.ts": true
+  },
+  "files.watcherExclude": {
+    "**/routeTree.gen.ts": true
+  },
+  "js/ts.experimental.useTsgo": false,
+  "js/ts.preferences.importModuleSpecifier": "non-relative",
+  "js/ts.tsdk.path": "node_modules/@typescript/lib",
+  "json.schemaDownload.trustedDomains": {
+    "https://turbo.build": true,
+    "https://ui.shadcn.com": true,
+    "https://railway.com/railway.schema.json": true
+  },
+  "npm.packageManager": "bun",
+  "oxc.enable": true,
+  "oxc.typeAware": true,
+  "search.exclude": {
+    "**/routeTree.gen.ts": true,
+    "bun.lock": true
+  },
+  "tailwindCSS.classFunctions": ["tw", "clsx", "cva", "tw\\.[a-z-]+"],
+  "tailwindCSS.experimental.classRegex": [["(`.*?`)", "(\".*?\")", "('.*?')"]],
+  "prettier.enable": false,
+  "eslint.enable": false
+}

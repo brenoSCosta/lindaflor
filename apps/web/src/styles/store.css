@@ -1,0 +1,157 @@
+.store {
+  --lf-pink: #d4147a;
+  --lf-pink-deep: #b01062;
+  --lf-cream: #faf9f6;
+  --lf-cream-dark: #f0e8dc;
+  --lf-gold: #c5a059;
+  --lf-ink: #1a1c1a;
+  --lf-muted: #7a6b72;
+  --lf-line: #e5e4e0;
+  --lf-line-rose: #e1bec7;
+  --lf-surface-container: #efeeeb;
+  font-family: "Outfit", "Inter", "Jost", sans-serif;
+}
+
+.store .font-display {
+  font-family: "Playfair Display", "Bodoni Moda", "Cormorant Garamond", serif;
+}
+
+/* ── Labels & typography ── */
+.store .lf-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  line-height: 1;
+  text-transform: uppercase;
+  color: var(--lf-muted);
+}
+
+.store .lf-heading {
+  font-family: "Playfair Display", "Bodoni Moda", serif;
+  color: var(--lf-ink);
+}
+
+/* ── Inputs: bottom-border only (Stitch editorial) ── */
+.store .lf-input {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--lf-line);
+  border-radius: 0;
+  background: transparent;
+  padding: 0.625rem 0;
+  font-size: 0.9375rem;
+  color: var(--lf-ink);
+  outline: none;
+  transition: border-color 0.2s;
+  box-shadow: none;
+}
+
+.store .lf-input::placeholder {
+  color: color-mix(in oklab, var(--lf-muted) 60%, transparent);
+}
+
+.store .lf-input:focus {
+  border-bottom-color: var(--lf-pink);
+}
+
+.store .lf-input[aria-invalid="true"] {
+  border-bottom-color: #ba1a1a;
+}
+
+/* Override shadcn Input inside store auth/forms */
+.store .lf-input-group input,
+.store input.lf-input-shadcn {
+  border: 0 !important;
+  border-bottom: 1px solid var(--lf-line) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  box-shadow: none !important;
+}
+
+.store .lf-input-group input:focus,
+.store input.lf-input-shadcn:focus {
+  border-bottom-color: var(--lf-pink) !important;
+  ring: none;
+}
+
+.store .lf-input-group {
+  border: 0 !important;
+  border-bottom: 1px solid var(--lf-line) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.store .lf-input-group:focus-within {
+  border-bottom-color: var(--lf-pink) !important;
+}
+
+/* ── Buttons ── */
+.store .lf-btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 3rem;
+  width: 100%;
+  border-radius: 0;
+  background: var(--lf-pink);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: white;
+  transition: background 0.2s;
+}
+
+.store .lf-btn-primary:hover {
+  background: var(--lf-pink-deep);
+}
+
+.store .lf-btn-primary:disabled {
+  opacity: 0.5;
+}
+
+.store .lf-btn-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 3rem;
+  width: 100%;
+  border-radius: 0;
+  border: 1px solid var(--lf-line);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--lf-ink);
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.store .lf-btn-outline:hover {
+  border-color: var(--lf-line-rose);
+  color: var(--lf-pink);
+}
+
+/* ── Dividers ── */
+.store .lf-divide {
+  border-color: var(--lf-line);
+}
+
+.store .lf-divide-rose {
+  border-color: var(--lf-line-rose);
+}
+
+/* ── Sheet overrides (cart, menu) ── */
+.store [data-slot="sheet-content"] {
+  border-color: var(--lf-line) !important;
+  box-shadow: none !important;
+}
+
+.store [data-slot="sheet-overlay"] {
+  background: color-mix(in oklab, var(--lf-ink) 15%, transparent) !important;
+  backdrop-filter: blur(4px);
+}

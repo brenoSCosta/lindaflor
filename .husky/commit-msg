@@ -1,0 +1,6 @@
+# Skip commitlint in CI environments or when HUSKY is disabled
+if [ "$CI" = "true" ] || [ "$HUSKY" = "0" ]; then
+  exit 0
+fi
+
+npx commitlint --edit $1

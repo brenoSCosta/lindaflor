@@ -1,0 +1,17 @@
+{
+  "extends": "@lindaflor/config/tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./src/*"],
+      "@lindaflor/api/*": ["../../packages/api/src/*"],
+      "@lindaflor/auth/*": ["../../packages/auth/src/*"],
+      "@lindaflor/db/*": ["../../packages/db/src/*"],
+      "@lindaflor/env/*": ["../../packages/env/src/*"],
+      "@lindaflor/valkey/*": ["../../packages/valkey/src/*"],
+      "@lindaflor/shared/*": ["../../packages/shared/src/*"],
+      "@lindaflor/core/*": ["../../packages/core/src/*"]
+    },
+    "jsx": "react-jsx"
+  },
+  "include": ["src/**/*"]
+}

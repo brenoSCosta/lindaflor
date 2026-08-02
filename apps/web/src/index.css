@@ -1,0 +1,662 @@
+@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Jost:wght@300;400;500;600&family=Outfit:wght@300;400;500;600&family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap");
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/archivo";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+@import "./typeset.css";
+@import "./styles/store.css";
+@import "./styles/store-examples.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/* shadcn Base UI data-attribute variants (see https://github.com/shadcn-ui/ui/blob/main/packages/shadcn/src/tailwind.css). */
+@custom-variant data-open {
+  &:where([data-state="open"]),
+  &:where([data-open]:not([data-open="false"])) {
+    @slot;
+  }
+}
+
+@custom-variant data-closed {
+  &:where([data-state="closed"]),
+  &:where([data-closed]:not([data-closed="false"])) {
+    @slot;
+  }
+}
+
+@custom-variant data-checked {
+  &:where([data-state="checked"]),
+  &:where([data-checked]:not([data-checked="false"])) {
+    @slot;
+  }
+}
+
+@custom-variant data-unchecked {
+  &:where([data-state="unchecked"]),
+  &:where([data-unchecked]:not([data-unchecked="false"])) {
+    @slot;
+  }
+}
+
+@custom-variant data-selected {
+  &:where([data-selected="true"]),
+  &:where([data-selected]:not([data-selected="false"])) {
+    @slot;
+  }
+}
+
+@custom-variant data-disabled {
+  &:where([data-disabled="true"]),
+  &:where([data-disabled]:not([data-disabled="false"])) {
+    @slot;
+  }
+}
+
+@custom-variant data-active {
+  &:where([data-state="active"]),
+  &:where([data-active]:not([data-active="false"])) {
+    @slot;
+  }
+}
+
+/* Base UI uses data-orientation instead of boolean data-horizontal/data-vertical. */
+@custom-variant data-horizontal {
+  &:where([data-orientation="horizontal"]) {
+    @slot;
+  }
+}
+
+@custom-variant data-vertical {
+  &:where([data-orientation="vertical"]) {
+    @slot;
+  }
+}
+
+@utility no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-display: var(--font-display);
+  --font-mono: var(--font-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-info: var(--info);
+  --color-warning: var(--warning);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-highlight: var(--highlight, var(--accent));
+  --color-highlight-foreground: var(
+    --highlight-foreground,
+    var(--accent-foreground)
+  );
+  --font-heading: var(--font-sans);
+}
+
+:root {
+  --header-height: 3.5rem;
+  --font-sans:
+    "Geist Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-display:
+    "Archivo Variable", "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono:
+    "IBM Plex Mono", ui-monospace, "SFMono-Regular", "Menlo", monospace;
+  --background: oklch(98.511% 0.00011 271.152);
+  --foreground: oklch(21.612% 0.00611 55.916);
+  --card: oklch(100% 0.00011 271.152);
+  --card-foreground: oklch(21.612% 0.00611 55.916);
+  --popover: oklch(100% 0.00011 271.152);
+  --popover-foreground: oklch(21.612% 0.00611 55.916);
+  --primary: oklch(36.153% 0.06212 237.186);
+  --primary-foreground: oklch(98.511% 0.00011 271.152);
+  --secondary: oklch(65.206% 0.13215 81.572);
+  --secondary-foreground: oklch(100% 0.00011 271.152);
+  --muted: oklch(96.987% 0.00122 107.796);
+  --muted-foreground: oklch(55.34% 0.01156 57.906);
+  --accent: oklch(36.153% 0.06212 237.186);
+  --accent-foreground: oklch(98.511% 0.00011 271.152);
+  --destructive: oklch(57.707% 0.21516 27.312);
+  --success: oklch(0.723 0.21 149);
+  --info: oklch(0.623 0.21 259);
+  --warning: oklch(0.795 0.18 86);
+  --border: oklch(92.318% 0.00249 47.09);
+  --input: oklch(92.318% 0.00249 47.09);
+  --ring: oklch(65.206% 0.13215 81.572);
+  --chart-1: oklch(60.023% 0.10385 184.741);
+  --chart-2: oklch(70.376% 0.12303 182.539);
+  --chart-3: oklch(55.102% 0.02343 264.389);
+  --chart-4: oklch(68.063% 0.14223 75.832);
+  --chart-5: oklch(86.055% 0.17305 91.942);
+  --radius: 0.625rem;
+  --sidebar: oklch(98.511% 0.00011 271.152);
+  --sidebar-foreground: oklch(21.612% 0.00611 55.916);
+  --sidebar-primary: oklch(60.023% 0.10385 184.741);
+  --sidebar-primary-foreground: oklch(98.511% 0.00011 271.152);
+  --sidebar-accent: oklch(96.987% 0.00122 107.796);
+  --sidebar-accent-foreground: oklch(21.612% 0.00611 55.916);
+  --sidebar-border: oklch(92.318% 0.00249 47.09);
+  --sidebar-ring: oklch(68.063% 0.14223 75.832);
+  --highlight: oklch(0.905 0.158 96.5);
+  --highlight-foreground: oklch(0.35 0.07 72);
+}
+
+.dark {
+  --background: oklch(18.674% 0.00002 271.152);
+  --foreground: oklch(91.485% 0.00348 38.143);
+  --card: oklch(22.324% 0.00154 16.369);
+  --card-foreground: oklch(91.485% 0.00348 38.143);
+  --popover: oklch(28.502% 0.00003 271.152);
+  --popover-foreground: oklch(91.485% 0.00348 38.143);
+  --primary: oklch(82.414% 0.05935 241.578);
+  --primary-foreground: oklch(30.744% 0.06342 235.588);
+  --secondary: oklch(82.879% 0.09879 86.615);
+  --secondary-foreground: oklch(31.219% 0.06386 86.371);
+  --muted: oklch(24.039% 0.00151 16.27);
+  --muted-foreground: oklch(82.756% 0.01013 253);
+  --accent: oklch(36.153% 0.06212 237.186);
+  --accent-foreground: oklch(73.285% 0.05804 240.537);
+  --destructive: oklch(71.061% 0.16614 22.191);
+  --success: oklch(0.723 0.21 149);
+  --info: oklch(0.623 0.21 259);
+  --warning: oklch(0.795 0.18 86);
+  --border: oklch(39.554% 0.01213 253.015);
+  --input: oklch(39.554% 0.01213 253.015);
+  --ring: oklch(82.879% 0.09879 86.615);
+  --chart-1: oklch(68.063% 0.14223 75.832);
+  --chart-2: oklch(86.055% 0.17305 91.942);
+  --chart-3: oklch(71.366% 0.01926 261.373);
+  --chart-4: oklch(70.376% 0.12303 182.539);
+  --chart-5: oklch(60.023% 0.10385 184.741);
+  --sidebar: oklch(26.848% 0.00627 34.067);
+  --sidebar-foreground: oklch(98.511% 0.00011 271.152);
+  --sidebar-primary: oklch(68.063% 0.14223 75.832);
+  --sidebar-primary-foreground: oklch(21.612% 0.00611 55.916);
+  --sidebar-accent: oklch(37.412% 0.00864 67.452);
+  --sidebar-accent-foreground: oklch(98.511% 0.00011 271.152);
+  --sidebar-border: oklch(41.956% 0.00321 106.77);
+  --sidebar-ring: oklch(68.063% 0.14223 75.832);
+  --highlight: oklch(0.85 0.16 96.5);
+  --highlight-foreground: oklch(0.26 0.05 72);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply scroll-smooth font-sans;
+  }
+
+  body {
+    @apply relative bg-background text-foreground antialiased transition-colors duration-300;
+  }
+}
+
+/* ── Bento custom properties ──────────────────────────────────────────────────
+   Registered so transitions on the governance cards animate smoothly. ─────── */
+@property --enter-y {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --tilt-x {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+@property --tilt-y {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+@property --mag-x {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --mag-y {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --glow-intensity {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-delay: 0s !important;
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-delay: 0s !important;
+    transition-duration: 0.001ms !important;
+  }
+
+  .hero-fade-in,
+  .bp-scroll-hint,
+  .hero-sonar::before,
+  .hero-sonar::after {
+    animation: none !important;
+    transform: none !important;
+  }
+
+  .reveal-enabled .blur-text-word {
+    opacity: 1;
+    filter: none;
+    transform: none;
+  }
+}
+
+@layer components {
+  .industrial-grid {
+    background-color: var(--background);
+    background-image:
+      linear-gradient(
+        to right,
+        color-mix(in oklab, var(--border) 31%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in oklab, var(--border) 31%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to right,
+        color-mix(in oklab, var(--border) 15%, transparent) 1px,
+        transparent 1px
+      ),
+      linear-gradient(
+        to bottom,
+        color-mix(in oklab, var(--border) 15%, transparent) 1px,
+        transparent 1px
+      );
+    background-position: -1px -1px;
+    background-size:
+      128px 128px,
+      128px 128px,
+      32px 32px,
+      32px 32px;
+  }
+
+  .bp-ruler {
+    background-image: repeating-linear-gradient(
+      to right,
+      color-mix(in oklab, var(--border) 90%, transparent) 0,
+      color-mix(in oklab, var(--border) 90%, transparent) 1px,
+      transparent 1px,
+      transparent 8px
+    );
+  }
+
+  .reveal-enabled .reveal {
+    opacity: 0;
+    transform: translateY(1.75rem);
+    transition:
+      opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+      transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .reveal-enabled .reveal.reveal-in {
+    opacity: 1;
+    transform: none;
+  }
+
+  .reveal-enabled .reveal-wipe {
+    clip-path: inset(0 100% 0 0);
+    transition: clip-path 0.9s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .reveal-enabled .reveal-wipe.reveal-in {
+    clip-path: inset(0 0 0 0);
+  }
+
+  /* ── Border Glow ───────────────────────────────────────────────────────────
+     Edge-sensitive directional border highlight injected by
+     `useBorderGlow`. The hook sets the conic `mask-image` and
+     `opacity`; everything static lives here. ───────────────────────────────── */
+
+  .border-glow-arc,
+  .border-glow-halo {
+    position: absolute;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-size: 100% 100%;
+    mask-size: 100% 100%;
+  }
+
+  .border-glow-arc {
+    inset: 0;
+    border: 1.5px solid transparent;
+    border-radius: inherit;
+    background:
+      linear-gradient(var(--card), var(--card)) padding-box,
+      radial-gradient(at 80% 55%, var(--secondary), transparent 50%) border-box,
+      radial-gradient(
+          at 69% 34%,
+          color-mix(in oklch, var(--secondary), white 38%),
+          transparent 50%
+        )
+        border-box,
+      radial-gradient(
+          at 8% 6%,
+          color-mix(in oklch, var(--secondary), black 30%),
+          transparent 50%
+        )
+        border-box,
+      radial-gradient(at 41% 38%, var(--secondary), transparent 50%) border-box,
+      radial-gradient(
+          at 86% 85%,
+          color-mix(in oklch, var(--secondary), white 38%),
+          transparent 50%
+        )
+        border-box,
+      radial-gradient(
+          at 82% 18%,
+          color-mix(in oklch, var(--secondary), black 30%),
+          transparent 50%
+        )
+        border-box,
+      radial-gradient(
+          at 51% 4%,
+          color-mix(in oklch, var(--secondary), white 38%),
+          transparent 50%
+        )
+        border-box,
+      linear-gradient(var(--secondary), var(--secondary)) border-box;
+  }
+
+  .border-glow-halo {
+    inset: -22px;
+    border-radius: calc(var(--radius) + 22px);
+  }
+
+  .border-glow-halo-glow {
+    position: absolute;
+    inset: 22px;
+    border-radius: var(--radius);
+    box-shadow:
+      inset 0 0 0 1px color-mix(in oklch, var(--secondary) 70%, transparent),
+      inset 0 0 3px 0 color-mix(in oklch, var(--secondary) 50%, transparent),
+      inset 0 0 6px 0 color-mix(in oklch, var(--secondary) 40%, transparent),
+      inset 0 0 15px 0 color-mix(in oklch, var(--secondary) 30%, transparent),
+      inset 0 0 25px 2px color-mix(in oklch, var(--secondary) 20%, transparent),
+      0 0 3px 0 color-mix(in oklch, var(--secondary) 50%, transparent),
+      0 0 6px 0 color-mix(in oklch, var(--secondary) 40%, transparent),
+      0 0 15px 0 color-mix(in oklch, var(--secondary) 30%, transparent),
+      0 0 25px 2px color-mix(in oklch, var(--secondary) 20%, transparent),
+      0 0 45px 4px color-mix(in oklch, var(--secondary) 12%, transparent);
+  }
+
+  .reveal-enabled .blur-text-word {
+    opacity: 0;
+    transform: translateY(-50px);
+  }
+
+  .blur-text-word {
+    display: inline-block;
+    will-change: transform, opacity;
+  }
+
+  .blur-text-word:not(:last-child) {
+    margin-right: 0.25em;
+  }
+
+  .hero-fade-in {
+    animation: hero-fade-in 0.7s var(--fade-delay, 0ms)
+      cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .hero-sonar::before,
+  .hero-sonar::after {
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    background: oklch(0.723 0.21 149);
+    animation: hero-sonar 2.4s ease-out infinite;
+    content: "";
+  }
+
+  .hero-sonar::after {
+    animation-delay: 1.2s;
+  }
+
+  .bp-scroll-hint {
+    animation: bp-scroll-hint 2s ease-in-out infinite;
+  }
+
+  .nav-link {
+    position: relative;
+  }
+
+  .nav-link::after {
+    position: absolute;
+    bottom: -0.4rem;
+    left: 0;
+    width: 0;
+    height: 1.5px;
+    background: var(--secondary);
+    transition: width 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    content: "";
+  }
+
+  .nav-link:hover::after,
+  .nav-link[data-active="true"]::after {
+    width: 100%;
+  }
+
+  /* ── Magic-bento governance grid ───────────────────────────────────────────
+     Cursor-following spotlight, per-card tilt/magnetism/glow, particle stars,
+     and click ripple. Behaviour lives in `useBento`. ──────────────────────── */
+
+  .bento-spotlight-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    overflow: hidden;
+    border-radius: inherit;
+    pointer-events: none;
+  }
+
+  .bento-spotlight {
+    position: absolute;
+    width: 800px;
+    height: 800px;
+    border-radius: 9999px;
+    opacity: 0;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(
+      circle,
+      color-mix(in oklch, var(--secondary) 16%, transparent) 0%,
+      color-mix(in oklch, var(--secondary) 7%, transparent) 30%,
+      transparent 65%
+    );
+    transition:
+      left 0.1s ease-out,
+      top 0.1s ease-out,
+      opacity 0.4s ease-out;
+  }
+
+  .bento-card {
+    position: relative;
+    z-index: 1;
+    overflow: hidden;
+    will-change: transform;
+    transform: perspective(60rem)
+      translate3d(
+        var(--mag-x, 0px),
+        calc(var(--enter-y, 0px) + var(--mag-y, 0px)),
+        0
+      )
+      rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
+    transition:
+      --enter-y 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+      opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+      --tilt-x 0.18s ease-out,
+      --tilt-y 0.18s ease-out,
+      --mag-x 0.3s ease-out,
+      --mag-y 0.3s ease-out,
+      --glow-intensity 0.25s ease-out,
+      box-shadow 0.3s ease;
+  }
+
+  .reveal-enabled .bento-card:not(.bento-in) {
+    opacity: 0;
+    --enter-y: 1.75rem;
+  }
+
+  .bento-card:hover {
+    box-shadow:
+      0 8px 30px -8px color-mix(in oklch, var(--secondary) 35%, transparent),
+      0 0 0 1px color-mix(in oklch, var(--secondary) 20%, transparent);
+  }
+
+  .bento-card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    padding: 1.5px;
+    border-radius: inherit;
+    background: radial-gradient(
+      var(--glow-radius, 220px) circle at var(--glow-x, 50%) var(--glow-y, 50%),
+      color-mix(
+          in oklch,
+          var(--secondary) calc(var(--glow-intensity, 0) * 75%),
+          transparent
+        )
+        0%,
+      color-mix(
+          in oklch,
+          var(--secondary) calc(var(--glow-intensity, 0) * 30%),
+          transparent
+        )
+        35%,
+      transparent 65%
+    );
+    -webkit-mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask:
+      linear-gradient(#fff 0 0) content-box,
+      linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  .bento-ripple {
+    position: absolute;
+    z-index: 15;
+    border-radius: 9999px;
+    pointer-events: none;
+    background: radial-gradient(
+      circle,
+      color-mix(in oklch, var(--secondary) 40%, transparent) 0%,
+      color-mix(in oklch, var(--secondary) 18%, transparent) 30%,
+      transparent 70%
+    );
+  }
+
+  .bento-particle {
+    position: absolute;
+    z-index: 20;
+    width: 4px;
+    height: 4px;
+    border-radius: 9999px;
+    pointer-events: none;
+    background: var(--secondary);
+    box-shadow: 0 0 6px color-mix(in oklch, var(--secondary) 70%, transparent);
+  }
+}
+
+@keyframes hero-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.75rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes hero-sonar {
+  0% {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(3.4);
+  }
+}
+
+@keyframes bp-scroll-hint {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(0.4rem);
+  }
+}
