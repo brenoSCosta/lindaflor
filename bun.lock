@@ -256,13 +256,12 @@
         "dotenv": "catalog:",
         "drizzle-orm": "catalog:",
         "effect": "catalog:",
-        "pg": "8.22.0",
+        "postgres": "^3.4.9",
         "uuid": "catalog:",
         "zod": "catalog:",
       },
       "devDependencies": {
         "@lindaflor/config": "workspace:*",
-        "@types/pg": "catalog:",
         "@types/uuid": "catalog:",
         "drizzle-kit": "0.31.10",
         "tsdown": "catalog:",
@@ -2381,6 +2380,8 @@
     "postal-mime": ["postal-mime@2.7.4", "", {}, "sha512-0WdnFQYUrPGGTFu1uOqD2s7omwua8xaeYGdO6rb88oD5yJ/4pPHDA4sdWqfD8wQVfCny563n/HQS7zTFft+f/g=="],
 
     "postcss": ["postcss@8.5.19", "", { "dependencies": { "nanoid": "^3.3.12", "picocolors": "^1.1.1", "source-map-js": "^1.2.1" } }, "sha512-Mz8SaolMd8nB+G13WkORcxQKHZ/NE4xXevtkJHVuG+guo9/wYKlIMTKAqGdEmYOXR2ijPjTYNHssizdaVSUNdQ=="],
+
+    "postgres": ["postgres@3.4.9", "", {}, "sha512-GD3qdB0x1z9xgFI6cdRD6xu2Sp2WCOEoe3mtnyB5Ee0XrrL5Pe+e4CCnJrRMnL1zYtRDZmQQVbvOttLnKDLnaw=="],
 
     "postgres-array": ["postgres-array@2.0.0", "", {}, "sha512-VpZrUqU5A69eQyW2c5CA1jtLecCsN2U/bD6VilrFDWq5+5UIEVO7nazS3TEcHf1zuPYO/sqGvUvW62g86RXZuA=="],
 

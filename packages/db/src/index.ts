@@ -1,7 +1,2 @@
-import { schema } from "@lindaflor/db/schema";
-import { env } from "@lindaflor/env/server";
-import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
-
-export const db: NodePgDatabase<typeof schema> = drizzle(env.DATABASE_URL, {
-  schema,
-});
+export { createMigrationDb, createPostgresClient, db } from "@lindaflor/db/client";
+export type { Database, DbSchema } from "@lindaflor/db/client";

@@ -64,7 +64,7 @@ function mapInventoryRow(row: {
   };
 }
 
-async function inventorySelect() {
+function inventorySelect() {
   return db
     .select({
       variant_id: product_variants.id,
@@ -95,7 +95,7 @@ export async function listInventory(input?: {
     filters.push(eq(inventory.warehouse_id, input.warehouse_id));
   }
 
-  const rows = await (await inventorySelect())
+  const rows = await inventorySelect()
     .where(and(...filters))
     .orderBy(asc(products.name), asc(product_variants.size));
 
@@ -112,7 +112,7 @@ export async function listInventory(input?: {
 
 export async function listLowStockAlerts() {
   const threshold = env.INVENTORY_LOW_STOCK_THRESHOLD;
-  const rows = await (await inventorySelect())
+  const rows = await inventorySelect()
     .where(eq(warehouses.active, true))
     .orderBy(asc(products.name), asc(product_variants.size));
 

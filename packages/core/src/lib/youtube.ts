@@ -64,6 +64,12 @@ export type YouTubeVideoMetadata = {
 export async function fetchYouTubeVideoMetadata(
   videoId: string,
 ): Promise<YouTubeVideoMetadata> {
+  if (!env.YOUTUBE_API_KEY) {
+    throw new ORPCError("SERVICE_UNAVAILABLE", {
+      message: "YOUTUBE_API_KEY não configurada",
+    });
+  }
+
   const url = new URL(YOUTUBE_VIDEO_API_URL);
   url.searchParams.set("part", "snippet,contentDetails");
   url.searchParams.set("id", videoId);

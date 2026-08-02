@@ -33,13 +33,12 @@
     "dotenv": "catalog:",
     "drizzle-orm": "catalog:",
     "effect": "catalog:",
-    "pg": "8.22.0",
+    "postgres": "^3.4.9",
     "uuid": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@lindaflor/config": "workspace:*",
-    "@types/pg": "catalog:",
     "@types/uuid": "catalog:",
     "drizzle-kit": "0.31.10",
     "tsdown": "catalog:",

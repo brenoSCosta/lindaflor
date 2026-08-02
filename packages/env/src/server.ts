@@ -12,6 +12,7 @@ dotenv.config({ path: path.resolve(projectRoot, ".env"), quiet: true });
 export const env = createEnv({
   server: {
     DATABASE_URL: z.string().min(1),
+    DATABASE_URL_DIRECT: z.string().min(1).optional(),
     VALKEY_URL: z.url(),
     BETTER_AUTH_SECRET: z.string().min(32),
     BETTER_AUTH_URL: z.url(),
@@ -53,6 +54,7 @@ export const env = createEnv({
     STORE_COUPON_DISCOUNT_PERCENT: z.coerce.number().int().min(1).max(100).default(10),
     ORDER_RESERVATION_HOURS: z.coerce.number().int().positive().default(24),
     INVENTORY_LOW_STOCK_THRESHOLD: z.coerce.number().int().nonnegative().default(5),
+    YOUTUBE_API_KEY: z.string().min(1).optional(),
     PS_URL: z.url().default("http://localhost:8080"),
   },
   runtimeEnv: process.env,

@@ -38,19 +38,30 @@ and
 bun run prepare
 ```
 
-Then, run the following command to start the database
+Then, configure Supabase in `.env`:
+
+- `DATABASE_URL` — transaction pooler (`:6543`, used by the API at runtime)
+- `DATABASE_URL_DIRECT` — direct Postgres (`db.[ref].supabase.co:5432`, used for migrations)
+
+Then, start Valkey and MinIO (local Postgres is no longer required):
 
 ```bash
 bun run docker:dev
 ```
 
-Then, run the following command to start the development server, build the web application and run the migrations:
+Run migrations against Supabase:
+
+```bash
+bun run db-migrate:run
+```
+
+Then, start the development server:
 
 ```bash
 bun run dev
 ```
 
-Then, run the following command to seed the database:
+Then, seed the database (development only — resets commerce data):
 
 ```bash
 bun run db-seed
@@ -58,8 +69,8 @@ bun run db-seed
 
 Dev users: `admin@lindaflor.com`, `org-alpha-owner@lindaflor.com`, `org-alpha-admin@lindaflor.com`, etc. Same password for all (default: `password`; override with `SEED_DEV_PASSWORD`). Requires `NODE_ENV=development`.
 
-Open [http://localhost:9001](http://localhost:9001) in your browser to see the web application.
-The API is running at [http://localhost:9000](http://localhost:9000).
+Open [http://localhost:9021](http://localhost:9021) in your browser to see the web application.
+The API is running at [http://localhost:9020](http://localhost:9020).
 
 ## Project Structure
 

@@ -1,31 +1,4 @@
 services:
-  postgres:
-    image: postgres:18-alpine
-    container_name: lindaflor-postgres
-    env_file:
-      - .env
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      POSTGRES_DB: ${POSTGRES_DB:-lindaflor}
-    ports:
-      - "${POSTGRES_PORT:-5491}:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-lindaflor}",
-        ]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    networks:
-      - lindaflor-network
-    restart: unless-stopped
-
   valkey:
     image: valkey/valkey:8-alpine
     container_name: lindaflor-valkey
@@ -93,6 +66,5 @@ networks:
     driver: bridge
 
 volumes:
-  postgres_data:
   valkey_data:
   minio_data:
