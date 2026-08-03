@@ -1,13 +1,13 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { env } from "@lindaflor/env/web";
+import { orderStatusLabels } from "@lindaflor/shared/enums/commerce";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { Check, Copy } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
 import { StoreLayout } from "@/components/store/store-layout";
 import { Button } from "@/components/ui/button";
-import { orderStatusLabels } from "@lindaflor/shared/enums/commerce";
-import { env } from "@lindaflor/env/web";
 import { formatCurrency } from "@/lib/format";
 import { orpc } from "@/lib/orpc";
 
@@ -28,8 +28,8 @@ function OrderPage() {
   if (orderQuery.isLoading) {
     return (
       <StoreLayout headerVariant="solid">
-        <div className="mx-auto max-w-3xl px-4 py-24 text-center text-[var(--lf-muted)]">
-          Carregando pedido...
+        <div className="mx-auto max-w-3xl px-4 py-24 text-center text-(--lf-muted)">
+          Carregando pedido…
         </div>
       </StoreLayout>
     );
@@ -41,7 +41,7 @@ function OrderPage() {
         <div className="mx-auto max-w-3xl px-4 py-24 text-center">
           <h1 className="font-display text-4xl">Pedido não encontrado</h1>
           <Link to="/produtos" className="mt-6 inline-block">
-            <Button className="rounded-none bg-[var(--lf-pink)] uppercase">
+            <Button className="rounded-none bg-(--lf-pink) uppercase">
               Voltar ao catálogo
             </Button>
           </Link>
@@ -87,20 +87,20 @@ function OrderPage() {
   return (
     <StoreLayout headerVariant="solid">
       <main className="mx-auto max-w-3xl px-4 py-12 md:px-8">
-        <p className="text-[10px] tracking-[0.18em] text-[var(--lf-muted)] uppercase">
+        <p className="text-[10px] tracking-[0.18em] text-(--lf-muted) uppercase">
           Pedido #{order.id.slice(0, 8)}
         </p>
-        <h1 className="font-display mt-3 text-5xl text-[var(--lf-ink)]">
+        <h1 className="font-display mt-3 text-5xl text-(--lf-ink)">
           {order.status === "pending_payment"
             ? "Aguardando pagamento"
             : orderStatusLabels[order.status]}
         </h1>
-        <p className="mt-2 text-[var(--lf-muted)]">
+        <p className="mt-2 text-(--lf-muted)">
           Enviamos as instruções para {order.guest_email}
         </p>
 
         {order.status === "pending_payment" && pixCode ? (
-          <section className="mt-10 space-y-6 border border-[var(--lf-line)] p-6">
+          <section className="mt-10 space-y-6 border border-(--lf-line) p-6">
             <h2 className="font-display text-2xl">Pague com PIX</h2>
             {pixQr ? (
               <img
@@ -110,7 +110,7 @@ function OrderPage() {
               />
             ) : null}
             <div className="space-y-2">
-              <p className="text-sm text-[var(--lf-muted)]">
+              <p className="text-sm text-(--lf-muted)">
                 Copie o código abaixo ou escaneie o QR Code:
               </p>
               <div className="flex gap-2">
@@ -136,7 +136,7 @@ function OrderPage() {
                 href={order.payment_meta.ticket_url}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-block text-sm text-[var(--lf-pink)] underline"
+                className="inline-block text-sm text-(--lf-pink) underline"
               >
                 Precisa de ajuda? Fale conosco no WhatsApp
               </a>
@@ -160,11 +160,11 @@ function OrderPage() {
           {order.items.map((item) => (
             <div
               key={item.id}
-              className="flex justify-between border-b border-[var(--lf-line)] py-3 text-sm"
+              className="flex justify-between border-b border-(--lf-line) py-3 text-sm"
             >
               <div>
                 <p className="font-medium">{item.product_name}</p>
-                <p className="text-[var(--lf-muted)]">{item.variant_label}</p>
+                <p className="text-(--lf-muted)">{item.variant_label}</p>
               </div>
               <div className="text-right">
                 <p>× {item.quantity}</p>
@@ -176,11 +176,11 @@ function OrderPage() {
 
         <section className="mt-8 space-y-2 text-sm">
           <div className="flex justify-between">
-            <span className="text-[var(--lf-muted)]">Subtotal</span>
+            <span className="text-(--lf-muted)">Subtotal</span>
             <span>{formatCurrency(order.subtotal_cents)}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-[var(--lf-muted)]">Frete</span>
+            <span className="text-(--lf-muted)">Frete</span>
             <span>
               {order.shipping_cents === 0
                 ? "Grátis"
@@ -189,7 +189,7 @@ function OrderPage() {
           </div>
           <div className="flex justify-between pt-2 text-lg font-medium">
             <span>Total</span>
-            <span className="text-[var(--lf-pink)]">
+            <span className="text-(--lf-pink)">
               {formatCurrency(order.total_cents)}
             </span>
           </div>

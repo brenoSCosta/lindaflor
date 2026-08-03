@@ -1,11 +1,11 @@
+import { productCategoryLabels } from "@lindaflor/shared/enums/commerce";
 import { useQuery } from "@tanstack/react-query";
 import { Search, ShoppingBag, User } from "lucide-react";
 
-import { productCategoryLabels } from "@lindaflor/shared/enums/commerce";
 import { formatCurrency } from "@/lib/format";
 import { orpc } from "@/lib/orpc";
-import { exampleImages } from "@/routes/exemplos/-components/example-images";
 import { cn } from "@/lib/utils";
+import { exampleImages } from "@/routes/exemplos/-components/example-images";
 
 const categories = [
   { key: "all", label: "Todos" },
@@ -16,7 +16,13 @@ const categories = [
 ] as const;
 
 const sizes = ["PP", "P", "M", "G", "GG"] as const;
-const swatches = ["#1a1218", "#faf9f6", "#7c2d3a", "#d4147a", "#2d5a3d"] as const;
+const swatches = [
+  "#1a1218",
+  "#faf9f6",
+  "#7c2d3a",
+  "#d4147a",
+  "#2d5a3d",
+] as const;
 
 export function BodoniCatalogExample() {
   const productsQuery = useQuery(
@@ -25,8 +31,8 @@ export function BodoniCatalogExample() {
   const products = productsQuery.data?.data ?? [];
 
   return (
-    <div className="store-example-bodoni font-ex-body min-h-screen bg-[var(--ex-bg)] text-[var(--ex-ink)]">
-      <header className="relative border-b border-[var(--ex-border)]">
+    <div className="store-example-bodoni font-ex-body min-h-screen bg-(--ex-bg) text-(--ex-ink)">
+      <header className="relative border-b border-(--ex-border)">
         <div className="mx-auto flex h-24 max-w-7xl items-center justify-between px-4 md:px-12">
           <nav className="hidden gap-8 md:flex">
             {["Coleções", "Catálogo", "Sobre", "Contato"].map((item, i) => (
@@ -34,7 +40,7 @@ export function BodoniCatalogExample() {
                 key={item}
                 className={cn(
                   "text-[10px] tracking-[0.2em] uppercase",
-                  i === 1 && "border-b border-[var(--ex-ink)] pb-0.5",
+                  i === 1 && "border-b border-(--ex-ink) pb-0.5",
                 )}
               >
                 {item}
@@ -51,7 +57,7 @@ export function BodoniCatalogExample() {
             <User className="size-4" />
             <div className="relative">
               <ShoppingBag className="size-4" />
-              <span className="absolute -top-1.5 -right-1.5 flex size-3.5 items-center justify-center bg-[var(--ex-pink)] text-[8px] text-white">
+              <span className="absolute -top-1.5 -right-1.5 flex size-3.5 items-center justify-center bg-(--ex-pink) text-[8px] text-white">
                 0
               </span>
             </div>
@@ -60,11 +66,11 @@ export function BodoniCatalogExample() {
       </header>
 
       <div className="mx-auto max-w-7xl px-4 py-10 md:px-12">
-        <p className="text-[10px] tracking-[0.18em] text-[var(--ex-muted)] uppercase">
+        <p className="text-[10px] tracking-[0.18em] text-(--ex-muted) uppercase">
           Início / Catálogo
         </p>
         <h1 className="font-ex-display mt-4 text-5xl md:text-6xl">Catálogo</h1>
-        <p className="mt-2 text-sm text-[var(--ex-muted)]">
+        <p className="mt-2 text-sm text-(--ex-muted)">
           Biquínis, maiôs e saídas de praia.
         </p>
 
@@ -82,11 +88,11 @@ export function BodoniCatalogExample() {
                       "flex items-center gap-2 text-sm",
                       i === 0
                         ? "font-medium"
-                        : "text-[var(--ex-muted)] hover:text-[var(--ex-ink)]",
+                        : "text-(--ex-muted) hover:text-(--ex-ink)",
                     )}
                   >
                     {i === 0 ? (
-                      <span className="size-1.5 rounded-full bg-[var(--ex-pink)]" />
+                      <span className="size-1.5 rounded-full bg-(--ex-pink)" />
                     ) : null}
                     {cat.label}
                   </li>
@@ -101,7 +107,7 @@ export function BodoniCatalogExample() {
                 {sizes.map((size) => (
                   <span
                     key={size}
-                    className="flex size-9 items-center justify-center border border-[var(--ex-border)] text-[10px] tracking-wider"
+                    className="flex size-9 items-center justify-center border border-(--ex-border) text-[10px] tracking-wider"
                   >
                     {size}
                   </span>
@@ -109,14 +115,12 @@ export function BodoniCatalogExample() {
               </div>
             </div>
             <div>
-              <p className="mb-4 text-[10px] tracking-[0.2em] uppercase">
-                Cor
-              </p>
+              <p className="mb-4 text-[10px] tracking-[0.2em] uppercase">Cor</p>
               <div className="flex gap-2">
                 {swatches.map((color) => (
                   <span
                     key={color}
-                    className="size-6 rounded-full border border-[var(--ex-border)]"
+                    className="size-6 rounded-full border border-(--ex-border)"
                     style={{ backgroundColor: color }}
                   />
                 ))}
@@ -125,33 +129,31 @@ export function BodoniCatalogExample() {
           </aside>
 
           <div>
-            <div className="mb-8 flex flex-wrap items-center justify-between gap-4 border-b border-[var(--ex-border)] pb-6">
+            <div className="mb-8 flex flex-wrap items-center justify-between gap-4 border-b border-(--ex-border) pb-6">
               <div className="flex flex-wrap gap-4 md:hidden">
                 {categories.slice(0, 4).map((cat, i) => (
                   <span
                     key={cat.key}
                     className={cn(
                       "text-[10px] tracking-[0.16em] uppercase",
-                      i === 0
-                        ? "text-[var(--ex-pink)]"
-                        : "text-[var(--ex-muted)]",
+                      i === 0 ? "text-(--ex-pink)" : "text-(--ex-muted)",
                     )}
                   >
                     {cat.label}
                   </span>
                 ))}
               </div>
-              <p className="text-xs text-[var(--ex-muted)]">
+              <p className="text-xs text-(--ex-muted)">
                 Exibindo 1–{products.length} de {products.length} resultados
               </p>
               <p className="text-[10px] tracking-[0.14em] uppercase">
                 Ordenar por:{" "}
-                <span className="text-[var(--ex-ink)]">Mais recentes</span>
+                <span className="text-(--ex-ink)">Mais recentes</span>
               </p>
             </div>
 
             {productsQuery.isLoading ? (
-              <p className="text-[var(--ex-muted)]">Carregando catálogo...</p>
+              <p className="text-(--ex-muted)">Carregando catálogo…</p>
             ) : (
               <div className="grid gap-x-6 gap-y-14 sm:grid-cols-2 xl:grid-cols-3">
                 {products.map((product, index) => {
@@ -165,7 +167,7 @@ export function BodoniCatalogExample() {
                   return (
                     <article key={product.id} className="group">
                       <div className="relative overflow-hidden bg-[#efeeeb]">
-                        <div className="aspect-[3/4]">
+                        <div className="aspect-3/4">
                           <img
                             src={image}
                             alt={product.name}
@@ -184,13 +186,13 @@ export function BodoniCatalogExample() {
                         </div>
                       </div>
                       <div className="mt-4 space-y-1">
-                        <p className="text-[10px] tracking-[0.18em] text-[var(--ex-muted)] uppercase">
+                        <p className="text-[10px] tracking-[0.18em] text-(--ex-muted) uppercase">
                           {productCategoryLabels[product.category]}
                         </p>
                         <h3 className="font-ex-display text-xl">
                           {product.name}
                         </h3>
-                        <p className="text-sm text-[var(--ex-muted)]">
+                        <p className="text-sm text-(--ex-muted)">
                           {formatCurrency(product.price_in_cents)}
                         </p>
                       </div>
@@ -203,7 +205,7 @@ export function BodoniCatalogExample() {
             <div className="mt-16 flex justify-center">
               <button
                 type="button"
-                className="border border-[var(--ex-ink)] px-12 py-4 text-[10px] tracking-[0.2em] uppercase transition-colors hover:bg-[var(--ex-ink)] hover:text-white"
+                className="border border-(--ex-ink) px-12 py-4 text-[10px] tracking-[0.2em] uppercase transition-colors hover:bg-(--ex-ink) hover:text-white"
               >
                 Carregar mais
               </button>
@@ -212,16 +214,16 @@ export function BodoniCatalogExample() {
         </div>
       </div>
 
-      <footer className="mt-20 border-t border-[var(--ex-border)] bg-[#efeeeb] px-4 py-16 md:px-12">
+      <footer className="mt-20 border-t border-(--ex-border) bg-[#efeeeb] px-4 py-16 md:px-12">
         <div className="mx-auto grid max-w-7xl gap-10 md:grid-cols-2">
           <div>
             <p className="font-ex-display text-2xl">Linda Flor</p>
-            <p className="mt-3 max-w-sm text-sm leading-relaxed text-[var(--ex-muted)]">
+            <p className="mt-3 max-w-sm text-sm leading-relaxed text-(--ex-muted)">
               Elegância e sofisticação em cada detalhe. Moda praia premium para
               mulheres exigentes.
             </p>
           </div>
-          <div className="text-sm text-[var(--ex-muted)] md:text-right">
+          <div className="text-sm text-(--ex-muted) md:text-right">
             <p>Exemplo Bodoni · Catálogo</p>
             <p className="mt-2 text-[10px] tracking-[0.14em] uppercase">
               © 2026 Linda Flor Moda Praia

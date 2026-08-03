@@ -22,11 +22,13 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
+const brlFormatter = new Intl.NumberFormat("pt-BR", {
+  style: "currency",
+  currency: "BRL",
+});
+
 function formatBrl(cents: number) {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  }).format(cents / 100);
+  return brlFormatter.format(cents / 100);
 }
 
 export function orderConfirmationEmailHtml(params: {

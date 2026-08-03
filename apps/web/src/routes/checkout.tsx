@@ -1,6 +1,6 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useMemo, useState, type ComponentProps } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 
@@ -26,9 +26,33 @@ const storeInputClass =
 const storeLabelClass = "lf-label";
 
 const brazilianStates = [
-  "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS",
-  "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC",
-  "SP", "SE", "TO",
+  "AC",
+  "AL",
+  "AP",
+  "AM",
+  "BA",
+  "CE",
+  "DF",
+  "ES",
+  "GO",
+  "MA",
+  "MT",
+  "MS",
+  "MG",
+  "PA",
+  "PB",
+  "PR",
+  "PE",
+  "PI",
+  "RJ",
+  "RN",
+  "RS",
+  "RO",
+  "RR",
+  "SC",
+  "SP",
+  "SE",
+  "TO",
 ] as const;
 
 function CheckoutPage() {
@@ -73,8 +97,7 @@ function CheckoutPage() {
   );
 
   const shipping = shippingQuery.data;
-  const totalCents =
-    subtotalCents + (shipping?.shipping_cents ?? 0);
+  const totalCents = subtotalCents + (shipping?.shipping_cents ?? 0);
 
   const canSubmit = useMemo(() => {
     const addressSchema = z.object({
@@ -108,11 +131,11 @@ function CheckoutPage() {
       <StoreLayout headerVariant="solid">
         <div className="mx-auto max-w-2xl px-4 py-24 text-center md:px-8">
           <h1 className="font-display text-4xl">Seu carrinho está vazio</h1>
-          <p className="mt-4 text-[var(--lf-muted)]">
+          <p className="mt-4 text-(--lf-muted)">
             Adicione peças ao carrinho antes de finalizar a compra.
           </p>
           <Button
-            className="mt-8 rounded-none bg-[var(--lf-pink)] uppercase"
+            className="mt-8 rounded-none bg-(--lf-pink) uppercase"
             onClick={() => void navigate({ to: "/produtos" })}
           >
             Ver catálogo
@@ -129,7 +152,9 @@ function CheckoutPage() {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
-  function handleSubmit(event: React.FormEvent) {
+  const handleSubmit: NonNullable<ComponentProps<"form">["onSubmit"]> = (
+    event,
+  ) => {
     event.preventDefault();
     if (!canSubmit) {
       return;
@@ -154,7 +179,7 @@ function CheckoutPage() {
       notes: form.notes || undefined,
       coupon_code: form.coupon_code || undefined,
     });
-  }
+  };
 
   return (
     <StoreLayout headerVariant="solid">
@@ -167,7 +192,7 @@ function CheckoutPage() {
         >
           <div className="space-y-8">
             <section className="space-y-4">
-              <h2 className="lf-label text-[var(--lf-ink)]">Contato</h2>
+              <h2 className="lf-label text-(--lf-ink)">Contato</h2>
               <div className="space-y-2">
                 <Label htmlFor="email" className={storeLabelClass}>
                   E-mail
@@ -186,9 +211,7 @@ function CheckoutPage() {
             </section>
 
             <section className="space-y-4">
-              <h2 className="lf-label text-[var(--lf-ink)]">
-                Endereço de entrega
-              </h2>
+              <h2 className="lf-label text-(--lf-ink)">Endereço de entrega</h2>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="name">Nome completo</Label>
@@ -196,7 +219,9 @@ function CheckoutPage() {
                     id="name"
                     required
                     value={form.name}
-                    onChange={(event) => updateField("name", event.target.value)}
+                    onChange={(event) =>
+                      updateField("name", event.target.value)
+                    }
                     className={storeInputClass}
                   />
                 </div>
@@ -253,7 +278,9 @@ function CheckoutPage() {
                     id="city"
                     required
                     value={form.city}
-                    onChange={(event) => updateField("city", event.target.value)}
+                    onChange={(event) =>
+                      updateField("city", event.target.value)
+                    }
                     className={storeInputClass}
                   />
                 </div>
@@ -261,9 +288,12 @@ function CheckoutPage() {
                   <Label htmlFor="state">Estado</Label>
                   <select
                     id="state"
+                    aria-label="Estado"
                     value={form.state}
-                    onChange={(event) => updateField("state", event.target.value)}
-                    className="h-10 w-full border-0 border-b border-[var(--lf-line)] bg-transparent px-0 text-sm outline-none focus:border-[var(--lf-pink)]"
+                    onChange={(event) =>
+                      updateField("state", event.target.value)
+                    }
+                    className="h-10 w-full border-0 border-b border-(--lf-line) bg-transparent px-0 text-sm outline-none focus:border-(--lf-pink)"
                   >
                     {brazilianStates.map((state) => (
                       <option key={state} value={state}>
@@ -312,13 +342,13 @@ function CheckoutPage() {
             </section>
           </div>
 
-          <aside className="h-fit space-y-6 bg-[var(--lf-surface-container)] p-8">
+          <aside className="h-fit space-y-6 bg-(--lf-surface-container) p-8">
             <h2 className="lf-heading text-2xl">Resumo</h2>
             <div className="space-y-3 text-sm">
               {items.map((item) => (
                 <div
                   key={item.variantId}
-                  className="flex justify-between gap-4 text-[var(--lf-muted)]"
+                  className="flex justify-between gap-4 text-(--lf-muted)"
                 >
                   <span>
                     {item.productName} × {item.quantity}
@@ -329,13 +359,13 @@ function CheckoutPage() {
                 </div>
               ))}
             </div>
-            <div className="space-y-2 border-t border-[var(--lf-line)] pt-4 text-sm">
+            <div className="space-y-2 border-t border-(--lf-line) pt-4 text-sm">
               <div className="flex justify-between">
-                <span className="text-[var(--lf-muted)]">Subtotal</span>
+                <span className="text-(--lf-muted)">Subtotal</span>
                 <span>{formatCurrency(subtotalCents)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-[var(--lf-muted)]">Frete</span>
+                <span className="text-(--lf-muted)">Frete</span>
                 <span>
                   {shippingQuery.isLoading
                     ? "Calculando..."
@@ -345,13 +375,13 @@ function CheckoutPage() {
                 </span>
               </div>
               {shipping ? (
-                <p className="text-xs text-[var(--lf-muted)]">
+                <p className="text-xs text-(--lf-muted)">
                   Prazo estimado: {shipping.estimated_days}
                 </p>
               ) : null}
               <div className="flex justify-between pt-2 text-base font-medium">
                 <span>Total</span>
-                <span className="text-[var(--lf-pink)]">
+                <span className="text-(--lf-pink)">
                   {formatCurrency(totalCents)}
                 </span>
               </div>
@@ -365,7 +395,7 @@ function CheckoutPage() {
                 ? "Processando..."
                 : "Pagar com PIX"}
             </button>
-            <p className="text-xs text-[var(--lf-muted)]">
+            <p className="text-xs text-(--lf-muted)">
               Pagamento via PIX. Após confirmar, você verá o QR Code na próxima
               tela.
             </p>

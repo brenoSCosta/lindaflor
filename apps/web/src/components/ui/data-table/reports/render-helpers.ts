@@ -1,7 +1,6 @@
 import { Effect } from "effect";
 
-const defaultLogoUrl =
-  "https://placehold.co/64x64/f472b6/ffffff?text=LF";
+const defaultLogoUrl = "https://placehold.co/64x64/f472b6/ffffff?text=LF";
 import type {
   OrgReportTheme,
   ReportColumn,

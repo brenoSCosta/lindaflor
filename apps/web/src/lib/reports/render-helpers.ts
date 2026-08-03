@@ -1,8 +1,7 @@
 import { Effect } from "effect";
 import { isRecord } from "effect/Predicate";
 
-const defaultLogoUrl =
-  "https://placehold.co/64x64/f472b6/ffffff?text=LF";
+const defaultLogoUrl = "https://placehold.co/64x64/f472b6/ffffff?text=LF";
 import type {
   OrgReportTheme,
   ReportColumn,

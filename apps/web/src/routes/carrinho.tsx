@@ -19,7 +19,7 @@ function CartPage() {
         <header className="mb-10">
           <h1 className="lf-heading text-4xl md:text-5xl">Carrinho</h1>
           {itemCount > 0 ? (
-            <p className="mt-2 text-sm text-[var(--lf-muted)]">
+            <p className="mt-2 text-sm text-muted">
               {itemCount} {itemCount === 1 ? "peça" : "peças"}
             </p>
           ) : null}
@@ -27,7 +27,7 @@ function CartPage() {
 
         {items.length === 0 ? (
           <div className="py-16 text-center">
-            <p className="text-[var(--lf-muted)]">Seu carrinho está vazio.</p>
+            <p className="text-muted">Seu carrinho está vazio.</p>
             <Link to="/produtos" className="mt-6 inline-block">
               <button type="button" className="lf-btn-primary w-auto px-10">
                 Ver catálogo
@@ -56,14 +56,12 @@ function CartPage() {
                     <p className="text-[11px] tracking-[0.12em] text-[var(--lf-ink)] uppercase">
                       {item.productName}
                     </p>
-                    <p className="text-xs text-[var(--lf-muted)]">
-                      {item.variantLabel}
-                    </p>
+                    <p className="text-xs text-muted">{item.variantLabel}</p>
                     <div className="flex items-center gap-3 pt-2">
                       <div className="inline-flex items-center divide-x divide-[var(--lf-line)] border border-[var(--lf-line)]">
                         <button
                           type="button"
-                          className="px-2.5 py-1.5 text-[var(--lf-muted)] hover:text-[var(--lf-ink)]"
+                          className="px-2.5 py-1.5 text-muted hover:text-[var(--lf-ink)]"
                           onClick={() =>
                             updateQuantity(item.variantId, item.quantity - 1)
                           }
@@ -76,7 +74,7 @@ function CartPage() {
                         </span>
                         <button
                           type="button"
-                          className="px-2.5 py-1.5 text-[var(--lf-muted)] hover:text-[var(--lf-ink)] disabled:opacity-40"
+                          className="px-2.5 py-1.5 text-muted hover:text-[var(--lf-ink)] disabled:opacity-40"
                           onClick={() =>
                             updateQuantity(item.variantId, item.quantity + 1)
                           }
@@ -89,7 +87,7 @@ function CartPage() {
                       <button
                         type="button"
                         onClick={() => removeItem(item.variantId)}
-                        className="text-[var(--lf-muted)] hover:text-[var(--lf-pink)]"
+                        className="text-muted hover:text-[var(--lf-pink)]"
                         aria-label="Remover"
                       >
                         <Trash2 className="size-4" strokeWidth={1.25} />
@@ -106,12 +104,12 @@ function CartPage() {
 
             <div className="mt-10 space-y-6 border-t border-[var(--lf-line)] pt-8">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-[var(--lf-muted)]">Subtotal</span>
+                <span className="text-sm text-muted">Subtotal</span>
                 <span className="text-xl text-[var(--lf-pink)]">
                   {formatCurrency(subtotalCents)}
                 </span>
               </div>
-              <p className="text-xs text-[var(--lf-muted)]">
+              <p className="text-xs text-muted">
                 Frete grátis para compras acima de R$ 299. Calculado no
                 checkout.
               </p>

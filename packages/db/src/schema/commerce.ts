@@ -1,3 +1,4 @@
+import { users } from "@lindaflor/db/schema/auth";
 import { relations } from "drizzle-orm";
 import {
   boolean,
@@ -13,8 +14,6 @@ import {
 } from "drizzle-orm/pg-core";
 import { v7 as uuidv7 } from "uuid";
 
-import { users } from "@lindaflor/db/schema/auth";
-
 export const product_category = pgEnum("product_category", [
   "biquini",
   "maio",
@@ -22,13 +21,7 @@ export const product_category = pgEnum("product_category", [
   "acessorio",
 ]);
 
-export const product_size = pgEnum("product_size", [
-  "pp",
-  "p",
-  "m",
-  "g",
-  "gg",
-]);
+export const product_size = pgEnum("product_size", ["pp", "p", "m", "g", "gg"]);
 
 export const order_status = pgEnum("order_status", [
   "pending_payment",
@@ -303,12 +296,15 @@ export const products_relations = relations(products, ({ one, many }) => ({
   variants: many(product_variants),
 }));
 
-export const product_images_relations = relations(product_images, ({ one }) => ({
-  product: one(products, {
-    fields: [product_images.product_id],
-    references: [products.id],
+export const product_images_relations = relations(
+  product_images,
+  ({ one }) => ({
+    product: one(products, {
+      fields: [product_images.product_id],
+      references: [products.id],
+    }),
   }),
-}));
+);
 
 export const product_variants_relations = relations(
   product_variants,

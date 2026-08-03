@@ -1,6 +1,11 @@
 import { defineAbilityFor } from "@lindaflor/shared/lib/ability";
 import { parseRoles, toOrgRole } from "@lindaflor/shared/lib/roles";
-import { createFileRoute, Link, Outlet, redirect } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  Link,
+  Outlet,
+  redirect,
+} from "@tanstack/react-router";
 
 import { Button } from "@/components/ui/button";
 
@@ -32,7 +37,7 @@ function AdminLayout() {
   return (
     <div className="min-h-screen bg-stone-50">
       <header className="border-b bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
+        <div className="mx-auto flex max-w-6xl items-center justify-between p-4">
           <div>
             <p className="text-sm text-stone-500">Painel</p>
             <h1 className="text-xl font-semibold">Linda Flor Admin</h1>

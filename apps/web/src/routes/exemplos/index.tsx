@@ -46,8 +46,8 @@ function ExamplesHubPage() {
           Três direções para Linda Flor
         </h1>
         <p className="mt-4 max-w-2xl leading-relaxed text-white/65">
-          Cada exemplo é uma página funcional com dados reais do catálogo. Compare
-          estilos e escolha qual combina mais com a marca.
+          Cada exemplo é uma página funcional com dados reais do catálogo.
+          Compare estilos e escolha qual combina mais com a marca.
         </p>
 
         <div className="mt-12 space-y-4">

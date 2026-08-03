@@ -1,3 +1,11 @@
+import { createPixPayment } from "@lindaflor/core/commerce/payments";
+import { resolveImageUrl } from "@lindaflor/core/commerce/product-images";
+import { formatVariantLabel } from "@lindaflor/core/commerce/products";
+import {
+  calculateCouponDiscountCents,
+  calculateShippingCents,
+} from "@lindaflor/core/commerce/shipping";
+import { getDefaultWarehouseId } from "@lindaflor/core/commerce/warehouses";
 import { db } from "@lindaflor/db";
 import {
   inventory,
@@ -8,24 +16,15 @@ import {
   product_variants,
   products,
 } from "@lindaflor/db/schema/commerce";
+import { env } from "@lindaflor/env/server";
+import { sendOrderConfirmationEmail } from "@lindaflor/mail/templates/order-confirmation";
+import { PRODUCTS_IMAGES_PREFIX, deleteFile, uploadFile } from "@lindaflor/s3";
 import { schema } from "@lindaflor/shared/schemas/commerce";
 import { ORPCError } from "@orpc/server";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import type { z } from "zod";
 import { Effect } from "effect";
 import { v7 as uuidv7 } from "uuid";
-
-import { getDefaultWarehouseId } from "@lindaflor/core/commerce/warehouses";
-import { formatVariantLabel } from "@lindaflor/core/commerce/products";
-import { resolveImageUrl } from "@lindaflor/core/commerce/product-images";
-import { createPixPayment } from "@lindaflor/core/commerce/payments";
-import {
-  calculateCouponDiscountCents,
-  calculateShippingCents,
-} from "@lindaflor/core/commerce/shipping";
-import { PRODUCTS_IMAGES_PREFIX, deleteFile, uploadFile } from "@lindaflor/s3";
-import { env } from "@lindaflor/env/server";
-import { sendOrderConfirmationEmail } from "@lindaflor/mail/templates/order-confirmation";
+import type { z } from "zod";
 
 type CreateOrderInput = z.infer<typeof schema.store.createOrder.input>;
 
@@ -125,8 +124,7 @@ export async function createStoreOrder(
         });
       }
 
-      const unitPrice =
-        variant.price_in_cents ?? variant.product_price;
+      const unitPrice = variant.price_in_cents ?? variant.product_price;
       subtotal_cents += unitPrice * item.quantity;
     }
 
@@ -173,42 +171,49 @@ export async function createStoreOrder(
       });
     }
 
-    for (const item of input.items) {
-      const variant = variantById.get(item.variant_id)!;
-      const unitPrice =
-        variant.price_in_cents ?? variant.product_price;
+    await Promise.all(
+      input.items.map(async (item) => {
+        const variant = variantById.get(item.variant_id);
+        if (!variant) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: "Variante não encontrada",
+          });
+        }
 
-      await tx.insert(order_items).values({
-        order_id: created.id,
-        variant_id: variant.id,
-        product_name: variant.product_name,
-        variant_label: formatVariantLabel(variant.size, variant.color),
-        quantity: item.quantity,
-        unit_price_cents: unitPrice,
-      });
+        const unitPrice = variant.price_in_cents ?? variant.product_price;
 
-      await tx
-        .update(inventory)
-        .set({
-          reserved: sql`${inventory.reserved} + ${item.quantity}`,
-        })
-        .where(
-          and(
-            eq(inventory.variant_id, variant.id),
-            eq(inventory.warehouse_id, warehouseId),
-          ),
-        );
+        await tx.insert(order_items).values({
+          order_id: created.id,
+          variant_id: variant.id,
+          product_name: variant.product_name,
+          variant_label: formatVariantLabel(variant.size, variant.color),
+          quantity: item.quantity,
+          unit_price_cents: unitPrice,
+        });
 
-      await tx.insert(inventory_movements).values({
-        variant_id: variant.id,
-        warehouse_id: warehouseId,
-        type: "reserva",
-        quantity: item.quantity,
-        reference_type: "order",
-        reference_id: created.id,
-        notes: "Reserva de checkout",
-      });
-    }
+        await tx
+          .update(inventory)
+          .set({
+            reserved: sql`${inventory.reserved} + ${item.quantity}`,
+          })
+          .where(
+            and(
+              eq(inventory.variant_id, variant.id),
+              eq(inventory.warehouse_id, warehouseId),
+            ),
+          );
+
+        await tx.insert(inventory_movements).values({
+          variant_id: variant.id,
+          warehouse_id: warehouseId,
+          type: "reserva",
+          quantity: item.quantity,
+          reference_type: "order",
+          reference_id: created.id,
+          notes: "Reserva de checkout",
+        });
+      }),
+    );
 
     return created;
   });

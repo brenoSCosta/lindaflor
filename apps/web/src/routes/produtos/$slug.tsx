@@ -1,17 +1,18 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
-import { toast } from "sonner";
-
-import { ProductCard } from "@/components/store/product-card";
-import { JsonLd, storeJsonLd } from "@/components/store/json-ld";
-import { StoreLayout } from "@/components/store/store-layout";
-import { Button } from "@/components/ui/button";
-import { useCart } from "@/context/cart";
 import {
   productCategoryLabels,
   productSizeLabels,
 } from "@lindaflor/shared/enums/commerce";
+import { useQuery } from "@tanstack/react-query";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useState } from "react";
+import { toast } from "sonner";
+
+import { JsonLd } from "@/components/store/json-ld";
+import { ProductCard } from "@/components/store/product-card";
+import { storeJsonLd } from "@/components/store/store-json-ld";
+import { StoreLayout } from "@/components/store/store-layout";
+import { Button } from "@/components/ui/button";
+import { useCart } from "@/context/cart";
 import { formatCurrency } from "@/lib/format";
 import { orpc } from "@/lib/orpc";
 import { cn } from "@/lib/utils";
@@ -52,8 +53,8 @@ function ProductDetailPage() {
   if (productQuery.isLoading) {
     return (
       <StoreLayout>
-        <div className="mx-auto max-w-7xl px-4 py-24 text-center text-[var(--lf-muted)] md:px-8">
-          Carregando produto...
+        <div className="mx-auto max-w-7xl px-4 py-24 text-center text-(--lf-muted) md:px-8">
+          Carregando produto…
         </div>
       </StoreLayout>
     );
@@ -65,7 +66,7 @@ function ProductDetailPage() {
         <div className="mx-auto max-w-7xl px-4 py-24 text-center md:px-8">
           <p className="font-display text-3xl">Produto não encontrado</p>
           <Link to="/produtos" className="mt-6 inline-block">
-            <Button className="rounded-none bg-[var(--lf-pink)] uppercase">
+            <Button className="rounded-none bg-(--lf-pink) uppercase">
               Voltar ao catálogo
             </Button>
           </Link>
@@ -123,12 +124,12 @@ function ProductDetailPage() {
         })}
       />
       <main className="mx-auto max-w-7xl px-4 py-10 md:px-8 md:py-16">
-        <div className="mb-8 text-[11px] tracking-[0.18em] text-[var(--lf-muted)] uppercase">
-          <Link to="/" className="hover:text-[var(--lf-pink)]">
+        <div className="mb-8 text-[11px] tracking-[0.18em] text-(--lf-muted) uppercase">
+          <Link to="/" className="hover:text-(--lf-pink)">
             Início
           </Link>
           <span className="mx-2">/</span>
-          <Link to="/produtos" className="hover:text-[var(--lf-pink)]">
+          <Link to="/produtos" className="hover:text-(--lf-pink)">
             Catálogo
           </Link>
           <span className="mx-2">/</span>
@@ -137,8 +138,8 @@ function ProductDetailPage() {
 
         <div className="grid gap-12 lg:grid-cols-2 lg:gap-16">
           <div className="space-y-4">
-            <div className="overflow-hidden bg-[var(--lf-cream-dark)]">
-              <div className="aspect-[3/4]">
+            <div className="overflow-hidden bg-(--lf-cream-dark)">
+              <div className="aspect-3/4">
                 {mainImage ? (
                   <img
                     src={mainImage}
@@ -156,8 +157,8 @@ function ProductDetailPage() {
                     type="button"
                     onClick={() => setSelectedImageUrl(image.url)}
                     className={cn(
-                      "aspect-square overflow-hidden bg-[var(--lf-cream-dark)] ring-offset-2",
-                      mainImage === image.url && "ring-2 ring-[var(--lf-pink)]",
+                      "aspect-square overflow-hidden bg-(--lf-cream-dark) ring-offset-2",
+                      mainImage === image.url && "ring-2 ring-(--lf-pink)",
                     )}
                   >
                     <img
@@ -173,16 +174,16 @@ function ProductDetailPage() {
 
           <div className="space-y-8 lg:pt-8">
             <div className="space-y-4">
-              <p className="text-[11px] tracking-[0.22em] text-[var(--lf-pink)] uppercase">
+              <p className="text-[11px] tracking-[0.22em] text-(--lf-pink) uppercase">
                 {productCategoryLabels[product.category]}
               </p>
-              <h1 className="font-display text-5xl leading-tight text-[var(--lf-ink)] md:text-6xl">
+              <h1 className="font-display text-5xl leading-tight text-(--lf-ink) md:text-6xl">
                 {product.name}
               </h1>
-              <p className="text-2xl font-medium text-[var(--lf-pink)]">
+              <p className="text-2xl font-medium text-(--lf-pink)">
                 {formatCurrency(price)}
               </p>
-              <p className="max-w-lg leading-relaxed text-[var(--lf-muted)]">
+              <p className="max-w-lg leading-relaxed text-(--lf-muted)">
                 {product.description}
               </p>
             </div>
@@ -205,8 +206,8 @@ function ProductDetailPage() {
                       className={cn(
                         "flex items-center justify-between border px-4 py-4 text-left transition-colors",
                         isSelected
-                          ? "border-[var(--lf-pink)] bg-[color-mix(in_oklab,var(--lf-pink)_8%,transparent)]"
-                          : "border-[var(--lf-line)] bg-transparent",
+                          ? "border-(--lf-pink) bg-[color-mix(in_oklab,var(--lf-pink)_8%,transparent)]"
+                          : "border-(--lf-line) bg-transparent",
                         disabled && "cursor-not-allowed opacity-45",
                       )}
                     >
@@ -214,7 +215,7 @@ function ProductDetailPage() {
                         <p className="font-medium">
                           {productSizeLabels[variant.size]} · {variant.color}
                         </p>
-                        <p className="text-xs text-[var(--lf-muted)]">
+                        <p className="text-xs text-(--lf-muted)">
                           SKU {variant.sku}
                         </p>
                       </div>
@@ -231,7 +232,7 @@ function ProductDetailPage() {
 
             <div className="space-y-3">
               <Button
-                className="h-14 w-full rounded-none bg-[var(--lf-pink)] text-[11px] tracking-[0.2em] uppercase hover:bg-[var(--lf-pink-deep)]"
+                className="h-14 w-full rounded-none bg-(--lf-pink) text-[11px] tracking-[0.2em] uppercase hover:bg-(--lf-pink-deep)"
                 disabled={!selectedVariant || selectedVariant.available === 0}
                 onClick={handleAddToCart}
               >
@@ -247,19 +248,19 @@ function ProductDetailPage() {
               >
                 <Button
                   variant="outline"
-                  className="h-14 w-full rounded-none border-[var(--lf-line-rose)] text-[11px] tracking-[0.2em] uppercase"
+                  className="h-14 w-full rounded-none border-(--lf-line-rose) text-[11px] tracking-[0.2em] uppercase"
                 >
                   Comprar pelo WhatsApp
                 </Button>
               </a>
             </div>
 
-            <div className="space-y-3 border-t border-[var(--lf-line)] pt-6 text-sm">
+            <div className="space-y-3 border-t border-(--lf-line) pt-6 text-sm">
               <details className="group">
                 <summary className="cursor-pointer text-[11px] tracking-[0.18em] uppercase">
                   Frete e entrega
                 </summary>
-                <p className="mt-2 text-[var(--lf-muted)]">
+                <p className="mt-2 text-muted">
                   Frete grátis para compras acima de R$ 299. Para Sergipe, prazo
                   de 3 a 7 dias úteis. Demais estados, 7 a 15 dias úteis.
                 </p>
@@ -268,12 +269,12 @@ function ProductDetailPage() {
                 <summary className="cursor-pointer text-[11px] tracking-[0.18em] uppercase">
                   Trocas e devoluções
                 </summary>
-                <p className="mt-2 text-[var(--lf-muted)]">
+                <p className="mt-2 text-muted">
                   Você tem até 7 dias após o recebimento para solicitar troca ou
                   devolução. Consulte nossa{" "}
                   <Link
                     to="/trocas-devolucoes"
-                    className="text-[var(--lf-pink)] underline"
+                    className="text-(--lf-pink) underline"
                   >
                     política completa
                   </Link>
@@ -284,7 +285,7 @@ function ProductDetailPage() {
                 <summary className="cursor-pointer text-[11px] tracking-[0.18em] uppercase">
                   Cuidados com a peça
                 </summary>
-                <p className="mt-2 text-[var(--lf-muted)]">
+                <p className="mt-2 text-muted">
                   Lave à mão com água fria. Não use alvejante. Seque à sombra
                   para preservar cores e elasticidade.
                 </p>
@@ -294,20 +295,16 @@ function ProductDetailPage() {
         </div>
 
         {relatedProducts.length > 0 ? (
-          <section className="mt-24 border-t border-[var(--lf-line)] pt-16">
-            <p className="text-[10px] tracking-[0.22em] text-[var(--lf-pink)] uppercase">
+          <section className="mt-24 border-t border-(--lf-line) pt-16">
+            <p className="text-[10px] tracking-[0.22em] text-(--lf-pink) uppercase">
               Você também pode gostar
             </p>
-            <h2 className="font-display mt-2 mb-10 text-4xl text-[var(--lf-ink)]">
+            <h2 className="font-display mt-2 mb-10 text-4xl text-(--lf-ink)">
               Complete o look
             </h2>
             <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
               {relatedProducts.map((item) => (
-                <ProductCard
-                  key={item.id}
-                  product={item}
-                  variant="editorial"
-                />
+                <ProductCard key={item.id} product={item} variant="editorial" />
               ))}
             </div>
           </section>

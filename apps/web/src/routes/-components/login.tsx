@@ -4,14 +4,14 @@ import React from "react";
 import { toast } from "sonner";
 import { z } from "zod";
 
+import { useAppForm } from "@/components/form/hooks";
+import { Loader } from "@/components/loader";
+import { SocialSignInButtons } from "@/components/social-sign-in-buttons";
 import {
   AuthDivider,
   AuthLayout,
   AuthLink,
 } from "@/components/store/auth-layout";
-import { useAppForm } from "@/components/form/hooks";
-import { Loader } from "@/components/loader";
-import { SocialSignInButtons } from "@/components/social-sign-in-buttons";
 import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 
@@ -132,7 +132,7 @@ function SignInForm({
         </form.Button>
       </form.AppForm>
 
-      <p className="text-center text-sm text-[var(--lf-muted)]">
+      <p className="text-center text-sm text-muted">
         Precisa de uma conta?{" "}
         <button
           type="button"
@@ -257,7 +257,7 @@ function SignUpForm({
         </form.Button>
       </form.AppForm>
 
-      <p className="text-center text-sm text-[var(--lf-muted)]">
+      <p className="text-center text-sm text-muted">
         Já tem uma conta?{" "}
         <button
           type="button"

@@ -14,11 +14,11 @@ function TermsPage() {
     <StoreLayout headerVariant="solid">
       <article className="mx-auto max-w-3xl px-4 py-16 md:px-8">
         <h1 className="font-display text-5xl">Termos de Uso</h1>
-        <div className="mt-8 space-y-4 text-sm leading-relaxed text-[var(--lf-muted)]">
+        <div className="mt-8 space-y-4 text-sm leading-relaxed text-muted">
           <p>
-            Ao utilizar o site da Linda Flor Moda Praia, você concorda com
-            estes termos. Os preços, disponibilidade e descrições dos produtos
-            podem ser alterados sem aviso prévio.
+            Ao utilizar o site da Linda Flor Moda Praia, você concorda com estes
+            termos. Os preços, disponibilidade e descrições dos produtos podem
+            ser alterados sem aviso prévio.
           </p>
           <p>
             Pedidos estão sujeitos à confirmação de pagamento e disponibilidade

@@ -1,5 +1,6 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { orderStatusLabels } from "@lindaflor/shared/enums/commerce";
 import { useQuery } from "@tanstack/react-query";
+import { createFileRoute, Link } from "@tanstack/react-router";
 
 import {
   Table,
@@ -9,7 +10,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { orderStatusLabels } from "@lindaflor/shared/enums/commerce";
 import { formatCurrency } from "@/lib/format";
 import { orpc } from "@/lib/orpc";
 
@@ -32,7 +32,7 @@ function AdminOrdersPage() {
       </div>
 
       {ordersQuery.isLoading ? (
-        <p>Carregando...</p>
+        <p>Carregando…</p>
       ) : ordersQuery.isError ? (
         <p className="text-red-600">
           Faça login como admin para ver os pedidos.

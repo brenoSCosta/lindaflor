@@ -1,4 +1,6 @@
+import { getDefaultWarehouseId } from "@lindaflor/core/commerce/warehouses";
 import { db } from "@lindaflor/db";
+import { users } from "@lindaflor/db/schema/auth";
 import {
   inventory,
   inventory_movements,
@@ -6,20 +8,13 @@ import {
   products,
   warehouses,
 } from "@lindaflor/db/schema/commerce";
-import { users } from "@lindaflor/db/schema/auth";
-import { schema } from "@lindaflor/shared/schemas/commerce";
 import { env } from "@lindaflor/env/server";
+import { schema } from "@lindaflor/shared/schemas/commerce";
 import { ORPCError } from "@orpc/server";
 import { and, asc, desc, eq, ilike, sql } from "drizzle-orm";
 import type { z } from "zod";
 
-import {
-  getDefaultWarehouseId,
-} from "@lindaflor/core/commerce/warehouses";
-
-type AdjustInventoryInput = z.infer<
-  typeof schema.admin.adjustInventory.input
->;
+type AdjustInventoryInput = z.infer<typeof schema.admin.adjustInventory.input>;
 type ReceiveInventoryInput = z.infer<
   typeof schema.admin.receiveInventory.input
 >;
@@ -116,13 +111,16 @@ export async function listLowStockAlerts() {
     .where(eq(warehouses.active, true))
     .orderBy(asc(products.name), asc(product_variants.size));
 
-  const data = rows
-    .map(mapInventoryRow)
-    .filter(
-      (row) =>
-        row.available <= Math.min(row.low_stock_threshold, threshold) ||
-        row.available === 0,
-    );
+  const data: ReturnType<typeof mapInventoryRow>[] = [];
+  for (const row of rows) {
+    const mapped = mapInventoryRow(row);
+    if (
+      mapped.available <= Math.min(mapped.low_stock_threshold, threshold) ||
+      mapped.available === 0
+    ) {
+      data.push(mapped);
+    }
+  }
 
   return {
     data: schema.admin.listLowStockAlerts.output.shape.data.parse(data),
@@ -278,8 +276,7 @@ export async function adjustInventory(
   input: AdjustInventoryInput,
   createdBy: string | null,
 ) {
-  const warehouseId =
-    input.warehouse_id ?? (await getDefaultWarehouseId());
+  const warehouseId = input.warehouse_id ?? (await getDefaultWarehouseId());
 
   const result = await applyInventoryChange({
     variant_id: input.variant_id,
@@ -303,8 +300,7 @@ export async function receiveInventory(
     });
   }
 
-  const warehouseId =
-    input.warehouse_id ?? (await getDefaultWarehouseId());
+  const warehouseId = input.warehouse_id ?? (await getDefaultWarehouseId());
 
   const result = await applyInventoryChange({
     variant_id: input.variant_id,
@@ -374,7 +370,9 @@ export async function transferInventory(
       .limit(1);
 
     if (!fromRow) {
-      throw new ORPCError("NOT_FOUND", { message: "Estoque de origem não encontrado" });
+      throw new ORPCError("NOT_FOUND", {
+        message: "Estoque de origem não encontrado",
+      });
     }
 
     const available = fromRow.quantity - fromRow.reserved;
@@ -408,9 +406,7 @@ export async function transferInventory(
         ),
       );
 
-    const note =
-      input.notes ??
-      `Transferência entre depósitos`;
+    const note = input.notes ?? `Transferência entre depósitos`;
 
     await tx.insert(inventory_movements).values({
       variant_id: input.variant_id,
@@ -445,7 +441,10 @@ export async function transferInventory(
         low_stock_threshold: product_variants.low_stock_threshold,
       })
       .from(inventory)
-      .innerJoin(product_variants, eq(product_variants.id, inventory.variant_id))
+      .innerJoin(
+        product_variants,
+        eq(product_variants.id, inventory.variant_id),
+      )
       .innerJoin(products, eq(products.id, product_variants.product_id))
       .innerJoin(warehouses, eq(warehouses.id, inventory.warehouse_id))
       .where(
@@ -462,7 +461,9 @@ export async function transferInventory(
       });
     }
 
-    return schema.admin.transferInventory.output.parse(mapInventoryRow(updated));
+    return schema.admin.transferInventory.output.parse(
+      mapInventoryRow(updated),
+    );
   });
 }
 
@@ -529,7 +530,14 @@ export async function importInventoryCsv(
     });
   }
 
-  const header = parseCsvLine(lines[0]!).map((h) => h.toLowerCase());
+  const headerLine = lines[0];
+  if (!headerLine) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: "CSV vazio ou sem linhas de dados",
+    });
+  }
+
+  const header = parseCsvLine(headerLine).map((h) => h.toLowerCase());
   const skuIdx = header.indexOf("sku");
   const warehouseIdx = header.indexOf("warehouse_code");
   const quantityIdx = header.indexOf("quantity");
@@ -540,10 +548,10 @@ export async function importInventoryCsv(
     });
   }
 
-  const defaultWarehouseId = await getDefaultWarehouseId();
-  const warehouseRows = await db
-    .select({ id: warehouses.id, code: warehouses.code })
-    .from(warehouses);
+  const [defaultWarehouseId, warehouseRows] = await Promise.all([
+    getDefaultWarehouseId(),
+    db.select({ id: warehouses.id, code: warehouses.code }).from(warehouses),
+  ]);
   const warehouseByCode = new Map(
     warehouseRows.map((row) => [row.code.toLowerCase(), row.id]),
   );
@@ -554,92 +562,100 @@ export async function importInventoryCsv(
     message?: string;
   }> = [];
 
-  for (const line of lines.slice(1)) {
-    const cols = parseCsvLine(line);
-    const sku = cols[skuIdx]?.trim();
-    const quantityRaw = cols[quantityIdx]?.trim();
-    const warehouseCode =
-      warehouseIdx >= 0 ? cols[warehouseIdx]?.trim().toLowerCase() : "principal";
+  await Promise.all(
+    lines.slice(1).map(async (line) => {
+      const cols = parseCsvLine(line);
+      const sku = cols[skuIdx]?.trim();
+      const quantityRaw = cols[quantityIdx]?.trim();
+      const warehouseCode =
+        warehouseIdx >= 0
+          ? cols[warehouseIdx]?.trim().toLowerCase()
+          : "principal";
 
-    if (!sku || !quantityRaw) {
-      results.push({ sku: sku ?? line, status: "skipped", message: "Linha inválida" });
-      continue;
-    }
-
-    const targetQuantity = Number(quantityRaw);
-    if (!Number.isInteger(targetQuantity) || targetQuantity < 0) {
-      results.push({ sku, status: "error", message: "Quantidade inválida" });
-      continue;
-    }
-
-    const warehouseId =
-      warehouseByCode.get(warehouseCode ?? "principal") ?? defaultWarehouseId;
-
-    try {
-      const [variant] = await db
-        .select({ id: product_variants.id })
-        .from(product_variants)
-        .where(eq(product_variants.sku, sku))
-        .limit(1);
-
-      if (!variant) {
-        results.push({ sku, status: "error", message: "SKU não encontrado" });
-        continue;
+      if (!sku || !quantityRaw) {
+        results.push({
+          sku: sku ?? line,
+          status: "skipped",
+          message: "Linha inválida",
+        });
+        return;
       }
 
-      const [current] = await db
-        .select({ quantity: inventory.quantity })
-        .from(inventory)
-        .where(
-          and(
-            eq(inventory.variant_id, variant.id),
-            eq(inventory.warehouse_id, warehouseId),
-          ),
-        )
-        .limit(1);
+      const targetQuantity = Number(quantityRaw);
+      if (!Number.isInteger(targetQuantity) || targetQuantity < 0) {
+        results.push({ sku, status: "error", message: "Quantidade inválida" });
+        return;
+      }
 
-      if (!current) {
-        await db.insert(inventory).values({
+      const warehouseId =
+        warehouseByCode.get(warehouseCode ?? "principal") ?? defaultWarehouseId;
+
+      try {
+        const [variant] = await db
+          .select({ id: product_variants.id })
+          .from(product_variants)
+          .where(eq(product_variants.sku, sku))
+          .limit(1);
+
+        if (!variant) {
+          results.push({ sku, status: "error", message: "SKU não encontrado" });
+          return;
+        }
+
+        const [current] = await db
+          .select({ quantity: inventory.quantity })
+          .from(inventory)
+          .where(
+            and(
+              eq(inventory.variant_id, variant.id),
+              eq(inventory.warehouse_id, warehouseId),
+            ),
+          )
+          .limit(1);
+
+        if (!current) {
+          await db.insert(inventory).values({
+            variant_id: variant.id,
+            warehouse_id: warehouseId,
+            quantity: targetQuantity,
+            reserved: 0,
+          });
+          await db.insert(inventory_movements).values({
+            variant_id: variant.id,
+            warehouse_id: warehouseId,
+            type: "entrada",
+            quantity: targetQuantity,
+            notes: "Importação CSV",
+            created_by: createdBy,
+          });
+          results.push({ sku, status: "updated" });
+          return;
+        }
+
+        const delta = targetQuantity - current.quantity;
+        if (delta === 0) {
+          results.push({ sku, status: "skipped", message: "Sem alteração" });
+          return;
+        }
+
+        await applyInventoryChange({
           variant_id: variant.id,
           warehouse_id: warehouseId,
-          quantity: targetQuantity,
-          reserved: 0,
-        });
-        await db.insert(inventory_movements).values({
-          variant_id: variant.id,
-          warehouse_id: warehouseId,
-          type: "entrada",
-          quantity: targetQuantity,
+          quantity_delta: delta,
+          type: delta > 0 ? "entrada" : "ajuste",
           notes: "Importação CSV",
           created_by: createdBy,
         });
         results.push({ sku, status: "updated" });
-        continue;
+      } catch (error) {
+        results.push({
+          sku,
+          status: "error",
+          message: error instanceof Error ? error.message : "Erro desconhecido",
+        });
       }
-
-      const delta = targetQuantity - current.quantity;
-      if (delta === 0) {
-        results.push({ sku, status: "skipped", message: "Sem alteração" });
-        continue;
-      }
-
-      await applyInventoryChange({
-        variant_id: variant.id,
-        warehouse_id: warehouseId,
-        quantity_delta: delta,
-        type: delta > 0 ? "entrada" : "ajuste",
-        notes: "Importação CSV",
-        created_by: createdBy,
-      });
-      results.push({ sku, status: "updated" });
-    } catch (error) {
-      results.push({
-        sku,
-        status: "error",
-        message: error instanceof Error ? error.message : "Erro desconhecido",
-      });
-    }
-  }
+    }),
+  );
 
   return schema.admin.importInventoryCsv.output.parse({
     processed: results.length,

@@ -1,8 +1,9 @@
-import { AuthLayout, AuthLink } from "@/components/store/auth-layout";
-import { useAppForm } from "@/components/form/hooks";
-import { authClient } from "@/lib/auth-client";
 import { toast } from "sonner";
 import { z } from "zod";
+
+import { useAppForm } from "@/components/form/hooks";
+import { AuthLayout, AuthLink } from "@/components/store/auth-layout";
+import { authClient } from "@/lib/auth-client";
 
 const inputClass =
   "lf-input-shadcn h-auto rounded-none border-0 border-b border-[var(--lf-line)] bg-transparent px-0 shadow-none focus-visible:border-[var(--lf-pink)] focus-visible:ring-0";
@@ -43,7 +44,7 @@ export function ForgotPassword() {
     >
       {form.state.isSubmitSuccessful ? (
         <div className="space-y-6 text-center">
-          <p className="text-sm text-[var(--lf-muted)]">
+          <p className="text-sm text-muted">
             Se existir uma conta com esse e-mail, um link de redefinição foi
             enviado. Verifique sua caixa de entrada.
           </p>

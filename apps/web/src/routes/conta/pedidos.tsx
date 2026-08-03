@@ -1,9 +1,9 @@
-import { createFileRoute, Link, redirect } from "@tanstack/react-router";
+import { orderStatusLabels } from "@lindaflor/shared/enums/commerce";
 import { useQuery } from "@tanstack/react-query";
+import { createFileRoute, Link, redirect } from "@tanstack/react-router";
 
 import { StoreLayout } from "@/components/store/store-layout";
 import { Button } from "@/components/ui/button";
-import { orderStatusLabels } from "@lindaflor/shared/enums/commerce";
 import { formatCurrency } from "@/lib/format";
 import { orpc } from "@/lib/orpc";
 
@@ -27,12 +27,12 @@ function MyOrdersPage() {
       <main className="mx-auto max-w-3xl px-4 py-12 md:px-8">
         <h1 className="font-display text-4xl">Meus pedidos</h1>
         {ordersQuery.isLoading ? (
-          <p className="mt-6 text-[var(--lf-muted)]">Carregando...</p>
+          <p className="mt-6 text-(--lf-muted)">Carregando…</p>
         ) : ordersQuery.data?.data.length === 0 ? (
           <div className="mt-8 space-y-4">
-            <p className="text-[var(--lf-muted)]">Você ainda não fez pedidos.</p>
+            <p className="text-(--lf-muted)">Você ainda não fez pedidos.</p>
             <Link to="/produtos">
-              <Button className="rounded-none bg-[var(--lf-pink)] uppercase">
+              <Button className="rounded-none bg-(--lf-pink) uppercase">
                 Ver catálogo
               </Button>
             </Link>
@@ -44,16 +44,17 @@ function MyOrdersPage() {
                 key={order.id}
                 to="/pedido/$id"
                 params={{ id: order.id }}
-                className="block border border-[var(--lf-line)] p-4 transition-colors hover:border-[var(--lf-pink)]"
+                className="block border border-(--lf-line) p-4 transition-colors hover:border-(--lf-pink)"
               >
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <p className="font-medium">#{order.id.slice(0, 8)}</p>
-                    <p className="text-sm text-[var(--lf-muted)]">
-                      {orderStatusLabels[order.status]} · {order.item_count} itens
+                    <p className="text-sm text-(--lf-muted)">
+                      {orderStatusLabels[order.status]} · {order.item_count}{" "}
+                      itens
                     </p>
                   </div>
-                  <p className="text-[var(--lf-pink)]">
+                  <p className="text-(--lf-pink)">
                     {formatCurrency(order.total_cents)}
                   </p>
                 </div>

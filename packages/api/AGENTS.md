@@ -53,7 +53,7 @@ Each schema module exports one procedure contract tree as **`export const schema
 | Procedure contract (nested `.input` / `.output`) | `schema`                                                                                                                         |
 | Row DTOs, enums, facets helpers, inferred types  | Descriptive names (`rowSchema`, `ConcessionOutput`, `defaultFacets`, …)                                                          |
 | Composing several entities in one index file     | `import { schema as courses } from "…/courses"` then `export const schema = { v1: { courses, … } }`                              |
-| One contract in a consumer file                  | `import { schema } from "@lindaflor/shared/schemas/…"`                                                                          |
+| One contract in a consumer file                  | `import { schema } from "@lindaflor/shared/schemas/…"`                                                                           |
 | Multiple contracts in one file                   | Local alias only: `import { schema as otherSchema } from "…/other"` — do not export prefixed `*Schema` names from schema modules |
 
 ## oRPC patterns

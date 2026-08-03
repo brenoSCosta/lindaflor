@@ -1,10 +1,46 @@
-import { env } from "@lindaflor/env/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import type { StoreOrder } from "@lindaflor/shared/schemas/commerce";
 
 import { confirmFulfillmentSale } from "@lindaflor/core/commerce/inventory";
+import { env } from "@lindaflor/env/server";
+import type { StoreOrder } from "@lindaflor/shared/schemas/commerce";
+import { z } from "zod";
 
 type PaymentMeta = NonNullable<StoreOrder["payment_meta"]>;
+
+const mercadoPagoCreatePaymentSchema = z.object({
+  id: z.number(),
+  point_of_interaction: z
+    .object({
+      transaction_data: z
+        .object({
+          qr_code: z.string().optional(),
+          qr_code_base64: z.string().optional(),
+          ticket_url: z.string().optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+});
+
+const mercadoPagoPaymentSchema = z.object({
+  id: z.number(),
+  status: z.string(),
+  external_reference: z.string().optional(),
+});
+
+function parseSignaturePart(
+  part: string,
+): { key: string; value: string } | null {
+  const separatorIndex = part.indexOf("=");
+  if (separatorIndex === -1) {
+    return null;
+  }
+
+  return {
+    key: part.slice(0, separatorIndex),
+    value: part.slice(separatorIndex + 1),
+  };
+}
 
 export async function createPixPayment(params: {
   orderId: string;
@@ -47,17 +83,14 @@ export async function createPixPayment(params: {
     throw new Error(`Mercado Pago error: ${body}`);
   }
 
-  const data = (await response.json()) as {
-    id: number;
-    point_of_interaction?: {
-      transaction_data?: {
-        qr_code?: string;
-        qr_code_base64?: string;
-        ticket_url?: string;
-      };
-    };
-  };
+  const parsed = mercadoPagoCreatePaymentSchema.safeParse(
+    await response.json(),
+  );
+  if (!parsed.success) {
+    throw new Error("Mercado Pago response inválida");
+  }
 
+  const data = parsed.data;
   const transaction = data.point_of_interaction?.transaction_data;
 
   return {
@@ -70,9 +103,11 @@ export async function createPixPayment(params: {
 }
 
 export async function confirmOrderPayment(orderId: string) {
-  const { db } = await import("@lindaflor/db");
-  const { order_items, orders } = await import("@lindaflor/db/schema/commerce");
-  const { eq } = await import("drizzle-orm");
+  const [{ db }, { order_items, orders }, { eq }] = await Promise.all([
+    import("@lindaflor/db"),
+    import("@lindaflor/db/schema/commerce"),
+    import("drizzle-orm"),
+  ]);
 
   return db.transaction(async (tx) => {
     const [order] = await tx
@@ -90,13 +125,15 @@ export async function confirmOrderPayment(orderId: string) {
       .from(order_items)
       .where(eq(order_items.order_id, orderId));
 
-    for (const item of items) {
-      await confirmFulfillmentSale({
-        variant_id: item.variant_id,
-        quantity: item.quantity,
-        order_id: orderId,
-      });
-    }
+    await Promise.all(
+      items.map((item) =>
+        confirmFulfillmentSale({
+          variant_id: item.variant_id,
+          quantity: item.quantity,
+          order_id: orderId,
+        }),
+      ),
+    );
 
     await tx
       .update(orders)
@@ -125,11 +162,8 @@ async function fetchMercadoPagoPayment(paymentId: string) {
     return null;
   }
 
-  return (await response.json()) as {
-    id: number;
-    status: string;
-    external_reference?: string;
-  };
+  const parsed = mercadoPagoPaymentSchema.safeParse(await response.json());
+  return parsed.success ? parsed.data : null;
 }
 
 export function verifyMercadoPagoWebhookSignature(
@@ -148,7 +182,11 @@ export function verifyMercadoPagoWebhookSignature(
   }
 
   const parts = Object.fromEntries(
-    signature.split(",").map((part) => part.split("=") as [string, string]),
+    signature
+      .split(",")
+      .map(parseSignaturePart)
+      .filter((part): part is { key: string; value: string } => part !== null)
+      .map((part) => [part.key, part.value]),
   );
   const ts = parts.ts;
   const v1 = parts.v1;
@@ -186,16 +224,16 @@ export async function handleMercadoPagoNotification(paymentId: string) {
 }
 
 export async function markOrderPaidFromWebhook(externalId: string) {
-  const { db } = await import("@lindaflor/db");
-  const { orders } = await import("@lindaflor/db/schema/commerce");
-  const { sql } = await import("drizzle-orm");
+  const [{ db }, { orders }, { sql }] = await Promise.all([
+    import("@lindaflor/db"),
+    import("@lindaflor/db/schema/commerce"),
+    import("drizzle-orm"),
+  ]);
 
   const [order] = await db
     .select({ id: orders.id })
     .from(orders)
-    .where(
-      sql`${orders.payment_meta}->>'external_id' = ${externalId}`,
-    )
+    .where(sql`${orders.payment_meta}->>'external_id' = ${externalId}`)
     .limit(1);
 
   if (!order) {

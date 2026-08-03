@@ -1,3 +1,4 @@
+import { ensureDefaultWarehouse } from "@lindaflor/core/commerce/warehouses";
 import { db } from "@lindaflor/db";
 import {
   collections,
@@ -7,8 +8,6 @@ import {
   products,
 } from "@lindaflor/db/schema/commerce";
 import { env } from "@lindaflor/env/server";
-
-import { ensureDefaultWarehouse } from "@lindaflor/core/commerce/warehouses";
 
 import { randomStockQuantity } from "@/seed/seeders/randomize-inventory";
 
@@ -94,9 +93,7 @@ export async function seedCommerce() {
       category: "saida_praia" as const,
       featured: false,
       image: productSeedImages.saidaCroche,
-      variants: [
-        { sku: "SPC-U-CREME", size: "m" as const, color: "Creme" },
-      ],
+      variants: [{ sku: "SPC-U-CREME", size: "m" as const, color: "Creme" }],
     },
   ];
 

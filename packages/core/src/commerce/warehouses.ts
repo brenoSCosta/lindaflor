@@ -43,10 +43,7 @@ export async function listWarehouses() {
   return { data: rows };
 }
 
-export async function createWarehouse(input: {
-  code: string;
-  name: string;
-}) {
+export async function createWarehouse(input: { code: string; name: string }) {
   const [created] = await db
     .insert(warehouses)
     .values({

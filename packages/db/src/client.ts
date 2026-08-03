@@ -30,8 +30,7 @@ const runtimeSql = createPostgresClient(env.DATABASE_URL);
 export const db: Database = drizzle(runtimeSql, { schema });
 
 export function createMigrationDb() {
-  const connectionString =
-    env.DATABASE_URL_DIRECT ?? env.DATABASE_URL;
+  const connectionString = env.DATABASE_URL_DIRECT ?? env.DATABASE_URL;
   const sql = createPostgresClient(connectionString);
   return {
     sql,

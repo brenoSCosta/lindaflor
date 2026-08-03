@@ -1,8 +1,7 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { createFileRoute, Link } from "@tanstack/react-router";
 
 import { StoreLayout } from "@/components/store/store-layout";
-
 import { orpc } from "@/lib/orpc";
 
 export const Route = createFileRoute("/colecoes/")({
@@ -18,7 +17,7 @@ function CollectionsPage() {
     <StoreLayout headerVariant="solid">
       <main className="mx-auto max-w-7xl px-4 py-16 md:px-8">
         <h1 className="font-display text-5xl">Coleções</h1>
-        <p className="mt-3 max-w-xl text-[var(--lf-muted)]">
+        <p className="mt-3 max-w-xl text-muted">
           Descubra as linhas da Linda Flor, pensadas para cada momento do seu
           verão.
         </p>
@@ -35,7 +34,7 @@ function CollectionsPage() {
               </p>
               <h2 className="font-display mt-2 text-3xl">{collection.name}</h2>
               {collection.description ? (
-                <p className="mt-2 text-sm text-[var(--lf-muted)]">
+                <p className="mt-2 text-sm text-muted">
                   {collection.description}
                 </p>
               ) : null}

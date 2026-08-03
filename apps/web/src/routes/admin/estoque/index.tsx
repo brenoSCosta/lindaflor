@@ -1,5 +1,6 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { productSizeLabels } from "@lindaflor/shared/enums/commerce";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -15,7 +16,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import { productSizeLabels } from "@lindaflor/shared/enums/commerce";
 import { orpc } from "@/lib/orpc";
 
 export const Route = createFileRoute("/admin/estoque/")({
@@ -55,8 +55,7 @@ function AdminInventoryPage() {
   const inventoryQuery = useQuery(
     orpc.commerce.admin.listInventory.queryOptions({
       input: {
-        warehouse_id:
-          warehouseFilter === "all" ? undefined : warehouseFilter,
+        warehouse_id: warehouseFilter === "all" ? undefined : warehouseFilter,
         low_stock_only: lowStockOnly || undefined,
       },
     }),
@@ -180,7 +179,7 @@ function AdminInventoryPage() {
         </div>
         <Button
           variant="outline"
-          onClick={() => exportMutation.mutate({})}
+          onClick={() => exportMutation.mutate(undefined)}
           disabled={exportMutation.isPending}
         >
           Exportar CSV
@@ -193,7 +192,7 @@ function AdminInventoryPage() {
             {alertsQuery.data?.data.length} alerta(s) de estoque baixo
           </p>
           <p className="mt-1 text-sm text-amber-800">
-            Limite global: {alertsQuery.data?.threshold} un. — revise os itens
+            Limite global: {alertsQuery.data?.threshold} un. · revise os itens
             em destaque abaixo.
           </p>
           <ul className="mt-3 space-y-1 text-sm text-amber-900">
@@ -224,6 +223,7 @@ function AdminInventoryPage() {
         <div className="space-y-4">
           <div className="flex flex-wrap gap-3">
             <select
+              aria-label="Filtrar por depósito"
               className="h-9 rounded-md border bg-white px-3 text-sm"
               value={warehouseFilter}
               onChange={(e) => setWarehouseFilter(e.target.value)}
@@ -286,8 +286,10 @@ function AdminInventoryPage() {
         >
           <h3 className="font-medium">Entrada de mercadoria</h3>
           <div className="space-y-2">
-            <Label>Variante (SKU)</Label>
+            <Label htmlFor="receive-variant">Variante (SKU)</Label>
             <select
+              id="receive-variant"
+              aria-label="Variante (SKU)"
               className="h-10 w-full rounded-md border px-3 text-sm"
               value={receiveForm.variant_id}
               onChange={(e) =>
@@ -295,17 +297,23 @@ function AdminInventoryPage() {
               }
               required
             >
-              <option value="">Selecione...</option>
+              <option value="">Selecione…</option>
               {variantOptions.map((item) => (
-                <option key={`${item.variant_id}-${item.warehouse_id}`} value={item.variant_id}>
-                  {item.sku} — {item.product_name} ({productSizeLabels[item.size]})
+                <option
+                  key={`${item.variant_id}-${item.warehouse_id}`}
+                  value={item.variant_id}
+                >
+                  {item.sku} · {item.product_name} (
+                  {productSizeLabels[item.size]})
                 </option>
               ))}
             </select>
           </div>
           <div className="space-y-2">
-            <Label>Depósito</Label>
+            <Label htmlFor="receive-warehouse">Depósito</Label>
             <select
+              id="receive-warehouse"
+              aria-label="Depósito"
               className="h-10 w-full rounded-md border px-3 text-sm"
               value={receiveForm.warehouse_id}
               onChange={(e) =>
@@ -402,7 +410,9 @@ function AdminInventoryPage() {
               <TableBody>
                 {warehousesQuery.data?.data.map((w) => (
                   <TableRow key={w.id}>
-                    <TableCell className="font-mono text-sm">{w.code}</TableCell>
+                    <TableCell className="font-mono text-sm">
+                      {w.code}
+                    </TableCell>
                     <TableCell>{w.name}</TableCell>
                     <TableCell>{w.is_default ? "Sim" : "—"}</TableCell>
                   </TableRow>
@@ -470,8 +480,10 @@ function AdminInventoryPage() {
             <h3 className="font-medium">Transferir entre depósitos</h3>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2 sm:col-span-2">
-                <Label>Variante</Label>
+                <Label htmlFor="transfer-variant">Variante</Label>
                 <select
+                  id="transfer-variant"
+                  aria-label="Variante"
                   className="h-10 w-full rounded-md border px-3 text-sm"
                   value={transferForm.variant_id}
                   onChange={(e) =>
@@ -481,17 +493,19 @@ function AdminInventoryPage() {
                     }))
                   }
                 >
-                  <option value="">Selecione...</option>
+                  <option value="">Selecione…</option>
                   {variantOptions.map((item) => (
                     <option key={item.variant_id} value={item.variant_id}>
-                      {item.sku} — {item.product_name}
+                      {item.sku} · {item.product_name}
                     </option>
                   ))}
                 </select>
               </div>
               <div className="space-y-2">
-                <Label>Origem</Label>
+                <Label htmlFor="transfer-from">Origem</Label>
                 <select
+                  id="transfer-from"
+                  aria-label="Depósito de origem"
                   className="h-10 w-full rounded-md border px-3 text-sm"
                   value={transferForm.from_warehouse_id}
                   onChange={(e) =>
@@ -501,7 +515,7 @@ function AdminInventoryPage() {
                     }))
                   }
                 >
-                  <option value="">Selecione...</option>
+                  <option value="">Selecione…</option>
                   {warehousesQuery.data?.data.map((w) => (
                     <option key={w.id} value={w.id}>
                       {w.name}
@@ -510,8 +524,10 @@ function AdminInventoryPage() {
                 </select>
               </div>
               <div className="space-y-2">
-                <Label>Destino</Label>
+                <Label htmlFor="transfer-to">Destino</Label>
                 <select
+                  id="transfer-to"
+                  aria-label="Depósito de destino"
                   className="h-10 w-full rounded-md border px-3 text-sm"
                   value={transferForm.to_warehouse_id}
                   onChange={(e) =>
@@ -521,7 +537,7 @@ function AdminInventoryPage() {
                     }))
                   }
                 >
-                  <option value="">Selecione...</option>
+                  <option value="">Selecione…</option>
                   {warehousesQuery.data?.data.map((w) => (
                     <option key={w.id} value={w.id}>
                       {w.name}
@@ -628,7 +644,7 @@ function InventoryTable({
   onStartAdjust: (id: string) => void;
   onConfirmAdjust: (variantId: string, warehouseId: string) => void;
 }) {
-  if (loading) return <p>Carregando...</p>;
+  if (loading) return <p>Carregando…</p>;
   if (error) return <p className="text-red-600">Erro ao carregar estoque.</p>;
 
   return (
@@ -684,7 +700,7 @@ function InventoryTable({
                           onConfirmAdjust(item.variant_id, item.warehouse_id)
                         }
                       >
-                        OK
+                        Confirmar
                       </Button>
                     </div>
                   ) : (

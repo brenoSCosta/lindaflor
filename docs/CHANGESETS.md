@@ -4,8 +4,8 @@ This project uses [Changesets](https://github.com/changesets/changesets) for ver
 
 **Scope → package:**
 
-| Scope  | Package            |
-| ------ | ------------------ |
+| Scope  | Package           |
+| ------ | ----------------- |
 | api    | @lindaflor/api    |
 | core   | @lindaflor/core   |
 | shared | @lindaflor/shared |

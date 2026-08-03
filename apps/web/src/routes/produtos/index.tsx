@@ -1,10 +1,10 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { productCategories } from "@lindaflor/shared/enums/commerce";
 import { useQuery } from "@tanstack/react-query";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { z } from "zod";
 
 import { ProductCard } from "@/components/store/product-card";
 import { StoreLayout } from "@/components/store/store-layout";
-import { productCategories } from "@lindaflor/shared/enums/commerce";
 import { orpc } from "@/lib/orpc";
 import { cn } from "@/lib/utils";
 
@@ -50,16 +50,16 @@ function ProductsPage() {
 
   return (
     <StoreLayout headerVariant="solid">
-      <section className="border-b border-[var(--lf-line)] px-4 py-16 md:px-8">
+      <section className="border-b border-(--lf-line) px-4 py-16 md:px-8">
         <div className="mx-auto max-w-7xl">
-          <p className="text-[10px] tracking-[0.18em] text-[var(--lf-muted)] uppercase">
+          <p className="text-[10px] tracking-[0.18em] text-muted uppercase">
             Início / Catálogo
           </p>
-          <h1 className="font-display mt-4 text-5xl text-[var(--lf-ink)] md:text-6xl">
+          <h1 className="font-display mt-4 text-5xl text-(--lf-ink) md:text-6xl">
             {search.q ? `Busca: ${search.q}` : "Catálogo"}
           </h1>
-          <p className="mt-3 max-w-2xl text-[var(--lf-muted)]">
-            Biquínis, maiôs e saídas de praia — peças selecionadas para o seu
+          <p className="mt-3 max-w-2xl text-muted">
+            Biquínis, maiôs e saídas de praia, peças selecionadas para o seu
             verão.
           </p>
         </div>
@@ -72,18 +72,15 @@ function ProductsPage() {
               key={filter.key}
               to="/produtos"
               search={{
-                categoria:
-                  filter.key === "all"
-                    ? undefined
-                    : filter.key,
+                categoria: filter.key === "all" ? undefined : filter.key,
                 q: search.q,
                 destaque: search.destaque,
               }}
               className={cn(
                 "border px-4 py-2 text-[10px] tracking-[0.16em] uppercase transition-colors",
                 activeFilter === filter.key
-                  ? "border-[var(--lf-pink)] bg-[var(--lf-pink)] text-white"
-                  : "border-[var(--lf-line)] text-[var(--lf-muted)] hover:border-[var(--lf-pink)]",
+                  ? "border-(--lf-pink) bg-(--lf-pink) text-white"
+                  : "border-(--lf-line) text-muted hover:border-(--lf-pink)",
               )}
             >
               {filter.label}
@@ -92,19 +89,17 @@ function ProductsPage() {
         </div>
 
         {productsQuery.isLoading ? (
-          <p className="text-[var(--lf-muted)]">Carregando catálogo...</p>
+          <p className="text-muted">Carregando catálogo…</p>
         ) : products.length === 0 ? (
-          <p className="text-[var(--lf-muted)]">
+          <p className="text-muted">
             Nenhum produto encontrado.{" "}
-            <Link to="/produtos" className="text-[var(--lf-pink)] underline">
+            <Link to="/produtos" className="text-(--lf-pink) underline">
               Limpar filtros
             </Link>
           </p>
         ) : (
           <>
-            <p className="mb-8 text-sm text-[var(--lf-muted)]">
-              {products.length} peças
-            </p>
+            <p className="mb-8 text-sm text-muted">{products.length} peças</p>
             <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
               {products.map((product) => (
                 <ProductCard

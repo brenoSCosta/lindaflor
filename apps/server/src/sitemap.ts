@@ -1,14 +1,22 @@
-import { env } from "@lindaflor/env/server";
 import { listProductSlugsForSitemap } from "@lindaflor/core/commerce/products";
+import { env } from "@lindaflor/env/server";
 
 export async function buildSitemapXml() {
   const products = await listProductSlugsForSitemap();
   const base = env.WEB_ORIGIN.replace(/\/$/, "");
-  const staticUrls = ["", "/produtos", "/colecoes", "/politica-privacidade", "/termos", "/trocas-devolucoes"];
+  const staticUrls = [
+    "",
+    "/produtos",
+    "/colecoes",
+    "/politica-privacidade",
+    "/termos",
+    "/trocas-devolucoes",
+  ];
 
   const urls = [
     ...staticUrls.map(
-      (path) => `  <url><loc>${base}${path}</loc><changefreq>weekly</changefreq></url>`,
+      (path) =>
+        `  <url><loc>${base}${path}</loc><changefreq>weekly</changefreq></url>`,
     ),
     ...products.map(
       (product) =>

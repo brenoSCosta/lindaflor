@@ -1,3 +1,8 @@
+import {
+  productCategoryLabels,
+  productSizeLabels,
+  productSizes,
+} from "@lindaflor/shared/enums/commerce";
 import { useQuery } from "@tanstack/react-query";
 import {
   ChevronDown,
@@ -10,15 +15,10 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
-import {
-  productCategoryLabels,
-  productSizeLabels,
-  productSizes,
-} from "@lindaflor/shared/enums/commerce";
 import { formatCurrency } from "@/lib/format";
 import { orpc } from "@/lib/orpc";
-import { exampleImages } from "@/routes/exemplos/-components/example-images";
 import { cn } from "@/lib/utils";
+import { exampleImages } from "@/routes/exemplos/-components/example-images";
 
 const galleryImages = [
   exampleImages.productLifestyle,
@@ -65,15 +65,15 @@ export function BossaNovaProductExample() {
 
   if (productQuery.isLoading) {
     return (
-      <div className="store-example-bossa font-ex-body flex min-h-[60vh] items-center justify-center bg-[var(--ex-bg)] text-[var(--ex-muted)]">
-        Carregando produto...
+      <div className="store-example-bossa font-ex-body flex min-h-[60vh] items-center justify-center bg-(--ex-bg) text-(--ex-muted)">
+        Carregando produto…
       </div>
     );
   }
 
   if (!product) {
     return (
-      <div className="store-example-bossa font-ex-body flex min-h-[60vh] items-center justify-center bg-[var(--ex-bg)] text-[var(--ex-muted)]">
+      <div className="store-example-bossa font-ex-body flex min-h-[60vh] items-center justify-center bg-(--ex-bg) text-(--ex-muted)">
         Produto de exemplo não encontrado. Rode o seed do banco.
       </div>
     );
@@ -85,7 +85,7 @@ export function BossaNovaProductExample() {
       : [...galleryImages];
 
   return (
-    <div className="store-example-bossa font-ex-body min-h-screen bg-[var(--ex-bg)] text-[var(--ex-ink)]">
+    <div className="store-example-bossa font-ex-body min-h-screen bg-(--ex-bg) text-(--ex-ink)">
       <header className="border-b border-[color-mix(in_oklab,var(--ex-ink)_8%,transparent)]">
         <div className="mx-auto flex h-20 max-w-7xl items-center justify-between px-4 md:px-10">
           <nav className="hidden gap-6 md:flex">
@@ -94,7 +94,7 @@ export function BossaNovaProductExample() {
                 key={item}
                 className={cn(
                   "text-[10px] tracking-[0.18em] uppercase",
-                  i === 1 && "text-[var(--ex-pink)]",
+                  i === 1 && "text-(--ex-pink)",
                 )}
               >
                 {item}
@@ -111,16 +111,18 @@ export function BossaNovaProductExample() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-8 md:px-10 md:py-12">
-        <p className="mb-8 text-[10px] tracking-[0.16em] text-[var(--ex-muted)] uppercase">
+        <p className="mb-8 text-[10px] tracking-[0.16em] text-(--ex-muted) uppercase">
           Início / Catálogo / {product.name}
         </p>
 
         <div className="grid gap-12 lg:grid-cols-[1.15fr_0.85fr] lg:gap-16">
           <div className="space-y-4">
-            <div className="overflow-hidden bg-[var(--ex-sand)]">
-              <div className="aspect-[3/4]">
+            <div className="overflow-hidden bg-(--ex-sand)">
+              <div className="aspect-3/4">
                 <img
-                  src={images[mainImage] ?? product.image_url ?? galleryImages[0]}
+                  src={
+                    images[mainImage] ?? product.image_url ?? galleryImages[0]
+                  }
                   alt={product.name}
                   className="h-full w-full object-cover"
                 />
@@ -131,11 +133,12 @@ export function BossaNovaProductExample() {
                 <button
                   key={url}
                   type="button"
+                  aria-label={`Ver imagem ${index + 1}`}
                   onClick={() => setMainImage(index)}
                   className={cn(
-                    "aspect-square overflow-hidden border-2 bg-[var(--ex-sand)]",
+                    "aspect-square overflow-hidden border-2 bg-(--ex-sand)",
                     mainImage === index
-                      ? "border-[var(--ex-pink)]"
+                      ? "border-(--ex-pink)"
                       : "border-transparent",
                   )}
                 >
@@ -151,7 +154,7 @@ export function BossaNovaProductExample() {
 
           <div className="space-y-8 lg:pt-4">
             <div className="space-y-3">
-              <p className="text-[10px] tracking-[0.2em] text-[var(--ex-muted)] uppercase">
+              <p className="text-[10px] tracking-[0.2em] text-(--ex-muted) uppercase">
                 {productCategoryLabels[product.category]}
               </p>
               <h1 className="font-ex-display text-4xl leading-tight md:text-5xl">
@@ -160,7 +163,7 @@ export function BossaNovaProductExample() {
               <p className="text-2xl font-light">
                 {formatCurrency(product.price_in_cents)}
               </p>
-              <p className="max-w-md leading-relaxed text-[var(--ex-muted)]">
+              <p className="max-w-md leading-relaxed text-(--ex-muted)">
                 {product.description}
               </p>
             </div>
@@ -172,7 +175,7 @@ export function BossaNovaProductExample() {
                 </p>
                 <button
                   type="button"
-                  className="text-[10px] tracking-[0.12em] text-[var(--ex-muted)] underline underline-offset-4"
+                  className="text-[10px] tracking-[0.12em] text-(--ex-muted) underline underline-offset-4"
                 >
                   Guia de tamanhos
                 </button>
@@ -186,8 +189,8 @@ export function BossaNovaProductExample() {
                     className={cn(
                       "flex size-11 items-center justify-center border text-xs tracking-wider uppercase transition-colors",
                       selectedSize === size
-                        ? "border-[var(--ex-pink)] bg-[var(--ex-pink)] text-white"
-                        : "border-[color-mix(in_oklab,var(--ex-ink)_15%,transparent)] hover:border-[var(--ex-ink)]",
+                        ? "border-(--ex-pink) bg-(--ex-pink) text-white"
+                        : "border-[color-mix(in_oklab,var(--ex-ink)_15%,transparent)] hover:border-(--ex-ink)",
                     )}
                   >
                     {productSizeLabels[size]}
@@ -203,9 +206,10 @@ export function BossaNovaProductExample() {
                   <button
                     key={color}
                     type="button"
+                    aria-label={`Cor ${i + 1}`}
                     className={cn(
                       "size-8 rounded-full border-2",
-                      i === 0 ? "border-[var(--ex-ink)]" : "border-transparent",
+                      i === 0 ? "border-(--ex-ink)" : "border-transparent",
                     )}
                     style={{ backgroundColor: color }}
                   />
@@ -227,7 +231,7 @@ export function BossaNovaProductExample() {
               </div>
               <button
                 type="button"
-                className="h-12 flex-1 bg-[var(--ex-pink)] text-[10px] tracking-[0.18em] text-white uppercase hover:bg-[var(--ex-pink-deep)]"
+                className="h-12 flex-1 bg-(--ex-pink) text-[10px] tracking-[0.18em] text-white uppercase hover:bg-(--ex-pink-deep)"
               >
                 Adicionar ao carrinho
               </button>
@@ -241,7 +245,7 @@ export function BossaNovaProductExample() {
               ].map(({ icon: Icon, label }) => (
                 <div
                   key={label}
-                  className="flex items-center gap-2 text-xs text-[var(--ex-muted)]"
+                  className="flex items-center gap-2 text-xs text-(--ex-muted)"
                 >
                   <Icon className="size-4 shrink-0" />
                   {label}
@@ -259,9 +263,7 @@ export function BossaNovaProductExample() {
                   >
                     <button
                       type="button"
-                      onClick={() =>
-                        setOpenAccordion(open ? null : item.title)
-                      }
+                      onClick={() => setOpenAccordion(open ? null : item.title)}
                       className="flex w-full items-center justify-between py-4 text-left text-[11px] tracking-[0.14em] uppercase"
                     >
                       {item.title}
@@ -273,7 +275,7 @@ export function BossaNovaProductExample() {
                       />
                     </button>
                     {open ? (
-                      <p className="pb-4 text-sm leading-relaxed text-[var(--ex-muted)]">
+                      <p className="pb-4 text-sm leading-relaxed text-(--ex-muted)">
                         {item.body}
                       </p>
                     ) : null}
@@ -291,7 +293,7 @@ export function BossaNovaProductExample() {
           <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
             {related.map((item) => (
               <article key={item.id}>
-                <div className="aspect-[3/4] overflow-hidden bg-[var(--ex-sand)]">
+                <div className="aspect-3/4 overflow-hidden bg-(--ex-sand)">
                   <img
                     src={item.image_url ?? exampleImages.categorySaida}
                     alt={item.name}
@@ -301,7 +303,7 @@ export function BossaNovaProductExample() {
                 <p className="mt-3 text-center font-ex-display text-lg">
                   {item.name}
                 </p>
-                <p className="text-center text-sm text-[var(--ex-muted)]">
+                <p className="text-center text-sm text-(--ex-muted)">
                   {formatCurrency(item.price_in_cents)}
                 </p>
               </article>
@@ -313,7 +315,7 @@ export function BossaNovaProductExample() {
       <footer className="mt-12 bg-[color-mix(in_oklab,var(--ex-sand)_60%,var(--ex-bg))] px-4 py-12 md:px-10">
         <div className="mx-auto flex max-w-7xl flex-col justify-between gap-4 md:flex-row md:items-center">
           <p className="font-ex-display text-xl">Linda Flor</p>
-          <p className="text-xs text-[var(--ex-muted)]">
+          <p className="text-xs text-(--ex-muted)">
             Exemplo Bossa Nova · Página de produto
           </p>
         </div>

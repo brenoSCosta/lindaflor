@@ -3,15 +3,15 @@ import { o, publicProcedure } from "@lindaflor/api/middlewares";
 import { authorize } from "@lindaflor/api/middlewares/authorize";
 import { authorizedProcedure } from "@lindaflor/api/middlewares/authorized";
 import {
-  getStoreCollectionBySlug,
-  listStoreCollections,
-} from "@lindaflor/core/commerce/collections";
-import {
   createStoreOrder,
   deleteProductImage,
   getStoreOrder,
   uploadProductImage,
 } from "@lindaflor/core/commerce/checkout";
+import {
+  getStoreCollectionBySlug,
+  listStoreCollections,
+} from "@lindaflor/core/commerce/collections";
 import {
   adjustInventory,
   exportInventoryCsv,
@@ -22,10 +22,6 @@ import {
   receiveInventory,
   transferInventory,
 } from "@lindaflor/core/commerce/inventory";
-import {
-  createWarehouse,
-  listWarehouses,
-} from "@lindaflor/core/commerce/warehouses";
 import {
   getAdminOrder,
   listCustomerOrders,
@@ -39,9 +35,11 @@ import {
   listStoreProducts,
   updateProduct,
 } from "@lindaflor/core/commerce/products";
+import { calculateShippingCents } from "@lindaflor/core/commerce/shipping";
 import {
-  calculateShippingCents,
-} from "@lindaflor/core/commerce/shipping";
+  createWarehouse,
+  listWarehouses,
+} from "@lindaflor/core/commerce/warehouses";
 import { schema } from "@lindaflor/shared/schemas/commerce";
 import type { EnhancedRouter } from "@orpc/server";
 

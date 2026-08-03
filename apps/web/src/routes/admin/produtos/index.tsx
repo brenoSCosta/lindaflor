@@ -1,5 +1,6 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { productCategoryLabels } from "@lindaflor/shared/enums/commerce";
 import { useQuery } from "@tanstack/react-query";
+import { createFileRoute, Link } from "@tanstack/react-router";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -10,7 +11,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { productCategoryLabels } from "@lindaflor/shared/enums/commerce";
 import { formatCurrency } from "@/lib/format";
 import { orpc } from "@/lib/orpc";
 
@@ -38,7 +38,7 @@ function AdminProductsPage() {
       </div>
 
       {productsQuery.isLoading ? (
-        <p>Carregando...</p>
+        <p>Carregando…</p>
       ) : productsQuery.isError ? (
         <p className="text-red-600">
           Faça login como admin para ver os produtos.
@@ -76,9 +76,7 @@ function AdminProductsPage() {
                   </TableCell>
                   <TableCell>{product.variant_count}</TableCell>
                   <TableCell>{product.available_total}</TableCell>
-                  <TableCell>
-                    {product.active ? "Ativo" : "Inativo"}
-                  </TableCell>
+                  <TableCell>{product.active ? "Ativo" : "Inativo"}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

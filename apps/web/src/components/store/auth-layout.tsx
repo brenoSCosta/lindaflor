@@ -1,4 +1,3 @@
-import type { ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 
 import { StoreLogo } from "@/components/store/store-logo";
@@ -12,7 +11,7 @@ type AuthLayoutProps = {
 
 export function AuthLayout({ children, title, subtitle }: AuthLayoutProps) {
   return (
-    <div className="store min-h-svh bg-[var(--lf-cream)]">
+    <div className="store min-h-svh bg-(--lf-cream)">
       <div className="grid min-h-svh lg:grid-cols-2">
         <div className="relative hidden overflow-hidden lg:block">
           <img
@@ -20,7 +19,7 @@ export function AuthLayout({ children, title, subtitle }: AuthLayoutProps) {
             alt=""
             className="absolute inset-0 h-full w-full object-cover"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-[color-mix(in_oklab,var(--lf-ink)_35%,transparent)] via-transparent to-transparent" />
+          <div className="absolute inset-0 bg-linear-to-t from-[color-mix(in_oklab,var(--lf-ink)_35%,transparent)] via-transparent to-transparent" />
           <div className="absolute inset-x-0 bottom-0 p-12">
             <p className="font-display text-3xl leading-tight text-white">
               Moda praia
@@ -38,7 +37,7 @@ export function AuthLayout({ children, title, subtitle }: AuthLayoutProps) {
             <StoreLogo />
             <Link
               to="/"
-              className="text-[10px] tracking-[0.18em] text-[var(--lf-muted)] uppercase transition-colors hover:text-[var(--lf-pink)]"
+              className="text-[10px] tracking-[0.18em] text-(--lf-muted) uppercase transition-colors hover:text-(--lf-pink)"
             >
               Voltar à loja
             </Link>
@@ -49,9 +48,7 @@ export function AuthLayout({ children, title, subtitle }: AuthLayoutProps) {
               <header className="mb-8 text-center lg:text-left">
                 <h1 className="lf-heading text-3xl md:text-4xl">{title}</h1>
                 {subtitle ? (
-                  <p className="mt-2 text-sm text-[var(--lf-muted)]">
-                    {subtitle}
-                  </p>
+                  <p className="mt-2 text-sm text-(--lf-muted)">{subtitle}</p>
                 ) : null}
               </header>
             ) : null}
@@ -67,10 +64,10 @@ export function AuthDivider() {
   return (
     <div className="relative my-6">
       <div className="absolute inset-0 flex items-center">
-        <span className="w-full border-t border-[var(--lf-line)]" />
+        <span className="w-full border-t border-(--lf-line)" />
       </div>
       <div className="relative flex justify-center">
-        <span className="bg-[var(--lf-cream)] px-3 text-[10px] tracking-[0.2em] text-[var(--lf-muted)] uppercase">
+        <span className="bg-(--lf-cream) px-3 text-[10px] tracking-[0.2em] text-(--lf-muted) uppercase">
           ou
         </span>
       </div>
@@ -85,7 +82,7 @@ export function AuthLink({
   return (
     <Link
       className={cn(
-        "text-sm text-[var(--lf-pink)] transition-colors hover:text-[var(--lf-pink-deep)]",
+        "text-sm text-(--lf-pink) transition-colors hover:text-(--lf-pink-deep)",
         className,
       )}
       {...props}

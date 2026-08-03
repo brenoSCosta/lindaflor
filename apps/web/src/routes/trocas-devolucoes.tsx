@@ -14,10 +14,10 @@ function ReturnsPage() {
     <StoreLayout headerVariant="solid">
       <article className="mx-auto max-w-3xl px-4 py-16 md:px-8">
         <h1 className="font-display text-5xl">Trocas e Devoluções</h1>
-        <div className="mt-8 space-y-4 text-sm leading-relaxed text-[var(--lf-muted)]">
+        <div className="mt-8 space-y-4 text-sm leading-relaxed text-muted">
           <p>
-            Você pode solicitar troca ou devolução em até 7 dias corridos após
-            o recebimento do pedido, conforme o Código de Defesa do Consumidor.
+            Você pode solicitar troca ou devolução em até 7 dias corridos após o
+            recebimento do pedido, conforme o Código de Defesa do Consumidor.
           </p>
           <p>
             A peça deve estar sem uso, com etiquetas e na embalagem original.

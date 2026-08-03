@@ -59,8 +59,7 @@ export function calculateShippingCents(params: {
   return {
     shipping_cents,
     free_shipping: false,
-    estimated_days:
-      region === "SE" ? "3 a 7 dias úteis" : "7 a 15 dias úteis",
+    estimated_days: region === "SE" ? "3 a 7 dias úteis" : "7 a 15 dias úteis",
   };
 }
 

@@ -1,11 +1,8 @@
-import { db } from "@lindaflor/db";
-import {
-  order_items,
-  orders,
-} from "@lindaflor/db/schema/commerce";
 import { releaseFulfillmentStock } from "@lindaflor/core/commerce/inventory";
-import { schema } from "@lindaflor/shared/schemas/commerce";
+import { db } from "@lindaflor/db";
+import { order_items, orders } from "@lindaflor/db/schema/commerce";
 import type { orderStatuses } from "@lindaflor/shared/enums/commerce";
+import { schema } from "@lindaflor/shared/schemas/commerce";
 import { ORPCError } from "@orpc/server";
 import { and, desc, eq, lt, or, sql } from "drizzle-orm";
 import type { z } from "zod";
@@ -121,13 +118,15 @@ async function releaseOrderReservations(orderId: string) {
     .from(order_items)
     .where(eq(order_items.order_id, orderId));
 
-  for (const item of items) {
-    await releaseFulfillmentStock({
-      variant_id: item.variant_id,
-      quantity: item.quantity,
-      order_id: orderId,
-    });
-  }
+  await Promise.all(
+    items.map((item) =>
+      releaseFulfillmentStock({
+        variant_id: item.variant_id,
+        quantity: item.quantity,
+        order_id: orderId,
+      }),
+    ),
+  );
 }
 
 export async function updateOrderStatus(input: UpdateOrderStatusInput) {
@@ -167,19 +166,18 @@ export async function releaseExpiredReservations(hours = 24) {
     .select({ id: orders.id })
     .from(orders)
     .where(
-      and(
-        eq(orders.status, "pending_payment"),
-        lt(orders.created_at, cutoff),
-      ),
+      and(eq(orders.status, "pending_payment"), lt(orders.created_at, cutoff)),
     );
 
-  for (const order of expired) {
-    await releaseOrderReservations(order.id);
-    await db
-      .update(orders)
-      .set({ status: "cancelled" })
-      .where(eq(orders.id, order.id));
-  }
+  await Promise.all(
+    expired.map(async (order) => {
+      await releaseOrderReservations(order.id);
+      await db
+        .update(orders)
+        .set({ status: "cancelled" })
+        .where(eq(orders.id, order.id));
+    }),
+  );
 
   return expired.length;
 }

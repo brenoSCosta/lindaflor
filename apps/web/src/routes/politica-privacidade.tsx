@@ -14,7 +14,7 @@ function PrivacyPage() {
     <StoreLayout headerVariant="solid">
       <article className="mx-auto max-w-3xl px-4 py-16 md:px-8">
         <h1 className="font-display text-5xl">Política de Privacidade</h1>
-        <div className="mt-8 space-y-4 text-sm leading-relaxed text-[var(--lf-muted)]">
+        <div className="mt-8 space-y-4 text-sm leading-relaxed text-muted">
           <p>
             A Linda Flor Moda Praia respeita sua privacidade. Coletamos apenas
             os dados necessários para processar pedidos, enviar comunicações

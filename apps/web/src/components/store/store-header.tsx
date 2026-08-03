@@ -41,8 +41,8 @@ export function StoreHeader({ variant = "light" }: StoreHeaderProps) {
           variant === "overlay"
             ? "border-white/10 bg-[color-mix(in_oklab,var(--lf-ink)_25%,transparent)] text-white"
             : variant === "light"
-              ? "border-[var(--lf-line)] bg-[color-mix(in_oklab,var(--lf-cream)_94%,white)]"
-              : "border-[var(--lf-line)] bg-[var(--lf-cream)]",
+              ? "border-(--lf-line) bg-[color-mix(in_oklab,var(--lf-cream)_94%,white)]"
+              : "border-(--lf-line) bg-(--lf-cream)",
         )}
       >
         <div className="mx-auto grid h-20 max-w-7xl grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 md:px-8">
@@ -56,7 +56,7 @@ export function StoreHeader({ variant = "light" }: StoreHeaderProps) {
                   "text-[10px] tracking-[0.18em] uppercase transition-colors",
                   variant === "overlay"
                     ? "text-white/85 hover:text-white"
-                    : "text-[var(--lf-ink)] hover:text-[var(--lf-pink)]",
+                    : "text-(--lf-ink) hover:text-(--lf-pink)",
                 )}
               >
                 {link.label}
@@ -122,7 +122,7 @@ export function StoreHeader({ variant = "light" }: StoreHeaderProps) {
             >
               <ShoppingBag className="size-4" />
               {itemCount > 0 ? (
-                <span className="absolute -top-1 -right-1 flex size-4 items-center justify-center bg-[var(--lf-pink)] text-[9px] text-white">
+                <span className="absolute -top-1 -right-1 flex size-4 items-center justify-center bg-(--lf-pink) text-[9px] text-white">
                   {itemCount > 9 ? "9+" : itemCount}
                 </span>
               ) : null}
@@ -148,21 +148,21 @@ export function StoreHeader({ variant = "light" }: StoreHeaderProps) {
               />
               <SheetContent
                 side="right"
-                className="store gap-0 border-[var(--lf-line)] bg-[var(--lf-cream)] p-0 shadow-none"
+                className="store gap-0 border-(--lf-line) bg-(--lf-cream) p-0 shadow-none"
               >
-                <SheetHeader className="border-b border-[var(--lf-line)] px-6 pt-6 pb-5 pr-12">
-                  <SheetTitle className="font-display text-2xl text-[var(--lf-ink)]">
+                <SheetHeader className="border-b border-(--lf-line) px-6 pt-6 pb-5 pr-12">
+                  <SheetTitle className="font-display text-2xl text-(--lf-ink)">
                     Menu
                   </SheetTitle>
                 </SheetHeader>
-                <nav className="flex flex-col gap-4 px-6 py-6">
+                <nav className="flex flex-col gap-4 p-6">
                   {navLinks.map((link) => (
                     <Link
                       key={link.label}
                       to={link.to}
                       {...("hash" in link ? { hash: link.hash } : {})}
                       onClick={() => setMenuOpen(false)}
-                      className="text-sm font-medium tracking-[0.14em] text-[var(--lf-ink)] uppercase"
+                      className="text-sm font-medium tracking-[0.14em] text-(--lf-ink) uppercase"
                     >
                       {link.label}
                     </Link>
@@ -173,14 +173,14 @@ export function StoreHeader({ variant = "light" }: StoreHeaderProps) {
                       setMenuOpen(false);
                       setSearchOpen(true);
                     }}
-                    className="text-left text-sm font-medium tracking-[0.14em] text-[var(--lf-ink)] uppercase"
+                    className="text-left text-sm font-medium tracking-[0.14em] text-(--lf-ink) uppercase"
                   >
                     Buscar
                   </button>
                   <Link
                     to="/login"
                     onClick={() => setMenuOpen(false)}
-                    className="text-sm font-medium tracking-[0.14em] text-[var(--lf-pink)] uppercase"
+                    className="text-sm font-medium tracking-[0.14em] text-(--lf-pink) uppercase"
                   >
                     Entrar
                   </Link>

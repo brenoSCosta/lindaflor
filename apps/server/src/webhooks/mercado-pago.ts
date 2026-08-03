@@ -3,12 +3,17 @@ import {
   handleMercadoPagoNotification,
   verifyMercadoPagoWebhookSignature,
 } from "@lindaflor/core/commerce/payments";
+import { z } from "zod";
 
-type MercadoPagoWebhookBody = {
-  type?: string;
-  action?: string;
-  data?: { id?: string | number };
-};
+const mercadoPagoWebhookBodySchema = z.object({
+  type: z.string().optional(),
+  action: z.string().optional(),
+  data: z
+    .object({
+      id: z.union([z.string(), z.number()]).optional(),
+    })
+    .optional(),
+});
 
 export async function handleMercadoPagoWebhookRequest(
   request: Request,
@@ -28,15 +33,22 @@ export async function handleMercadoPagoWebhookRequest(
       return new Response("Invalid signature", { status: 401 });
     }
 
-    let body: MercadoPagoWebhookBody;
+    let parsedBody: z.infer<typeof mercadoPagoWebhookBodySchema>;
     try {
-      body = JSON.parse(bodyText) as MercadoPagoWebhookBody;
+      const json: unknown = JSON.parse(bodyText);
+      const parsed = mercadoPagoWebhookBodySchema.safeParse(json);
+      if (!parsed.success) {
+        return new Response("Invalid JSON", { status: 400 });
+      }
+      parsedBody = parsed.data;
     } catch {
       return new Response("Invalid JSON", { status: 400 });
     }
 
-    if (body.type === "payment" && body.data?.id != null) {
-      const result = await handleMercadoPagoNotification(String(body.data.id));
+    if (parsedBody.type === "payment" && parsedBody.data?.id != null) {
+      const result = await handleMercadoPagoNotification(
+        String(parsedBody.data.id),
+      );
       return Response.json(result);
     }
   }

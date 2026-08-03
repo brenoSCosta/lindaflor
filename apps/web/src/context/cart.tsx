@@ -1,26 +1,31 @@
 import {
   createContext,
+  use,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from "react";
+import { z } from "zod";
 
 const STORAGE_KEY = "lindaflor-cart-v1";
 
-export type CartItem = {
-  variantId: string;
-  productId: string;
-  productSlug: string;
-  productName: string;
-  variantLabel: string;
-  imageUrl: string | null;
-  unitPriceCents: number;
-  quantity: number;
-  maxQuantity: number;
-};
+const cartItemSchema = z.object({
+  variantId: z.string(),
+  productId: z.string(),
+  productSlug: z.string(),
+  productName: z.string(),
+  variantLabel: z.string(),
+  imageUrl: z.string().nullable(),
+  unitPriceCents: z.number(),
+  quantity: z.number(),
+  maxQuantity: z.number(),
+});
+
+const cartItemsSchema = z.array(cartItemSchema);
+
+export type CartItem = z.infer<typeof cartItemSchema>;
 
 type CartContextValue = {
   items: CartItem[];
@@ -44,8 +49,8 @@ function readStoredCart(): CartItem[] {
     if (!raw) {
       return [];
     }
-    const parsed = JSON.parse(raw) as CartItem[];
-    return Array.isArray(parsed) ? parsed : [];
+    const parsed = cartItemsSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : [];
   } catch {
     return [];
   }
@@ -90,18 +95,23 @@ export function CartProvider({ children }: { children: ReactNode }) {
   );
 
   const updateQuantity = useCallback((variantId: string, quantity: number) => {
-    setItems((current) =>
-      current
-        .map((entry) =>
-          entry.variantId === variantId
-            ? {
-                ...entry,
-                quantity: Math.min(Math.max(quantity, 1), entry.maxQuantity),
-              }
-            : entry,
-        )
-        .filter((entry) => entry.quantity > 0),
-    );
+    setItems((current) => {
+      const next: CartItem[] = [];
+
+      for (const entry of current) {
+        if (entry.variantId !== variantId) {
+          next.push(entry);
+          continue;
+        }
+
+        const nextQuantity = Math.min(Math.max(quantity, 1), entry.maxQuantity);
+        if (nextQuantity > 0) {
+          next.push({ ...entry, quantity: nextQuantity });
+        }
+      }
+
+      return next;
+    });
   }, []);
 
   const removeItem = useCallback((variantId: string) => {
@@ -132,13 +142,11 @@ export function CartProvider({ children }: { children: ReactNode }) {
     };
   }, [addItem, clearCart, items, removeItem, updateQuantity]);
 
-  return (
-    <CartContext.Provider value={value}>{children}</CartContext.Provider>
-  );
+  return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }
 
 export function useCart() {
-  const context = useContext(CartContext);
+  const context = use(CartContext);
   if (!context) {
     throw new Error("useCart must be used within CartProvider");
   }

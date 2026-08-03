@@ -1,19 +1,20 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useMutation } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
-import { toast } from "sonner";
-
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   productCategories,
   productCategoryLabels,
   productSizeLabels,
   productSizes,
 } from "@lindaflor/shared/enums/commerce";
+import { useMutation } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
+import { useNavigate } from "@tanstack/react-router";
+import { useState, type ComponentProps } from "react";
+import { toast } from "sonner";
+import { z } from "zod";
+
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { orpc } from "@/lib/orpc";
 
 export const Route = createFileRoute("/admin/produtos/novo")({
@@ -21,13 +22,18 @@ export const Route = createFileRoute("/admin/produtos/novo")({
 });
 
 type VariantDraft = {
+  id: string;
   sku: string;
   size: (typeof productSizes)[number];
   color: string;
   quantity: number;
 };
 
+const productCategorySchema = z.enum(productCategories);
+const productSizeSchema = z.enum(productSizes);
+
 const defaultVariant = (): VariantDraft => ({
+  id: crypto.randomUUID(),
   sku: "",
   size: "m",
   color: "",
@@ -79,10 +85,14 @@ function AdminNewProductPage() {
     );
   }
 
-  function handleSubmit(event: React.FormEvent) {
+  const handleSubmit: NonNullable<ComponentProps<"form">["onSubmit"]> = (
+    event,
+  ) => {
     event.preventDefault();
 
-    const price = Math.round(Number(form.price_in_cents.replace(",", ".")) * 100);
+    const price = Math.round(
+      Number(form.price_in_cents.replace(",", ".")) * 100,
+    );
     if (!price || price <= 0) {
       toast.error("Informe um preço válido");
       return;
@@ -102,7 +112,7 @@ function AdminNewProductPage() {
         quantity: variant.quantity,
       })),
     });
-  }
+  };
 
   return (
     <div className="space-y-6">
@@ -184,13 +194,19 @@ function AdminNewProductPage() {
             <Label htmlFor="category">Categoria</Label>
             <select
               id="category"
+              aria-label="Categoria"
               value={form.category}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  category: event.target.value as (typeof productCategories)[number],
-                }))
-              }
+              onChange={(event) => {
+                const parsed = productCategorySchema.safeParse(
+                  event.target.value,
+                );
+                if (parsed.success) {
+                  setForm((current) => ({
+                    ...current,
+                    category: parsed.data,
+                  }));
+                }
+              }}
               className="h-10 w-full rounded-md border px-3 text-sm"
             >
               {productCategories.map((category) => (
@@ -233,14 +249,16 @@ function AdminNewProductPage() {
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => setVariants((current) => [...current, defaultVariant()])}
+              onClick={() =>
+                setVariants((current) => [...current, defaultVariant()])
+              }
             >
               Adicionar variante
             </Button>
           </div>
           {variants.map((variant, index) => (
             <div
-              key={index}
+              key={variant.id}
               className="grid gap-3 rounded-lg border p-4 md:grid-cols-4"
             >
               <Input
@@ -252,12 +270,16 @@ function AdminNewProductPage() {
                 }
               />
               <select
+                aria-label={`Tamanho da variante ${index + 1}`}
                 value={variant.size}
-                onChange={(event) =>
-                  updateVariant(index, {
-                    size: event.target.value as (typeof productSizes)[number],
-                  })
-                }
+                onChange={(event) => {
+                  const parsed = productSizeSchema.safeParse(
+                    event.target.value,
+                  );
+                  if (parsed.success) {
+                    updateVariant(index, { size: parsed.data });
+                  }
+                }}
                 className="h-10 rounded-md border px-3 text-sm"
               >
                 {productSizes.map((size) => (
@@ -291,7 +313,7 @@ function AdminNewProductPage() {
         </div>
 
         <Button type="submit" disabled={createMutation.isPending}>
-          {createMutation.isPending ? "Salvando..." : "Criar produto"}
+          {createMutation.isPending ? "Salvando…" : "Criar produto"}
         </Button>
       </form>
     </div>

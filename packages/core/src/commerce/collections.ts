@@ -1,10 +1,9 @@
+import { listStoreProducts } from "@lindaflor/core/commerce/products";
 import { db } from "@lindaflor/db";
 import { collections } from "@lindaflor/db/schema/commerce";
 import { schema } from "@lindaflor/shared/schemas/commerce";
 import { ORPCError } from "@orpc/server";
 import { and, asc, eq } from "drizzle-orm";
-
-import { listStoreProducts } from "@lindaflor/core/commerce/products";
 
 export async function listStoreCollections() {
   const rows = await db
@@ -23,10 +22,7 @@ export async function listStoreCollections() {
       const { data } = await listStoreProducts({
         collection_slug: collection.slug,
       });
-      return {
-        ...collection,
-        product_count: data.length,
-      };
+      return Object.assign({}, collection, { product_count: data.length });
     }),
   );
 

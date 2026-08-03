@@ -1,3 +1,5 @@
+import { resolveImageUrl } from "@lindaflor/core/commerce/product-images";
+import { getDefaultWarehouseId } from "@lindaflor/core/commerce/warehouses";
 import { db } from "@lindaflor/db";
 import {
   inventory,
@@ -7,8 +9,6 @@ import {
 } from "@lindaflor/db/schema/commerce";
 import type { ProductDetail } from "@lindaflor/shared/schemas/commerce";
 import { schema } from "@lindaflor/shared/schemas/commerce";
-import { resolveImageUrl } from "@lindaflor/core/commerce/product-images";
-import { getDefaultWarehouseId } from "@lindaflor/core/commerce/warehouses";
 import { ORPCError } from "@orpc/server";
 import { and, asc, desc, eq, ilike, inArray, sql } from "drizzle-orm";
 import type { z } from "zod";
@@ -128,19 +128,20 @@ export async function listStoreProducts(input: ListProductsInput | undefined) {
   const data = schema.store.listProducts.output.shape.data.parse(
     (
       await Promise.all(
-        productRows.map(async (product) => ({
-          id: product.id,
-          name: product.name,
-          slug: product.slug,
-          description: product.description,
-          price_in_cents: product.price_in_cents,
-          category: product.category,
-          featured: product.featured,
-          image_url: imageByProductId.get(product.id)
-            ? await resolveImageUrl(imageByProductId.get(product.id)!)
-            : null,
-          available_total: availabilityByProductId.get(product.id) ?? 0,
-        })),
+        productRows.map(async (product) => {
+          const imageKey = imageByProductId.get(product.id);
+          return {
+            id: product.id,
+            name: product.name,
+            slug: product.slug,
+            description: product.description,
+            price_in_cents: product.price_in_cents,
+            category: product.category,
+            featured: product.featured,
+            image_url: imageKey ? await resolveImageUrl(imageKey) : null,
+            available_total: availabilityByProductId.get(product.id) ?? 0,
+          };
+        }),
       )
     ).filter(
       (product) =>
@@ -151,7 +152,9 @@ export async function listStoreProducts(input: ListProductsInput | undefined) {
   return { data };
 }
 
-export async function getStoreProductBySlug(slug: string): Promise<ProductDetail> {
+export async function getStoreProductBySlug(
+  slug: string,
+): Promise<ProductDetail> {
   const [product] = await db
     .select()
     .from(products)
@@ -191,8 +194,13 @@ export async function getStoreProductBySlug(slug: string): Promise<ProductDetail
       .orderBy(asc(product_variants.size), asc(product_variants.color)),
     product.collection_id
       ? db.query.collections.findFirst({
-          where: (table, { eq: eqFn }) =>
-            eqFn(table.id, product.collection_id!),
+          where: (table, { eq: eqFn }) => {
+            const collectionId = product.collection_id;
+            if (!collectionId) {
+              return sql`false`;
+            }
+            return eqFn(table.id, collectionId);
+          },
           columns: { id: true, name: true, slug: true },
         })
       : Promise.resolve(null),
@@ -208,10 +216,10 @@ export async function getStoreProductBySlug(slug: string): Promise<ProductDetail
     : null;
 
   const resolvedImages = await Promise.all(
-    images.map(async (image) => ({
-      ...image,
-      url: await resolveImageUrl(image.url),
-    })),
+    images.map(async (image) => {
+      const url = await resolveImageUrl(image.url);
+      return Object.assign({}, image, { url });
+    }),
   );
 
   return schema.store.getProduct.output.parse({
@@ -239,16 +247,16 @@ export async function listAdminProducts() {
   const productIds = productRows.map((product) => product.id);
 
   const [availabilityByProductId, variantCounts] = await Promise.all([
-      getProductAvailabilityByProductId(productIds),
-      db
-        .select({
-          product_id: product_variants.product_id,
-          variant_count: sql<number>`count(*)::int`,
-        })
-        .from(product_variants)
-        .where(inArray(product_variants.product_id, productIds))
-        .groupBy(product_variants.product_id),
-    ]);
+    getProductAvailabilityByProductId(productIds),
+    db
+      .select({
+        product_id: product_variants.product_id,
+        variant_count: sql<number>`count(*)::int`,
+      })
+      .from(product_variants)
+      .where(inArray(product_variants.product_id, productIds))
+      .groupBy(product_variants.product_id),
+  ]);
 
   const variantCountByProductId = new Map(
     variantCounts.map((row) => [row.product_id, row.variant_count] as const),
@@ -288,9 +296,9 @@ export async function createProduct(input: CreateProductInput) {
     });
   }
 
-  const product = await db.transaction(async (tx) => {
-    const warehouseId = await getDefaultWarehouseId();
+  const warehouseId = await getDefaultWarehouseId();
 
+  const product = await db.transaction(async (tx) => {
     const [created] = await tx
       .insert(products)
       .values({
@@ -309,30 +317,32 @@ export async function createProduct(input: CreateProductInput) {
       });
     }
 
-    for (const variant of input.variants) {
-      const [createdVariant] = await tx
-        .insert(product_variants)
-        .values({
-          product_id: created.id,
-          sku: variant.sku,
-          size: variant.size,
-          color: variant.color,
-          price_in_cents: variant.price_in_cents ?? null,
-        })
-        .returning();
+    await Promise.all(
+      input.variants.map(async (variant) => {
+        const [createdVariant] = await tx
+          .insert(product_variants)
+          .values({
+            product_id: created.id,
+            sku: variant.sku,
+            size: variant.size,
+            color: variant.color,
+            price_in_cents: variant.price_in_cents ?? null,
+          })
+          .returning();
 
-      if (!createdVariant) {
-        throw new ORPCError("INTERNAL_SERVER_ERROR", {
-          message: "Falha ao criar variante",
+        if (!createdVariant) {
+          throw new ORPCError("INTERNAL_SERVER_ERROR", {
+            message: "Falha ao criar variante",
+          });
+        }
+
+        await tx.insert(inventory).values({
+          variant_id: createdVariant.id,
+          warehouse_id: warehouseId,
+          quantity: variant.quantity,
         });
-      }
-
-      await tx.insert(inventory).values({
-        variant_id: createdVariant.id,
-        warehouse_id: warehouseId,
-        quantity: variant.quantity,
-      });
-    }
+      }),
+    );
 
     return created;
   });

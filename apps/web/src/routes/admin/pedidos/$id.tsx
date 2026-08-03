@@ -1,12 +1,12 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
-
-import { Button } from "@/components/ui/button";
 import {
   orderStatusLabels,
   type orderStatuses,
 } from "@lindaflor/shared/enums/commerce";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { toast } from "sonner";
+
+import { Button } from "@/components/ui/button";
 import { formatCurrency } from "@/lib/format";
 import { orpc } from "@/lib/orpc";
 
@@ -47,7 +47,7 @@ function AdminOrderDetailPage() {
   );
 
   if (orderQuery.isLoading) {
-    return <p>Carregando pedido...</p>;
+    return <p>Carregando pedido…</p>;
   }
 
   if (orderQuery.isError || !orderQuery.data) {
@@ -76,9 +76,7 @@ function AdminOrderDetailPage() {
               variant={status === "cancelled" ? "outline" : "default"}
               size="sm"
               disabled={updateMutation.isPending}
-              onClick={() =>
-                updateMutation.mutate({ id: order.id, status })
-              }
+              onClick={() => updateMutation.mutate({ id: order.id, status })}
             >
               {orderStatusLabels[status]}
             </Button>
@@ -135,8 +133,8 @@ function AdminOrderDetailPage() {
             {order.shipping_address.street}, {order.shipping_address.number}
           </p>
           <p>
-            {order.shipping_address.neighborhood} — {order.shipping_address.city}
-            /{order.shipping_address.state}
+            {order.shipping_address.neighborhood} —{" "}
+            {order.shipping_address.city}/{order.shipping_address.state}
           </p>
           <p>CEP {order.shipping_address.zip_code}</p>
         </div>
