@@ -5,21 +5,7 @@ import {
   type MongoAbility,
 } from "@casl/ability";
 import type { OrgRoles, Roles } from "@lindaflor/shared/lib/roles";
-import type { ConcessionOutput } from "@lindaflor/shared/schemas/concession";
-import type { CurriculumOutput } from "@lindaflor/shared/schemas/curriculum";
-import type { InstallationOutput } from "@lindaflor/shared/schemas/installation";
-import type { LabOilAnalysisOutput } from "@lindaflor/shared/schemas/lab-oil-analysis";
-import type { MeasurementEquipmentOutput } from "@lindaflor/shared/schemas/measurement-equipment";
-import type { TankCalibrationOutput } from "@lindaflor/shared/schemas/tankage/calibrations";
-import type { TankDayBulletinOutput } from "@lindaflor/shared/schemas/tankage/day-bulletins";
-import type { TankageOutput } from "@lindaflor/shared/schemas/tankage/tankages";
-import type { TankOutput } from "@lindaflor/shared/schemas/tankage/tanks";
-import type { TankTransferOutput } from "@lindaflor/shared/schemas/tankage/transfers";
 import type { TodoOutput } from "@lindaflor/shared/schemas/todo";
-import type {
-  TrainingCourseOutput,
-  TrainingEnrollmentOutput,
-} from "@lindaflor/shared/schemas/training";
 
 type CrudActions = "create" | "read" | "update" | "delete" | "manage";
 
@@ -68,27 +54,6 @@ export type SubjectMap = {
   // `id` + `email` required; everything else optional so better-auth's UserWithRole (looser nullability) also fits.
   User: AbilitySubject<AbilityUser, "id" | "email">;
   Organization: AbilityOrganization;
-  Concessions: ConcessionOutput;
-  Installations: InstallationOutput;
-  MeasurementEquipments: MeasurementEquipmentOutput;
-  LabOilAnalyses: LabOilAnalysisOutput;
-  Tanks: TankOutput;
-  TankCalibrations: TankCalibrationOutput;
-  Tankages: AbilitySubject<
-    TankageOutput,
-    "organization_id" | "bulletin_status"
-  >;
-  TankTransfers: AbilitySubject<
-    TankTransferOutput,
-    "organization_id" | "bulletin_status"
-  >;
-  TankDayBulletins: AbilitySubject<
-    TankDayBulletinOutput,
-    "organization_id" | "status"
-  >;
-  Curriculum: CurriculumOutput;
-  Training: TrainingCourseOutput;
-  TrainingEnrollment: TrainingEnrollmentOutput;
   Product: { id: string };
   Inventory: { variant_id: string };
   Order: { id: string };
@@ -101,21 +66,6 @@ export type ActionsBySubject = {
   Member: CrudActions;
   User: CrudActions | "ban" | "impersonate";
   Organization: Extract<CrudActions, "read" | "update">;
-  Concessions: CrudActions;
-  Installations: CrudActions;
-  MeasurementEquipments: CrudActions;
-  LabOilAnalyses: CrudActions;
-  Tanks: CrudActions;
-  TankCalibrations: CrudActions;
-  Tankages: CrudActions | "retreat";
-  TankTransfers: CrudActions | "retreat";
-  TankDayBulletins:
-    | Extract<CrudActions, "read" | "manage" | "delete">
-    | "approve"
-    | "reopen";
-  Curriculum: CrudActions;
-  Training: CrudActions | "progress" | "certificate";
-  TrainingEnrollment: CrudActions;
   Product: CrudActions;
   Inventory: CrudActions;
   Order: CrudActions;

@@ -24,10 +24,8 @@ import {
   adminRBAC,
   memberOrganization,
   moderatorRBAC,
-  operatorOrganization,
   organizationAC,
   ownerOrganization,
-  supervisorOrganization,
   userRBAC,
 } from "@lindaflor/shared/lib/permissions";
 import {
@@ -58,8 +56,6 @@ const adminPluginRoles = {
 
 const organizationPluginRoles = {
   member: memberOrganization,
-  operator: operatorOrganization,
-  supervisor: supervisorOrganization,
   admin: adminOrganization,
   owner: ownerOrganization,
 } satisfies Record<OrgRoles, unknown>;
@@ -262,9 +258,7 @@ export const auth = betterAuth({
           const rolePriority = {
             owner: 0,
             admin: 1,
-            supervisor: 2,
-            operator: 3,
-            member: 4,
+            member: 2,
           } as const satisfies Record<OrgRoles, number>;
 
           const sorted = memberRows.toSorted(

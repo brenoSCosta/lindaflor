@@ -35,7 +35,11 @@ export const env = createEnv({
       })
       .optional(),
     MAIL_ENABLED: z.coerce.boolean().default(false),
-    MAIL_FROM: z.string().min(1).default("Linda Flor <noreply@lindaflor.local>"),
+    MAIL_FROM: z
+      .string()
+      .min(1)
+      .default("Linda Flor <noreply@lindaflor.local>"),
+    SEED_COUNT: z.coerce.number().int().positive().default(5000).optional(),
     GOOGLE_CLIENT_ID: z
       .string()
       .endsWith(".apps.googleusercontent.com")
@@ -51,9 +55,18 @@ export const env = createEnv({
     MERCADO_PAGO_ACCESS_TOKEN: z.string().min(1).optional(),
     MERCADO_PAGO_WEBHOOK_SECRET: z.string().min(1).optional(),
     STORE_COUPON_CODE: z.string().min(1).optional(),
-    STORE_COUPON_DISCOUNT_PERCENT: z.coerce.number().int().min(1).max(100).default(10),
+    STORE_COUPON_DISCOUNT_PERCENT: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .default(10),
     ORDER_RESERVATION_HOURS: z.coerce.number().int().positive().default(24),
-    INVENTORY_LOW_STOCK_THRESHOLD: z.coerce.number().int().nonnegative().default(5),
+    INVENTORY_LOW_STOCK_THRESHOLD: z.coerce
+      .number()
+      .int()
+      .nonnegative()
+      .default(5),
     YOUTUBE_API_KEY: z.string().min(1).optional(),
     PS_URL: z.url().default("http://localhost:8080"),
   },

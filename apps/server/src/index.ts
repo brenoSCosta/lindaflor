@@ -3,6 +3,7 @@ import { createContext } from "@lindaflor/api/context";
 import { getClientIp } from "@lindaflor/api/lib/client-ip";
 import { appRouter } from "@lindaflor/api/routers";
 import { auth } from "@lindaflor/auth";
+import { releaseExpiredReservations } from "@lindaflor/core/commerce/orders";
 import { runMigrations } from "@lindaflor/db/migrate";
 import { env } from "@lindaflor/env/server";
 import { ensureBucket } from "@lindaflor/s3";
@@ -30,18 +31,15 @@ import {
   type AppRouterProcedurePath,
   type BodyLimitOptions,
 } from "@/lib/body-limit";
+import { buildSitemapXml } from "@/sitemap";
 import {
   handleDevPaymentConfirm,
   handleMercadoPagoWebhookRequest,
 } from "@/webhooks/mercado-pago";
-import { buildSitemapXml } from "@/sitemap";
-import { releaseExpiredReservations } from "@lindaflor/core/commerce/orders";
 
 const BODY_LIMIT_CONFIG: BodyLimitOptions<AppRouterProcedurePath> = {
   defaultMaxBodySize: 1024 * 1024,
   overrides: {
-    "curriculum.v1.submit": 10 * 1024 * 1024,
-    "training.v1.lectures.pdf.download": 10 * 1024 * 1024,
     "user.v1.avatar.update": 3 * 1024 * 1024,
     "organization.v1.logo.update": 3 * 1024 * 1024,
     "commerce.admin.uploadProductImage": 5 * 1024 * 1024,
@@ -187,9 +185,12 @@ const program = Effect.gen(function* () {
     yield* Effect.log(`Released ${released} expired order reservations`);
   }
 
-  setInterval(() => {
-    void releaseExpiredReservations(env.ORDER_RESERVATION_HOURS);
-  }, 60 * 60 * 1000);
+  setInterval(
+    () => {
+      void releaseExpiredReservations(env.ORDER_RESERVATION_HOURS);
+    },
+    60 * 60 * 1000,
+  );
 
   app.listen(env.SERVER_PORT);
 });

@@ -4,8 +4,6 @@ import {
   adminRBAC,
   memberOrganization,
   moderatorRBAC,
-  operatorOrganization,
-  supervisorOrganization,
   organizationAC,
   ownerOrganization,
   userRBAC,
@@ -41,8 +39,6 @@ export const authClient = createAuthClient({
       ac: organizationAC,
       roles: {
         member: memberOrganization,
-        operator: operatorOrganization,
-        supervisor: supervisorOrganization,
         admin: adminOrganization,
         owner: ownerOrganization,
       },

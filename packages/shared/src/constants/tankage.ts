@@ -1,1 +1,0 @@
-export const MAX_TANKAGE_MEASUREMENTS_PER_DAY = 24;

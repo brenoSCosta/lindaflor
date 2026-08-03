@@ -1,40 +1,15 @@
 import { createAccessControl } from "better-auth/plugins/access";
 import {
-  defaultStatements as defaultStatementRBAC,
   adminAc as adminAcRBAC,
+  defaultStatements as defaultStatementRBAC,
   userAc as userAcRBAC,
 } from "better-auth/plugins/admin/access";
 import {
-  defaultStatements,
   adminAc,
+  defaultStatements,
   memberAc,
   ownerAc,
 } from "better-auth/plugins/organization/access";
-
-const tankageStatements = {
-  concessions: ["create", "read", "update"],
-  installations: ["create", "read", "update"],
-  tankages: ["create", "read", "update"],
-  tanks: ["create", "read", "update", "delete"],
-} as const;
-
-const operatorTankageStatements = {
-  concessions: ["create", "read", "update"],
-  installations: ["create", "read", "update"],
-  tankages: ["create", "read", "update"],
-  tanks: ["read"],
-} as const;
-
-const memberTankStatements = {
-  tanks: ["read"],
-} as const;
-
-const supervisorTankageStatements = {
-  concessions: ["read"],
-  installations: ["read"],
-  tankages: ["read"],
-  tanks: ["read"],
-} as const;
 
 /**
  * make sure to use `as const` so typescript can infer the type correctly
@@ -45,7 +20,6 @@ const statementRBAC = {
 
 const statementOrganization = {
   ...defaultStatements,
-  ...tankageStatements,
 } as const;
 
 export const organizationAC = createAccessControl(statementOrganization);
@@ -66,27 +40,14 @@ export const userRBAC = adminAC.newRole({
 
 export const memberOrganization = organizationAC.newRole({
   ...memberAc.statements,
-  ...memberTankStatements,
 });
 
 export const adminOrganization = organizationAC.newRole({
   ...adminAc.statements,
-  ...tankageStatements,
 });
 
 export const ownerOrganization = organizationAC.newRole({
   ...ownerAc.statements,
-  ...tankageStatements,
-});
-
-export const operatorOrganization = organizationAC.newRole({
-  ...memberAc.statements,
-  ...operatorTankageStatements,
-});
-
-export const supervisorOrganization = organizationAC.newRole({
-  ...memberAc.statements,
-  ...supervisorTankageStatements,
 });
 
 type NonEmptyArray<T> = [T, ...T[]];

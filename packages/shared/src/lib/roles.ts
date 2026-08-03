@@ -13,13 +13,7 @@ export const parseRoles = (raw: string | null | undefined): readonly Roles[] =>
     .map((r) => r.trim())
     .filter((r): r is Roles => r !== "" && isRole(r));
 
-export const ORGANIZATION_ROLES = [
-  "owner",
-  "admin",
-  "supervisor",
-  "operator",
-  "member",
-] as const;
+export const ORGANIZATION_ROLES = ["owner", "admin", "member"] as const;
 export type OrgRoles = (typeof ORGANIZATION_ROLES)[number];
 
 const orgRoleSet = new Set<string>(ORGANIZATION_ROLES);

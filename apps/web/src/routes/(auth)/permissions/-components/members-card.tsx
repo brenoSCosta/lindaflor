@@ -298,7 +298,6 @@ function RemoveMemberButton({
 const ROLE_OPTIONS: ReadonlyArray<{ value: OrgRoles; label: string }> = [
   { value: "owner", label: "Proprietário" },
   { value: "admin", label: "Administrador" },
-  { value: "operator", label: "Operador" },
   { value: "member", label: "Membro" },
 ];
 

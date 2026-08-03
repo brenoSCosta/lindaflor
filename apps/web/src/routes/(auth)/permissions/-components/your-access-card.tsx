@@ -38,11 +38,6 @@ const ALL_ACTIONS = [
   "manage",
   "ban",
   "impersonate",
-  "progress",
-  "certificate",
-  "approve",
-  "reopen",
-  "retreat",
 ] as const satisfies readonly AllPossibleActions[];
 
 // `Record<AllPossibleActions, string>` errors if an action from ActionsBySubject
@@ -55,28 +50,11 @@ const ACTION_LABELS: Record<AllPossibleActions, string> = {
   manage: "Gerenciar",
   ban: "Banir",
   impersonate: "Atuar como",
-  progress: "Progresso",
-  certificate: "Certificado",
-  approve: "Aprovar",
-  reopen: "Reabrir",
-  retreat: "Retratar",
 };
 
 const BASE_RESOURCES = [
   // { name: "Todo" as const, label: "Tarefas" },
   { name: "Member" as const, label: "Membros" },
-  { name: "Concessions" as const, label: "Concessões" },
-  { name: "Installations" as const, label: "Instalações" },
-  { name: "MeasurementEquipments" as const, label: "Trenas" },
-  { name: "LabOilAnalyses" as const, label: "Análises de laboratório" },
-  { name: "Tanks" as const, label: "Tanques" },
-  { name: "TankCalibrations" as const, label: "Arqueações" },
-  { name: "Tankages" as const, label: "Tancagens" },
-  { name: "TankTransfers" as const, label: "Transferências" },
-  { name: "TankDayBulletins" as const, label: "Boletins diários" },
-  { name: "Curriculum" as const, label: "Currículo" },
-  { name: "Training" as const, label: "Cursos de treinamento" },
-  { name: "TrainingEnrollment" as const, label: "Inscrições em treinamentos" },
 ];
 const ADMIN_RESOURCE = { name: "User" as const, label: "Usuários (admin)" };
 
@@ -129,12 +107,6 @@ export function YourAccessCard() {
           {orgRole === "owner" && <Badge>Proprietário da org</Badge>}
           {orgRole === "admin" && (
             <Badge variant="secondary">Admin da org</Badge>
-          )}
-          {orgRole === "operator" && (
-            <Badge variant="secondary">Operador</Badge>
-          )}
-          {orgRole === "supervisor" && (
-            <Badge variant="secondary">Supervisor</Badge>
           )}
           {orgRole === "member" && <Badge variant="outline">Membro</Badge>}
           {!isAdmin && !orgRole && (

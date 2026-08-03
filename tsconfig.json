@@ -1,3 +1,11 @@
 {
-  "extends": "@lindaflor/config/tsconfig.base.json"
+  // The root tsconfig is only used by editors for the workspace-wide TS language
+  // service (the default project for loose files outside any sub-project). It
+  // intentionally compiles *no* files so the TS server never pulls the entire
+  // monorepo into a single program. Each app/package has its own tsconfig with
+  // a focused `include`; the editor drives off those when you open a file in
+  // that folder. This keeps tsserver memory bounded and prevents the
+  // "approaching memory limit" warnings.
+  "files": [],
+  "references": []
 }
