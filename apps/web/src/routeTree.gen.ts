@@ -33,34 +33,17 @@ import { Route as PedidoIdRouteImport } from './routes/pedido/$id'
 import { Route as ExemplosEditorialRouteImport } from './routes/exemplos/editorial'
 import { Route as ExemplosBossaNovaRouteImport } from './routes/exemplos/bossa-nova'
 import { Route as ExemplosBodoniRouteImport } from './routes/exemplos/bodoni'
-import { Route as CurriculumSubmitRouteImport } from './routes/curriculum/submit'
 import { Route as ContaPedidosRouteImport } from './routes/conta/pedidos'
 import { Route as ColecoesSlugRouteImport } from './routes/colecoes/$slug'
-import { Route as authCurriculumRouteRouteImport } from './routes/(auth)/curriculum/route'
 import { Route as AdminProdutosIndexRouteImport } from './routes/admin/produtos/index'
 import { Route as AdminPedidosIndexRouteImport } from './routes/admin/pedidos/index'
 import { Route as AdminEstoqueIndexRouteImport } from './routes/admin/estoque/index'
-import { Route as authTrainingIndexRouteImport } from './routes/(auth)/training/index'
-import { Route as authTankagesIndexRouteImport } from './routes/(auth)/tankages/index'
 import { Route as authSettingsIndexRouteImport } from './routes/(auth)/settings/index'
 import { Route as authPermissionsIndexRouteImport } from './routes/(auth)/permissions/index'
 import { Route as authDashboardIndexRouteImport } from './routes/(auth)/dashboard/index'
-import { Route as authCurriculumIndexRouteImport } from './routes/(auth)/curriculum/index'
-import { Route as authCadastrosIndexRouteImport } from './routes/(auth)/cadastros/index'
-import { Route as authArqueacaoIndexRouteImport } from './routes/(auth)/arqueacao/index'
 import { Route as AdminProdutosNovoRouteImport } from './routes/admin/produtos/novo'
 import { Route as AdminProdutosIdRouteImport } from './routes/admin/produtos/$id'
 import { Route as AdminPedidosIdRouteImport } from './routes/admin/pedidos/$id'
-import { Route as authTrainingManageRouteImport } from './routes/(auth)/training/manage'
-import { Route as authCurriculumIdRouteImport } from './routes/(auth)/curriculum/$id'
-import { Route as authTankagesTankIdIndexRouteImport } from './routes/(auth)/tankages/$tankId/index'
-import { Route as authTrainingCoursesNewRouteImport } from './routes/(auth)/training/courses/new'
-import { Route as authTrainingCoursesIdRouteImport } from './routes/(auth)/training/courses/$id'
-import { Route as authTankagesTankIdAnalisesLaboratorioRouteImport } from './routes/(auth)/tankages/$tankId/analises-laboratorio'
-import { Route as authTankagesTankIdDateRouteImport } from './routes/(auth)/tankages/$tankId/$date'
-import { Route as authTrainingCoursesIdIndexRouteImport } from './routes/(auth)/training/courses/$id/index'
-import { Route as authTrainingCoursesIdManageRouteImport } from './routes/(auth)/training/courses/$id/manage'
-import { Route as authTrainingCoursesIdCertificateRouteImport } from './routes/(auth)/training/courses/$id/certificate'
 
 const VerifyEmailRoute = VerifyEmailRouteImport.update({
   id: '/verify-email',
@@ -181,11 +164,6 @@ const ExemplosBodoniRoute = ExemplosBodoniRouteImport.update({
   path: '/exemplos/bodoni',
   getParentRoute: () => rootRouteImport,
 } as any)
-const CurriculumSubmitRoute = CurriculumSubmitRouteImport.update({
-  id: '/curriculum/submit',
-  path: '/curriculum/submit',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ContaPedidosRoute = ContaPedidosRouteImport.update({
   id: '/conta/pedidos',
   path: '/conta/pedidos',
@@ -195,11 +173,6 @@ const ColecoesSlugRoute = ColecoesSlugRouteImport.update({
   id: '/colecoes/$slug',
   path: '/colecoes/$slug',
   getParentRoute: () => rootRouteImport,
-} as any)
-const authCurriculumRouteRoute = authCurriculumRouteRouteImport.update({
-  id: '/curriculum',
-  path: '/curriculum',
-  getParentRoute: () => authRouteRoute,
 } as any)
 const AdminProdutosIndexRoute = AdminProdutosIndexRouteImport.update({
   id: '/produtos/',
@@ -216,16 +189,6 @@ const AdminEstoqueIndexRoute = AdminEstoqueIndexRouteImport.update({
   path: '/estoque/',
   getParentRoute: () => AdminRouteRoute,
 } as any)
-const authTrainingIndexRoute = authTrainingIndexRouteImport.update({
-  id: '/training/',
-  path: '/training/',
-  getParentRoute: () => authRouteRoute,
-} as any)
-const authTankagesIndexRoute = authTankagesIndexRouteImport.update({
-  id: '/tankages/',
-  path: '/tankages/',
-  getParentRoute: () => authRouteRoute,
-} as any)
 const authSettingsIndexRoute = authSettingsIndexRouteImport.update({
   id: '/settings/',
   path: '/settings/',
@@ -239,21 +202,6 @@ const authPermissionsIndexRoute = authPermissionsIndexRouteImport.update({
 const authDashboardIndexRoute = authDashboardIndexRouteImport.update({
   id: '/dashboard/',
   path: '/dashboard/',
-  getParentRoute: () => authRouteRoute,
-} as any)
-const authCurriculumIndexRoute = authCurriculumIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => authCurriculumRouteRoute,
-} as any)
-const authCadastrosIndexRoute = authCadastrosIndexRouteImport.update({
-  id: '/cadastros/',
-  path: '/cadastros/',
-  getParentRoute: () => authRouteRoute,
-} as any)
-const authArqueacaoIndexRoute = authArqueacaoIndexRouteImport.update({
-  id: '/arqueacao/',
-  path: '/arqueacao/',
   getParentRoute: () => authRouteRoute,
 } as any)
 const AdminProdutosNovoRoute = AdminProdutosNovoRouteImport.update({
@@ -271,60 +219,6 @@ const AdminPedidosIdRoute = AdminPedidosIdRouteImport.update({
   path: '/pedidos/$id',
   getParentRoute: () => AdminRouteRoute,
 } as any)
-const authTrainingManageRoute = authTrainingManageRouteImport.update({
-  id: '/training/manage',
-  path: '/training/manage',
-  getParentRoute: () => authRouteRoute,
-} as any)
-const authCurriculumIdRoute = authCurriculumIdRouteImport.update({
-  id: '/$id',
-  path: '/$id',
-  getParentRoute: () => authCurriculumRouteRoute,
-} as any)
-const authTankagesTankIdIndexRoute = authTankagesTankIdIndexRouteImport.update({
-  id: '/tankages/$tankId/',
-  path: '/tankages/$tankId/',
-  getParentRoute: () => authRouteRoute,
-} as any)
-const authTrainingCoursesNewRoute = authTrainingCoursesNewRouteImport.update({
-  id: '/training/courses/new',
-  path: '/training/courses/new',
-  getParentRoute: () => authRouteRoute,
-} as any)
-const authTrainingCoursesIdRoute = authTrainingCoursesIdRouteImport.update({
-  id: '/training/courses/$id',
-  path: '/training/courses/$id',
-  getParentRoute: () => authRouteRoute,
-} as any)
-const authTankagesTankIdAnalisesLaboratorioRoute =
-  authTankagesTankIdAnalisesLaboratorioRouteImport.update({
-    id: '/tankages/$tankId/analises-laboratorio',
-    path: '/tankages/$tankId/analises-laboratorio',
-    getParentRoute: () => authRouteRoute,
-  } as any)
-const authTankagesTankIdDateRoute = authTankagesTankIdDateRouteImport.update({
-  id: '/tankages/$tankId/$date',
-  path: '/tankages/$tankId/$date',
-  getParentRoute: () => authRouteRoute,
-} as any)
-const authTrainingCoursesIdIndexRoute =
-  authTrainingCoursesIdIndexRouteImport.update({
-    id: '/',
-    path: '/',
-    getParentRoute: () => authTrainingCoursesIdRoute,
-  } as any)
-const authTrainingCoursesIdManageRoute =
-  authTrainingCoursesIdManageRouteImport.update({
-    id: '/manage',
-    path: '/manage',
-    getParentRoute: () => authTrainingCoursesIdRoute,
-  } as any)
-const authTrainingCoursesIdCertificateRoute =
-  authTrainingCoursesIdCertificateRouteImport.update({
-    id: '/certificate',
-    path: '/certificate',
-    getParentRoute: () => authTrainingCoursesIdRoute,
-  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -341,10 +235,8 @@ export interface FileRoutesByFullPath {
   '/trocas-devolucoes': typeof TrocasDevolucoesRoute
   '/two-factor': typeof TwoFactorRoute
   '/verify-email': typeof VerifyEmailRoute
-  '/curriculum': typeof authCurriculumRouteRouteWithChildren
   '/colecoes/$slug': typeof ColecoesSlugRoute
   '/conta/pedidos': typeof ContaPedidosRoute
-  '/curriculum/submit': typeof CurriculumSubmitRoute
   '/exemplos/bodoni': typeof ExemplosBodoniRoute
   '/exemplos/bossa-nova': typeof ExemplosBossaNovaRoute
   '/exemplos/editorial': typeof ExemplosEditorialRoute
@@ -354,30 +246,15 @@ export interface FileRoutesByFullPath {
   '/colecoes/': typeof ColecoesIndexRoute
   '/exemplos/': typeof ExemplosIndexRoute
   '/produtos/': typeof ProdutosIndexRoute
-  '/curriculum/$id': typeof authCurriculumIdRoute
-  '/training/manage': typeof authTrainingManageRoute
   '/admin/pedidos/$id': typeof AdminPedidosIdRoute
   '/admin/produtos/$id': typeof AdminProdutosIdRoute
   '/admin/produtos/novo': typeof AdminProdutosNovoRoute
-  '/arqueacao/': typeof authArqueacaoIndexRoute
-  '/cadastros/': typeof authCadastrosIndexRoute
-  '/curriculum/': typeof authCurriculumIndexRoute
   '/dashboard/': typeof authDashboardIndexRoute
   '/permissions/': typeof authPermissionsIndexRoute
   '/settings/': typeof authSettingsIndexRoute
-  '/tankages/': typeof authTankagesIndexRoute
-  '/training/': typeof authTrainingIndexRoute
   '/admin/estoque/': typeof AdminEstoqueIndexRoute
   '/admin/pedidos/': typeof AdminPedidosIndexRoute
   '/admin/produtos/': typeof AdminProdutosIndexRoute
-  '/tankages/$tankId/$date': typeof authTankagesTankIdDateRoute
-  '/tankages/$tankId/analises-laboratorio': typeof authTankagesTankIdAnalisesLaboratorioRoute
-  '/training/courses/$id': typeof authTrainingCoursesIdRouteWithChildren
-  '/training/courses/new': typeof authTrainingCoursesNewRoute
-  '/tankages/$tankId/': typeof authTankagesTankIdIndexRoute
-  '/training/courses/$id/certificate': typeof authTrainingCoursesIdCertificateRoute
-  '/training/courses/$id/manage': typeof authTrainingCoursesIdManageRoute
-  '/training/courses/$id/': typeof authTrainingCoursesIdIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -395,7 +272,6 @@ export interface FileRoutesByTo {
   '/verify-email': typeof VerifyEmailRoute
   '/colecoes/$slug': typeof ColecoesSlugRoute
   '/conta/pedidos': typeof ContaPedidosRoute
-  '/curriculum/submit': typeof CurriculumSubmitRoute
   '/exemplos/bodoni': typeof ExemplosBodoniRoute
   '/exemplos/bossa-nova': typeof ExemplosBossaNovaRoute
   '/exemplos/editorial': typeof ExemplosEditorialRoute
@@ -405,29 +281,15 @@ export interface FileRoutesByTo {
   '/colecoes': typeof ColecoesIndexRoute
   '/exemplos': typeof ExemplosIndexRoute
   '/produtos': typeof ProdutosIndexRoute
-  '/curriculum/$id': typeof authCurriculumIdRoute
-  '/training/manage': typeof authTrainingManageRoute
   '/admin/pedidos/$id': typeof AdminPedidosIdRoute
   '/admin/produtos/$id': typeof AdminProdutosIdRoute
   '/admin/produtos/novo': typeof AdminProdutosNovoRoute
-  '/arqueacao': typeof authArqueacaoIndexRoute
-  '/cadastros': typeof authCadastrosIndexRoute
-  '/curriculum': typeof authCurriculumIndexRoute
   '/dashboard': typeof authDashboardIndexRoute
   '/permissions': typeof authPermissionsIndexRoute
   '/settings': typeof authSettingsIndexRoute
-  '/tankages': typeof authTankagesIndexRoute
-  '/training': typeof authTrainingIndexRoute
   '/admin/estoque': typeof AdminEstoqueIndexRoute
   '/admin/pedidos': typeof AdminPedidosIndexRoute
   '/admin/produtos': typeof AdminProdutosIndexRoute
-  '/tankages/$tankId/$date': typeof authTankagesTankIdDateRoute
-  '/tankages/$tankId/analises-laboratorio': typeof authTankagesTankIdAnalisesLaboratorioRoute
-  '/training/courses/new': typeof authTrainingCoursesNewRoute
-  '/tankages/$tankId': typeof authTankagesTankIdIndexRoute
-  '/training/courses/$id/certificate': typeof authTrainingCoursesIdCertificateRoute
-  '/training/courses/$id/manage': typeof authTrainingCoursesIdManageRoute
-  '/training/courses/$id': typeof authTrainingCoursesIdIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -446,10 +308,8 @@ export interface FileRoutesById {
   '/trocas-devolucoes': typeof TrocasDevolucoesRoute
   '/two-factor': typeof TwoFactorRoute
   '/verify-email': typeof VerifyEmailRoute
-  '/(auth)/curriculum': typeof authCurriculumRouteRouteWithChildren
   '/colecoes/$slug': typeof ColecoesSlugRoute
   '/conta/pedidos': typeof ContaPedidosRoute
-  '/curriculum/submit': typeof CurriculumSubmitRoute
   '/exemplos/bodoni': typeof ExemplosBodoniRoute
   '/exemplos/bossa-nova': typeof ExemplosBossaNovaRoute
   '/exemplos/editorial': typeof ExemplosEditorialRoute
@@ -459,30 +319,15 @@ export interface FileRoutesById {
   '/colecoes/': typeof ColecoesIndexRoute
   '/exemplos/': typeof ExemplosIndexRoute
   '/produtos/': typeof ProdutosIndexRoute
-  '/(auth)/curriculum/$id': typeof authCurriculumIdRoute
-  '/(auth)/training/manage': typeof authTrainingManageRoute
   '/admin/pedidos/$id': typeof AdminPedidosIdRoute
   '/admin/produtos/$id': typeof AdminProdutosIdRoute
   '/admin/produtos/novo': typeof AdminProdutosNovoRoute
-  '/(auth)/arqueacao/': typeof authArqueacaoIndexRoute
-  '/(auth)/cadastros/': typeof authCadastrosIndexRoute
-  '/(auth)/curriculum/': typeof authCurriculumIndexRoute
   '/(auth)/dashboard/': typeof authDashboardIndexRoute
   '/(auth)/permissions/': typeof authPermissionsIndexRoute
   '/(auth)/settings/': typeof authSettingsIndexRoute
-  '/(auth)/tankages/': typeof authTankagesIndexRoute
-  '/(auth)/training/': typeof authTrainingIndexRoute
   '/admin/estoque/': typeof AdminEstoqueIndexRoute
   '/admin/pedidos/': typeof AdminPedidosIndexRoute
   '/admin/produtos/': typeof AdminProdutosIndexRoute
-  '/(auth)/tankages/$tankId/$date': typeof authTankagesTankIdDateRoute
-  '/(auth)/tankages/$tankId/analises-laboratorio': typeof authTankagesTankIdAnalisesLaboratorioRoute
-  '/(auth)/training/courses/$id': typeof authTrainingCoursesIdRouteWithChildren
-  '/(auth)/training/courses/new': typeof authTrainingCoursesNewRoute
-  '/(auth)/tankages/$tankId/': typeof authTankagesTankIdIndexRoute
-  '/(auth)/training/courses/$id/certificate': typeof authTrainingCoursesIdCertificateRoute
-  '/(auth)/training/courses/$id/manage': typeof authTrainingCoursesIdManageRoute
-  '/(auth)/training/courses/$id/': typeof authTrainingCoursesIdIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -501,10 +346,8 @@ export interface FileRouteTypes {
     | '/trocas-devolucoes'
     | '/two-factor'
     | '/verify-email'
-    | '/curriculum'
     | '/colecoes/$slug'
     | '/conta/pedidos'
-    | '/curriculum/submit'
     | '/exemplos/bodoni'
     | '/exemplos/bossa-nova'
     | '/exemplos/editorial'
@@ -514,30 +357,15 @@ export interface FileRouteTypes {
     | '/colecoes/'
     | '/exemplos/'
     | '/produtos/'
-    | '/curriculum/$id'
-    | '/training/manage'
     | '/admin/pedidos/$id'
     | '/admin/produtos/$id'
     | '/admin/produtos/novo'
-    | '/arqueacao/'
-    | '/cadastros/'
-    | '/curriculum/'
     | '/dashboard/'
     | '/permissions/'
     | '/settings/'
-    | '/tankages/'
-    | '/training/'
     | '/admin/estoque/'
     | '/admin/pedidos/'
     | '/admin/produtos/'
-    | '/tankages/$tankId/$date'
-    | '/tankages/$tankId/analises-laboratorio'
-    | '/training/courses/$id'
-    | '/training/courses/new'
-    | '/tankages/$tankId/'
-    | '/training/courses/$id/certificate'
-    | '/training/courses/$id/manage'
-    | '/training/courses/$id/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -555,7 +383,6 @@ export interface FileRouteTypes {
     | '/verify-email'
     | '/colecoes/$slug'
     | '/conta/pedidos'
-    | '/curriculum/submit'
     | '/exemplos/bodoni'
     | '/exemplos/bossa-nova'
     | '/exemplos/editorial'
@@ -565,29 +392,15 @@ export interface FileRouteTypes {
     | '/colecoes'
     | '/exemplos'
     | '/produtos'
-    | '/curriculum/$id'
-    | '/training/manage'
     | '/admin/pedidos/$id'
     | '/admin/produtos/$id'
     | '/admin/produtos/novo'
-    | '/arqueacao'
-    | '/cadastros'
-    | '/curriculum'
     | '/dashboard'
     | '/permissions'
     | '/settings'
-    | '/tankages'
-    | '/training'
     | '/admin/estoque'
     | '/admin/pedidos'
     | '/admin/produtos'
-    | '/tankages/$tankId/$date'
-    | '/tankages/$tankId/analises-laboratorio'
-    | '/training/courses/new'
-    | '/tankages/$tankId'
-    | '/training/courses/$id/certificate'
-    | '/training/courses/$id/manage'
-    | '/training/courses/$id'
   id:
     | '__root__'
     | '/'
@@ -605,10 +418,8 @@ export interface FileRouteTypes {
     | '/trocas-devolucoes'
     | '/two-factor'
     | '/verify-email'
-    | '/(auth)/curriculum'
     | '/colecoes/$slug'
     | '/conta/pedidos'
-    | '/curriculum/submit'
     | '/exemplos/bodoni'
     | '/exemplos/bossa-nova'
     | '/exemplos/editorial'
@@ -618,30 +429,15 @@ export interface FileRouteTypes {
     | '/colecoes/'
     | '/exemplos/'
     | '/produtos/'
-    | '/(auth)/curriculum/$id'
-    | '/(auth)/training/manage'
     | '/admin/pedidos/$id'
     | '/admin/produtos/$id'
     | '/admin/produtos/novo'
-    | '/(auth)/arqueacao/'
-    | '/(auth)/cadastros/'
-    | '/(auth)/curriculum/'
     | '/(auth)/dashboard/'
     | '/(auth)/permissions/'
     | '/(auth)/settings/'
-    | '/(auth)/tankages/'
-    | '/(auth)/training/'
     | '/admin/estoque/'
     | '/admin/pedidos/'
     | '/admin/produtos/'
-    | '/(auth)/tankages/$tankId/$date'
-    | '/(auth)/tankages/$tankId/analises-laboratorio'
-    | '/(auth)/training/courses/$id'
-    | '/(auth)/training/courses/new'
-    | '/(auth)/tankages/$tankId/'
-    | '/(auth)/training/courses/$id/certificate'
-    | '/(auth)/training/courses/$id/manage'
-    | '/(auth)/training/courses/$id/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -662,7 +458,6 @@ export interface RootRouteChildren {
   VerifyEmailRoute: typeof VerifyEmailRoute
   ColecoesSlugRoute: typeof ColecoesSlugRoute
   ContaPedidosRoute: typeof ContaPedidosRoute
-  CurriculumSubmitRoute: typeof CurriculumSubmitRoute
   ExemplosBodoniRoute: typeof ExemplosBodoniRoute
   ExemplosBossaNovaRoute: typeof ExemplosBossaNovaRoute
   ExemplosEditorialRoute: typeof ExemplosEditorialRoute
@@ -843,13 +638,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ExemplosBodoniRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/curriculum/submit': {
-      id: '/curriculum/submit'
-      path: '/curriculum/submit'
-      fullPath: '/curriculum/submit'
-      preLoaderRoute: typeof CurriculumSubmitRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/conta/pedidos': {
       id: '/conta/pedidos'
       path: '/conta/pedidos'
@@ -863,13 +651,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/colecoes/$slug'
       preLoaderRoute: typeof ColecoesSlugRouteImport
       parentRoute: typeof rootRouteImport
-    }
-    '/(auth)/curriculum': {
-      id: '/(auth)/curriculum'
-      path: '/curriculum'
-      fullPath: '/curriculum'
-      preLoaderRoute: typeof authCurriculumRouteRouteImport
-      parentRoute: typeof authRouteRoute
     }
     '/admin/produtos/': {
       id: '/admin/produtos/'
@@ -892,20 +673,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminEstoqueIndexRouteImport
       parentRoute: typeof AdminRouteRoute
     }
-    '/(auth)/training/': {
-      id: '/(auth)/training/'
-      path: '/training'
-      fullPath: '/training/'
-      preLoaderRoute: typeof authTrainingIndexRouteImport
-      parentRoute: typeof authRouteRoute
-    }
-    '/(auth)/tankages/': {
-      id: '/(auth)/tankages/'
-      path: '/tankages'
-      fullPath: '/tankages/'
-      preLoaderRoute: typeof authTankagesIndexRouteImport
-      parentRoute: typeof authRouteRoute
-    }
     '/(auth)/settings/': {
       id: '/(auth)/settings/'
       path: '/settings'
@@ -925,27 +692,6 @@ declare module '@tanstack/react-router' {
       path: '/dashboard'
       fullPath: '/dashboard/'
       preLoaderRoute: typeof authDashboardIndexRouteImport
-      parentRoute: typeof authRouteRoute
-    }
-    '/(auth)/curriculum/': {
-      id: '/(auth)/curriculum/'
-      path: '/'
-      fullPath: '/curriculum/'
-      preLoaderRoute: typeof authCurriculumIndexRouteImport
-      parentRoute: typeof authCurriculumRouteRoute
-    }
-    '/(auth)/cadastros/': {
-      id: '/(auth)/cadastros/'
-      path: '/cadastros'
-      fullPath: '/cadastros/'
-      preLoaderRoute: typeof authCadastrosIndexRouteImport
-      parentRoute: typeof authRouteRoute
-    }
-    '/(auth)/arqueacao/': {
-      id: '/(auth)/arqueacao/'
-      path: '/arqueacao'
-      fullPath: '/arqueacao/'
-      preLoaderRoute: typeof authArqueacaoIndexRouteImport
       parentRoute: typeof authRouteRoute
     }
     '/admin/produtos/novo': {
@@ -969,142 +715,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminPedidosIdRouteImport
       parentRoute: typeof AdminRouteRoute
     }
-    '/(auth)/training/manage': {
-      id: '/(auth)/training/manage'
-      path: '/training/manage'
-      fullPath: '/training/manage'
-      preLoaderRoute: typeof authTrainingManageRouteImport
-      parentRoute: typeof authRouteRoute
-    }
-    '/(auth)/curriculum/$id': {
-      id: '/(auth)/curriculum/$id'
-      path: '/$id'
-      fullPath: '/curriculum/$id'
-      preLoaderRoute: typeof authCurriculumIdRouteImport
-      parentRoute: typeof authCurriculumRouteRoute
-    }
-    '/(auth)/tankages/$tankId/': {
-      id: '/(auth)/tankages/$tankId/'
-      path: '/tankages/$tankId'
-      fullPath: '/tankages/$tankId/'
-      preLoaderRoute: typeof authTankagesTankIdIndexRouteImport
-      parentRoute: typeof authRouteRoute
-    }
-    '/(auth)/training/courses/new': {
-      id: '/(auth)/training/courses/new'
-      path: '/training/courses/new'
-      fullPath: '/training/courses/new'
-      preLoaderRoute: typeof authTrainingCoursesNewRouteImport
-      parentRoute: typeof authRouteRoute
-    }
-    '/(auth)/training/courses/$id': {
-      id: '/(auth)/training/courses/$id'
-      path: '/training/courses/$id'
-      fullPath: '/training/courses/$id'
-      preLoaderRoute: typeof authTrainingCoursesIdRouteImport
-      parentRoute: typeof authRouteRoute
-    }
-    '/(auth)/tankages/$tankId/analises-laboratorio': {
-      id: '/(auth)/tankages/$tankId/analises-laboratorio'
-      path: '/tankages/$tankId/analises-laboratorio'
-      fullPath: '/tankages/$tankId/analises-laboratorio'
-      preLoaderRoute: typeof authTankagesTankIdAnalisesLaboratorioRouteImport
-      parentRoute: typeof authRouteRoute
-    }
-    '/(auth)/tankages/$tankId/$date': {
-      id: '/(auth)/tankages/$tankId/$date'
-      path: '/tankages/$tankId/$date'
-      fullPath: '/tankages/$tankId/$date'
-      preLoaderRoute: typeof authTankagesTankIdDateRouteImport
-      parentRoute: typeof authRouteRoute
-    }
-    '/(auth)/training/courses/$id/': {
-      id: '/(auth)/training/courses/$id/'
-      path: '/'
-      fullPath: '/training/courses/$id/'
-      preLoaderRoute: typeof authTrainingCoursesIdIndexRouteImport
-      parentRoute: typeof authTrainingCoursesIdRoute
-    }
-    '/(auth)/training/courses/$id/manage': {
-      id: '/(auth)/training/courses/$id/manage'
-      path: '/manage'
-      fullPath: '/training/courses/$id/manage'
-      preLoaderRoute: typeof authTrainingCoursesIdManageRouteImport
-      parentRoute: typeof authTrainingCoursesIdRoute
-    }
-    '/(auth)/training/courses/$id/certificate': {
-      id: '/(auth)/training/courses/$id/certificate'
-      path: '/certificate'
-      fullPath: '/training/courses/$id/certificate'
-      preLoaderRoute: typeof authTrainingCoursesIdCertificateRouteImport
-      parentRoute: typeof authTrainingCoursesIdRoute
-    }
   }
 }
 
-interface authCurriculumRouteRouteChildren {
-  authCurriculumIdRoute: typeof authCurriculumIdRoute
-  authCurriculumIndexRoute: typeof authCurriculumIndexRoute
-}
-
-const authCurriculumRouteRouteChildren: authCurriculumRouteRouteChildren = {
-  authCurriculumIdRoute: authCurriculumIdRoute,
-  authCurriculumIndexRoute: authCurriculumIndexRoute,
-}
-
-const authCurriculumRouteRouteWithChildren =
-  authCurriculumRouteRoute._addFileChildren(authCurriculumRouteRouteChildren)
-
-interface authTrainingCoursesIdRouteChildren {
-  authTrainingCoursesIdCertificateRoute: typeof authTrainingCoursesIdCertificateRoute
-  authTrainingCoursesIdManageRoute: typeof authTrainingCoursesIdManageRoute
-  authTrainingCoursesIdIndexRoute: typeof authTrainingCoursesIdIndexRoute
-}
-
-const authTrainingCoursesIdRouteChildren: authTrainingCoursesIdRouteChildren = {
-  authTrainingCoursesIdCertificateRoute: authTrainingCoursesIdCertificateRoute,
-  authTrainingCoursesIdManageRoute: authTrainingCoursesIdManageRoute,
-  authTrainingCoursesIdIndexRoute: authTrainingCoursesIdIndexRoute,
-}
-
-const authTrainingCoursesIdRouteWithChildren =
-  authTrainingCoursesIdRoute._addFileChildren(
-    authTrainingCoursesIdRouteChildren,
-  )
-
 interface authRouteRouteChildren {
-  authCurriculumRouteRoute: typeof authCurriculumRouteRouteWithChildren
-  authTrainingManageRoute: typeof authTrainingManageRoute
-  authArqueacaoIndexRoute: typeof authArqueacaoIndexRoute
-  authCadastrosIndexRoute: typeof authCadastrosIndexRoute
   authDashboardIndexRoute: typeof authDashboardIndexRoute
   authPermissionsIndexRoute: typeof authPermissionsIndexRoute
   authSettingsIndexRoute: typeof authSettingsIndexRoute
-  authTankagesIndexRoute: typeof authTankagesIndexRoute
-  authTrainingIndexRoute: typeof authTrainingIndexRoute
-  authTankagesTankIdDateRoute: typeof authTankagesTankIdDateRoute
-  authTankagesTankIdAnalisesLaboratorioRoute: typeof authTankagesTankIdAnalisesLaboratorioRoute
-  authTrainingCoursesIdRoute: typeof authTrainingCoursesIdRouteWithChildren
-  authTrainingCoursesNewRoute: typeof authTrainingCoursesNewRoute
-  authTankagesTankIdIndexRoute: typeof authTankagesTankIdIndexRoute
 }
 
 const authRouteRouteChildren: authRouteRouteChildren = {
-  authCurriculumRouteRoute: authCurriculumRouteRouteWithChildren,
-  authTrainingManageRoute: authTrainingManageRoute,
-  authArqueacaoIndexRoute: authArqueacaoIndexRoute,
-  authCadastrosIndexRoute: authCadastrosIndexRoute,
   authDashboardIndexRoute: authDashboardIndexRoute,
   authPermissionsIndexRoute: authPermissionsIndexRoute,
   authSettingsIndexRoute: authSettingsIndexRoute,
-  authTankagesIndexRoute: authTankagesIndexRoute,
-  authTrainingIndexRoute: authTrainingIndexRoute,
-  authTankagesTankIdDateRoute: authTankagesTankIdDateRoute,
-  authTankagesTankIdAnalisesLaboratorioRoute:
-    authTankagesTankIdAnalisesLaboratorioRoute,
-  authTrainingCoursesIdRoute: authTrainingCoursesIdRouteWithChildren,
-  authTrainingCoursesNewRoute: authTrainingCoursesNewRoute,
-  authTankagesTankIdIndexRoute: authTankagesTankIdIndexRoute,
 }
 
 const authRouteRouteWithChildren = authRouteRoute._addFileChildren(
@@ -1153,7 +776,6 @@ const rootRouteChildren: RootRouteChildren = {
   VerifyEmailRoute: VerifyEmailRoute,
   ColecoesSlugRoute: ColecoesSlugRoute,
   ContaPedidosRoute: ContaPedidosRoute,
-  CurriculumSubmitRoute: CurriculumSubmitRoute,
   ExemplosBodoniRoute: ExemplosBodoniRoute,
   ExemplosBossaNovaRoute: ExemplosBossaNovaRoute,
   ExemplosEditorialRoute: ExemplosEditorialRoute,
