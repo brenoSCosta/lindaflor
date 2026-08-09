@@ -22,14 +22,25 @@ function AdminOrdersPage() {
     orpc.commerce.admin.listOrders.queryOptions({ input: undefined }),
   );
 
+  const pendingCount =
+    ordersQuery.data?.data.filter((order) => order.status === "pending_payment")
+      .length ?? 0;
+
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-semibold">Pedidos</h2>
         <p className="text-stone-600">
-          Acompanhe pedidos da loja e status de pagamento.
+          Acompanhe pedidos da loja e status de pagamento. Confirme o PIX após o
+          cliente avisar no WhatsApp.
         </p>
       </div>
+
+      {pendingCount > 0 ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          {pendingCount} pedido(s) aguardando confirmação de pagamento PIX.
+        </div>
+      ) : null}
 
       {ordersQuery.isLoading ? (
         <p>Carregando…</p>
@@ -54,7 +65,14 @@ function AdminOrdersPage() {
             </TableHeader>
             <TableBody>
               {ordersQuery.data?.data.map((order) => (
-                <TableRow key={order.id}>
+                <TableRow
+                  key={order.id}
+                  className={
+                    order.status === "pending_payment"
+                      ? "bg-amber-50/60"
+                      : undefined
+                  }
+                >
                   <TableCell className="font-mono text-xs">
                     <Link
                       to="/admin/pedidos/$id"

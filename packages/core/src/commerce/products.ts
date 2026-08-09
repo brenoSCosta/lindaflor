@@ -6,6 +6,7 @@ import {
   product_images,
   product_variants,
   products,
+  warehouses,
 } from "@lindaflor/db/schema/commerce";
 import type { ProductDetail } from "@lindaflor/shared/schemas/commerce";
 import { schema } from "@lindaflor/shared/schemas/commerce";
@@ -15,7 +16,7 @@ import type { z } from "zod";
 
 type ListProductsInput = z.infer<typeof schema.store.listProducts.input>;
 
-function formatVariantLabel(size: string, color: string) {
+export function formatVariantLabel(size: string, color: string) {
   return `${size.toUpperCase()} · ${color}`;
 }
 
@@ -24,22 +25,20 @@ async function getProductAvailabilityByProductId(productIds: string[]) {
     return new Map<string, number>();
   }
 
-  const warehouseId = await getDefaultWarehouseId();
-
   const rows = await db
     .select({
       product_id: product_variants.product_id,
       available_total: sql<number>`coalesce(sum(greatest(${inventory.quantity} - ${inventory.reserved}, 0)), 0)::int`,
     })
     .from(product_variants)
-    .innerJoin(
-      inventory,
+    .innerJoin(inventory, eq(inventory.variant_id, product_variants.id))
+    .innerJoin(warehouses, eq(warehouses.id, inventory.warehouse_id))
+    .where(
       and(
-        eq(inventory.variant_id, product_variants.id),
-        eq(inventory.warehouse_id, warehouseId),
+        inArray(product_variants.product_id, productIds),
+        eq(warehouses.active, true),
       ),
     )
-    .where(inArray(product_variants.product_id, productIds))
     .groupBy(product_variants.product_id);
 
   return new Map(
@@ -165,8 +164,6 @@ export async function getStoreProductBySlug(
     throw new ORPCError("NOT_FOUND", { message: "Produto não encontrado" });
   }
 
-  const warehouseId = await getDefaultWarehouseId();
-
   const [images, variants, collection] = await Promise.all([
     db
       .select()
@@ -180,16 +177,16 @@ export async function getStoreProductBySlug(
         size: product_variants.size,
         color: product_variants.color,
         price_in_cents: product_variants.price_in_cents,
-        available: sql<number>`coalesce(greatest(${inventory.quantity} - ${inventory.reserved}, 0), 0)::int`,
+        low_stock_threshold: product_variants.low_stock_threshold,
+        available: sql<number>`coalesce((
+          SELECT sum(greatest(i.quantity - i.reserved, 0))::int
+          FROM inventory i
+          INNER JOIN warehouses w ON w.id = i.warehouse_id
+          WHERE i.variant_id = ${product_variants.id}
+            AND w.active = true
+        ), 0)::int`,
       })
       .from(product_variants)
-      .leftJoin(
-        inventory,
-        and(
-          eq(inventory.variant_id, product_variants.id),
-          eq(inventory.warehouse_id, warehouseId),
-        ),
-      )
       .where(eq(product_variants.product_id, product.id))
       .orderBy(asc(product_variants.size), asc(product_variants.color)),
     product.collection_id
@@ -392,5 +389,3 @@ export async function updateProduct(input: UpdateProductInput) {
 
   return getStoreProductBySlug(input.slug);
 }
-
-export { formatVariantLabel };

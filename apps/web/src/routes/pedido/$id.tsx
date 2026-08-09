@@ -3,7 +3,7 @@ import { orderStatusLabels } from "@lindaflor/shared/enums/commerce";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { Check, Copy } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { StoreLayout } from "@/components/store/store-layout";
@@ -15,44 +15,51 @@ export const Route = createFileRoute("/pedido/$id")({
   component: OrderPage,
 });
 
+function formatCountdown(expiresAt: Date | null | undefined) {
+  if (!expiresAt) {
+    return null;
+  }
+  const ms = expiresAt.getTime() - Date.now();
+  if (ms <= 0) {
+    return "Expirado";
+  }
+  const hours = Math.floor(ms / (1000 * 60 * 60));
+  const minutes = Math.floor((ms % (1000 * 60 * 60)) / (1000 * 60));
+  return `${hours}h ${minutes.toString().padStart(2, "0")}min`;
+}
+
 function OrderPage() {
   const { id } = Route.useParams();
   const [copied, setCopied] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
   const queryClient = useQueryClient();
 
-  const orderQuery = useQuery(
-    orpc.commerce.store.getOrder.queryOptions({ input: { id } }),
-  );
+  const orderQuery = useQuery({
+    ...orpc.commerce.store.getOrder.queryOptions({ input: { id } }),
+    refetchInterval: (query) =>
+      query.state.data?.status === "pending_payment" ? 30_000 : false,
+  });
 
-  if (orderQuery.isLoading) {
-    return (
-      <StoreLayout headerVariant="solid">
-        <div className="mx-auto max-w-3xl px-4 py-24 text-center text-(--lf-muted)">
-          Carregando pedido…
-        </div>
-      </StoreLayout>
-    );
-  }
-
-  if (orderQuery.isError || !orderQuery.data) {
-    return (
-      <StoreLayout headerVariant="solid">
-        <div className="mx-auto max-w-3xl px-4 py-24 text-center">
-          <h1 className="font-display text-4xl">Pedido não encontrado</h1>
-          <Link to="/produtos" className="mt-6 inline-block">
-            <Button className="rounded-none bg-(--lf-pink) uppercase">
-              Voltar ao catálogo
-            </Button>
-          </Link>
-        </div>
-      </StoreLayout>
-    );
-  }
+  useEffect(() => {
+    if (orderQuery.data?.status !== "pending_payment") {
+      return undefined;
+    }
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [orderQuery.data?.status]);
 
   const order = orderQuery.data;
-  const pixCode = order.payment_meta?.pix_copy_paste;
-  const pixQr = order.payment_meta?.pix_qr_base64;
+  const pixCode = order?.payment_meta?.pix_copy_paste;
+  const pixQr = order?.payment_meta?.pix_qr_base64;
+  const countdown = useMemo(() => {
+    void now;
+    return formatCountdown(
+      order?.reservation_expires_at
+        ? new Date(order.reservation_expires_at)
+        : null,
+    );
+  }, [order?.reservation_expires_at, now]);
 
   async function copyPix() {
     if (!pixCode) {
@@ -84,6 +91,31 @@ function OrderPage() {
     }
   }
 
+  if (orderQuery.isLoading) {
+    return (
+      <StoreLayout headerVariant="solid">
+        <div className="mx-auto max-w-3xl px-4 py-24 text-center text-(--lf-muted)">
+          Carregando pedido…
+        </div>
+      </StoreLayout>
+    );
+  }
+
+  if (orderQuery.isError || !order) {
+    return (
+      <StoreLayout headerVariant="solid">
+        <div className="mx-auto max-w-3xl px-4 py-24 text-center">
+          <h1 className="font-display text-4xl">Pedido não encontrado</h1>
+          <Link to="/produtos" className="mt-6 inline-block">
+            <Button className="rounded-none bg-(--lf-pink) uppercase">
+              Voltar ao catálogo
+            </Button>
+          </Link>
+        </div>
+      </StoreLayout>
+    );
+  }
+
   return (
     <StoreLayout headerVariant="solid">
       <main className="mx-auto max-w-3xl px-4 py-12 md:px-8">
@@ -99,9 +131,27 @@ function OrderPage() {
           Enviamos as instruções para {order.guest_email}
         </p>
 
-        {order.status === "pending_payment" && pixCode ? (
+        {order.status === "pending_payment" ? (
           <section className="mt-10 space-y-6 border border-(--lf-line) p-6">
             <h2 className="font-display text-2xl">Pague com PIX</h2>
+            <ol className="list-decimal space-y-2 pl-5 text-sm text-(--lf-muted)">
+              <li>Copie o código PIX ou escaneie o QR Code</li>
+              <li>
+                Pague exatamente{" "}
+                <strong className="text-(--lf-ink)">
+                  {formatCurrency(order.total_cents)}
+                </strong>
+              </li>
+              <li>Avise a loja no WhatsApp para confirmarmos o pagamento</li>
+            </ol>
+
+            {countdown ? (
+              <p className="text-sm text-(--lf-muted)">
+                Reserva de estoque expira em{" "}
+                <strong className="text-(--lf-ink)">{countdown}</strong>
+              </p>
+            ) : null}
+
             {pixQr ? (
               <img
                 src={`data:image/png;base64,${pixQr}`}
@@ -109,39 +159,46 @@ function OrderPage() {
                 className="mx-auto size-56 border bg-white p-4"
               />
             ) : null}
-            <div className="space-y-2">
-              <p className="text-sm text-(--lf-muted)">
-                Copie o código abaixo ou escaneie o QR Code:
-              </p>
-              <div className="flex gap-2">
-                <code className="flex-1 overflow-x-auto border bg-white p-3 text-xs">
-                  {pixCode}
-                </code>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="rounded-none"
-                  onClick={() => void copyPix()}
-                >
-                  {copied ? (
-                    <Check className="size-4" />
-                  ) : (
-                    <Copy className="size-4" />
-                  )}
-                </Button>
+
+            {pixCode ? (
+              <div className="space-y-2">
+                <p className="text-sm text-(--lf-muted)">PIX copia e cola:</p>
+                <div className="flex gap-2">
+                  <code className="flex-1 overflow-x-auto border bg-white p-3 text-xs">
+                    {pixCode}
+                  </code>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-none"
+                    onClick={() => void copyPix()}
+                  >
+                    {copied ? (
+                      <Check className="size-4" />
+                    ) : (
+                      <Copy className="size-4" />
+                    )}
+                  </Button>
+                </div>
               </div>
-            </div>
+            ) : (
+              <p className="text-sm text-amber-700">
+                Instruções de pagamento indisponíveis. Fale conosco no WhatsApp.
+              </p>
+            )}
+
             {order.payment_meta?.ticket_url ? (
               <a
                 href={order.payment_meta.ticket_url}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-block text-sm text-(--lf-pink) underline"
+                className="inline-flex w-full items-center justify-center bg-(--lf-pink) px-4 py-3 text-sm font-medium tracking-wide text-white uppercase"
               >
-                Precisa de ajuda? Fale conosco no WhatsApp
+                Avise no WhatsApp
               </a>
             ) : null}
-            {env.VITE_NODE_ENV === "development" ? (
+
+            {import.meta.env.DEV || env.VITE_NODE_ENV === "development" ? (
               <Button
                 type="button"
                 variant="outline"

@@ -1,3 +1,4 @@
+import { ensureStoreSettings } from "@lindaflor/core/commerce/store-settings";
 import { ensureDefaultWarehouse } from "@lindaflor/core/commerce/warehouses";
 import { db } from "@lindaflor/db";
 import {
@@ -24,6 +25,7 @@ const productSeedImages = {
 
 export async function seedCommerce() {
   const warehouseId = await ensureDefaultWarehouse();
+  await ensureStoreSettings();
 
   const [collection] = await db
     .insert(collections)

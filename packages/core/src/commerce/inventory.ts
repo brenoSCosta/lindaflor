@@ -70,14 +70,20 @@ function inventorySelect() {
       warehouse_id: warehouses.id,
       warehouse_code: warehouses.code,
       warehouse_name: warehouses.name,
-      quantity: inventory.quantity,
-      reserved: inventory.reserved,
+      quantity: sql<number>`coalesce(${inventory.quantity}, 0)::int`,
+      reserved: sql<number>`coalesce(${inventory.reserved}, 0)::int`,
       low_stock_threshold: product_variants.low_stock_threshold,
     })
-    .from(inventory)
-    .innerJoin(product_variants, eq(product_variants.id, inventory.variant_id))
+    .from(product_variants)
     .innerJoin(products, eq(products.id, product_variants.product_id))
-    .innerJoin(warehouses, eq(warehouses.id, inventory.warehouse_id));
+    .innerJoin(warehouses, eq(warehouses.active, true))
+    .leftJoin(
+      inventory,
+      and(
+        eq(inventory.variant_id, product_variants.id),
+        eq(inventory.warehouse_id, warehouses.id),
+      ),
+    );
 }
 
 export async function listInventory(input?: {
@@ -87,7 +93,7 @@ export async function listInventory(input?: {
   const filters = [eq(warehouses.active, true)];
 
   if (input?.warehouse_id) {
-    filters.push(eq(inventory.warehouse_id, input.warehouse_id));
+    filters.push(eq(warehouses.id, input.warehouse_id));
   }
 
   const rows = await inventorySelect()
@@ -197,11 +203,9 @@ async function applyInventoryChange(params: {
   created_by: string | null;
 }) {
   return db.transaction(async (tx) => {
-    const [row] = await tx
+    const [meta] = await tx
       .select({
-        variant_id: inventory.variant_id,
-        quantity: inventory.quantity,
-        reserved: inventory.reserved,
+        variant_id: product_variants.id,
         product_name: products.name,
         sku: product_variants.sku,
         size: product_variants.size,
@@ -211,13 +215,24 @@ async function applyInventoryChange(params: {
         warehouse_name: warehouses.name,
         low_stock_threshold: product_variants.low_stock_threshold,
       })
-      .from(inventory)
-      .innerJoin(
-        product_variants,
-        eq(product_variants.id, inventory.variant_id),
-      )
+      .from(product_variants)
       .innerJoin(products, eq(products.id, product_variants.product_id))
-      .innerJoin(warehouses, eq(warehouses.id, inventory.warehouse_id))
+      .innerJoin(warehouses, eq(warehouses.id, params.warehouse_id))
+      .where(eq(product_variants.id, params.variant_id))
+      .limit(1);
+
+    if (!meta) {
+      throw new ORPCError("NOT_FOUND", {
+        message: "Variante ou depósito não encontrado",
+      });
+    }
+
+    const [existing] = await tx
+      .select({
+        quantity: inventory.quantity,
+        reserved: inventory.reserved,
+      })
+      .from(inventory)
       .where(
         and(
           eq(inventory.variant_id, params.variant_id),
@@ -226,33 +241,39 @@ async function applyInventoryChange(params: {
       )
       .limit(1);
 
-    if (!row) {
-      throw new ORPCError("NOT_FOUND", {
-        message: "Estoque não encontrado para esta variante e depósito",
-      });
-    }
+    const currentQuantity = existing?.quantity ?? 0;
+    const currentReserved = existing?.reserved ?? 0;
+    const nextQuantity = currentQuantity + params.quantity_delta;
 
-    const nextQuantity = row.quantity + params.quantity_delta;
     if (nextQuantity < 0) {
       throw new ORPCError("BAD_REQUEST", {
         message: "Estoque não pode ficar negativo",
       });
     }
-    if (nextQuantity < row.reserved) {
+    if (nextQuantity < currentReserved) {
       throw new ORPCError("BAD_REQUEST", {
         message: "Estoque não pode ficar abaixo do reservado",
       });
     }
 
-    await tx
-      .update(inventory)
-      .set({ quantity: nextQuantity })
-      .where(
-        and(
-          eq(inventory.variant_id, params.variant_id),
-          eq(inventory.warehouse_id, params.warehouse_id),
-        ),
-      );
+    if (existing) {
+      await tx
+        .update(inventory)
+        .set({ quantity: nextQuantity })
+        .where(
+          and(
+            eq(inventory.variant_id, params.variant_id),
+            eq(inventory.warehouse_id, params.warehouse_id),
+          ),
+        );
+    } else {
+      await tx.insert(inventory).values({
+        variant_id: params.variant_id,
+        warehouse_id: params.warehouse_id,
+        quantity: nextQuantity,
+        reserved: 0,
+      });
+    }
 
     await tx.insert(inventory_movements).values({
       variant_id: params.variant_id,
@@ -266,8 +287,9 @@ async function applyInventoryChange(params: {
     });
 
     return mapInventoryRow({
-      ...row,
+      ...meta,
       quantity: nextQuantity,
+      reserved: currentReserved,
     });
   });
 }
@@ -666,15 +688,32 @@ export async function importInventoryCsv(
   });
 }
 
-export async function reserveFulfillmentStock(params: {
-  variant_id: string;
-  quantity: number;
-  order_id: string;
-  notes?: string;
-}) {
-  const warehouseId = await getDefaultWarehouseId();
+type InventoryExecutor = {
+  update: typeof db.update;
+  insert: typeof db.insert;
+  select: typeof db.select;
+  execute: typeof db.execute;
+};
 
-  await db
+async function resolveWarehouseId(warehouseId?: string) {
+  return warehouseId ?? (await getDefaultWarehouseId());
+}
+
+/**
+ * Atomically reserve stock when available >= quantity.
+ * Uses conditional update to prevent oversell under concurrency.
+ */
+export async function reserveFulfillmentStock(
+  params: {
+    variant_id: string;
+    quantity: number;
+    order_id: string;
+    warehouse_id: string;
+    notes?: string;
+  },
+  executor: InventoryExecutor = db,
+) {
+  const updated = await executor
     .update(inventory)
     .set({
       reserved: sql`${inventory.reserved} + ${params.quantity}`,
@@ -682,13 +721,21 @@ export async function reserveFulfillmentStock(params: {
     .where(
       and(
         eq(inventory.variant_id, params.variant_id),
-        eq(inventory.warehouse_id, warehouseId),
+        eq(inventory.warehouse_id, params.warehouse_id),
+        sql`${inventory.quantity} - ${inventory.reserved} >= ${params.quantity}`,
       ),
-    );
+    )
+    .returning({ id: inventory.id });
 
-  await db.insert(inventory_movements).values({
+  if (updated.length === 0) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: "Estoque insuficiente para reserva",
+    });
+  }
+
+  await executor.insert(inventory_movements).values({
     variant_id: params.variant_id,
-    warehouse_id: warehouseId,
+    warehouse_id: params.warehouse_id,
     type: "reserva",
     quantity: params.quantity,
     reference_type: "order",
@@ -697,15 +744,21 @@ export async function reserveFulfillmentStock(params: {
   });
 }
 
-export async function releaseFulfillmentStock(params: {
-  variant_id: string;
-  quantity: number;
-  order_id: string;
-  notes?: string;
-}) {
-  const warehouseId = await getDefaultWarehouseId();
+export async function releaseFulfillmentStock(
+  params: {
+    variant_id: string;
+    quantity: number;
+    order_id: string;
+    warehouse_id?: string | null;
+    notes?: string;
+  },
+  executor: InventoryExecutor = db,
+) {
+  const warehouseId = await resolveWarehouseId(
+    params.warehouse_id ?? undefined,
+  );
 
-  await db
+  await executor
     .update(inventory)
     .set({
       reserved: sql`GREATEST(${inventory.reserved} - ${params.quantity}, 0)`,
@@ -717,7 +770,7 @@ export async function releaseFulfillmentStock(params: {
       ),
     );
 
-  await db.insert(inventory_movements).values({
+  await executor.insert(inventory_movements).values({
     variant_id: params.variant_id,
     warehouse_id: warehouseId,
     type: "liberacao",
@@ -728,14 +781,20 @@ export async function releaseFulfillmentStock(params: {
   });
 }
 
-export async function confirmFulfillmentSale(params: {
-  variant_id: string;
-  quantity: number;
-  order_id: string;
-}) {
-  const warehouseId = await getDefaultWarehouseId();
+export async function confirmFulfillmentSale(
+  params: {
+    variant_id: string;
+    quantity: number;
+    order_id: string;
+    warehouse_id?: string | null;
+  },
+  executor: InventoryExecutor = db,
+) {
+  const warehouseId = await resolveWarehouseId(
+    params.warehouse_id ?? undefined,
+  );
 
-  await db
+  await executor
     .update(inventory)
     .set({
       quantity: sql`${inventory.quantity} - ${params.quantity}`,
@@ -748,7 +807,7 @@ export async function confirmFulfillmentSale(params: {
       ),
     );
 
-  await db.insert(inventory_movements).values({
+  await executor.insert(inventory_movements).values({
     variant_id: params.variant_id,
     warehouse_id: warehouseId,
     type: "venda",
@@ -759,25 +818,64 @@ export async function confirmFulfillmentSale(params: {
   });
 }
 
-export async function getFulfillmentAvailable(variantId: string) {
-  const warehouseId = await getDefaultWarehouseId();
+export async function getAvailableTotal(variantId: string) {
   const [row] = await db
     .select({
-      quantity: inventory.quantity,
-      reserved: inventory.reserved,
+      available: sql<number>`coalesce(sum(greatest(${inventory.quantity} - ${inventory.reserved}, 0)), 0)::int`,
     })
     .from(inventory)
+    .innerJoin(warehouses, eq(warehouses.id, inventory.warehouse_id))
     .where(
-      and(
-        eq(inventory.variant_id, variantId),
-        eq(inventory.warehouse_id, warehouseId),
-      ),
-    )
-    .limit(1);
+      and(eq(inventory.variant_id, variantId), eq(warehouses.active, true)),
+    );
 
-  if (!row) {
-    return 0;
+  return row?.available ?? 0;
+}
+
+/** @deprecated Use getAvailableTotal — aggregates across active warehouses. */
+export async function getFulfillmentAvailable(variantId: string) {
+  return getAvailableTotal(variantId);
+}
+
+export async function issueInventory(
+  input: z.infer<typeof schema.admin.issueInventory.input>,
+  createdBy: string | null,
+) {
+  if (input.quantity <= 0) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: "Quantidade de saída deve ser positiva",
+    });
   }
 
-  return Math.max(row.quantity - row.reserved, 0);
+  const warehouseId = input.warehouse_id ?? (await getDefaultWarehouseId());
+
+  const result = await applyInventoryChange({
+    variant_id: input.variant_id,
+    warehouse_id: warehouseId,
+    quantity_delta: -input.quantity,
+    type: "saida",
+    notes: input.notes ?? "Saída de estoque",
+    created_by: createdBy,
+  });
+
+  return schema.admin.issueInventory.output.parse(result);
+}
+
+export async function updateVariantLowStockThreshold(
+  input: z.infer<typeof schema.admin.updateVariantLowStockThreshold.input>,
+) {
+  const [updated] = await db
+    .update(product_variants)
+    .set({ low_stock_threshold: input.low_stock_threshold })
+    .where(eq(product_variants.id, input.variant_id))
+    .returning({
+      variant_id: product_variants.id,
+      low_stock_threshold: product_variants.low_stock_threshold,
+    });
+
+  if (!updated) {
+    throw new ORPCError("NOT_FOUND", { message: "Variante não encontrada" });
+  }
+
+  return schema.admin.updateVariantLowStockThreshold.output.parse(updated);
 }

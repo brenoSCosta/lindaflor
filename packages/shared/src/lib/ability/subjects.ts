@@ -57,6 +57,7 @@ export type SubjectMap = {
   Product: { id: string };
   Inventory: { variant_id: string };
   Order: { id: string };
+  StoreSettings: { id: string };
 };
 
 // Actions are defined per subject. Adding a new action to one subject does not
@@ -69,6 +70,7 @@ export type ActionsBySubject = {
   Product: CrudActions;
   Inventory: CrudActions;
   Order: CrudActions;
+  StoreSettings: Extract<CrudActions, "read" | "update" | "manage">;
 };
 
 // Discriminated tuple union: each (action, subject) pair must match one branch.

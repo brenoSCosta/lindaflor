@@ -89,6 +89,7 @@ const RBAC_ADMIN_CAN: readonly AbilityGrant[] = [
   { actions: "manage", subject: "Product" },
   { actions: "manage", subject: "Inventory" },
   { actions: "manage", subject: "Order" },
+  { actions: "manage", subject: "StoreSettings" },
 ];
 
 const RBAC_ADMIN_CANNOT: readonly AbilityGrant[] = [

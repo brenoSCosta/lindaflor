@@ -63,6 +63,18 @@ const orgRow = (id = "org-1"): AbilityOrganization => ({
 
 describe("defineAbilityFor", () => {
   describe("admin RBAC role", () => {
+    it("can manage store settings and inventory", () => {
+      const ability = defineAbilityFor({
+        userId: "u",
+        roles: ["admin"],
+        activeOrganizationId: null,
+        orgRole: null,
+      });
+      expect(ability.can("manage", "StoreSettings")).toBe(true);
+      expect(ability.can("manage", "Inventory")).toBe(true);
+      expect(ability.can("manage", "Order")).toBe(true);
+    });
+
     it("with no active org, cannot touch org-scoped Todos", () => {
       const ability = defineAbilityFor({
         userId: "u",

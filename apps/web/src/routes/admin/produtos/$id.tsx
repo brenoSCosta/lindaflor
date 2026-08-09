@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { formatCurrency } from "@/lib/format";
 import { orpc } from "@/lib/orpc";
+import { VariantThresholdRow } from "@/routes/admin/produtos/-components/variant-threshold-row";
 
 export const Route = createFileRoute("/admin/produtos/$id")({
   component: AdminEditProductPage,
@@ -228,6 +229,23 @@ function EditProductForm({
         {product.variant_count} variantes · {product.available_total}{" "}
         disponíveis
       </p>
+
+      {detailQuery.data?.variants.length ? (
+        <div className="space-y-3 rounded-lg border p-4">
+          <h3 className="font-medium">Limiar de estoque baixo</h3>
+          <div className="space-y-2">
+            {detailQuery.data.variants.map((variant) => (
+              <VariantThresholdRow
+                key={variant.id}
+                variantId={variant.id}
+                label={`${variant.sku} · ${variant.size.toUpperCase()} · ${variant.color}`}
+                threshold={variant.low_stock_threshold ?? 5}
+                available={variant.available}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       <Button type="submit" disabled={updateMutation.isPending}>
         {updateMutation.isPending ? "Salvando…" : "Salvar alterações"}

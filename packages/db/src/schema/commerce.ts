@@ -42,6 +42,32 @@ export const inventory_movement_type = pgEnum("inventory_movement_type", [
   "transferencia",
 ]);
 
+export const pix_key_type = pgEnum("pix_key_type", [
+  "cpf",
+  "cnpj",
+  "email",
+  "phone",
+  "random",
+]);
+
+export const store_settings = pgTable("store_settings", {
+  id: uuid("id")
+    .primaryKey()
+    .$defaultFn(() => uuidv7()),
+  pix_key: text("pix_key"),
+  pix_key_type: pix_key_type("pix_key_type"),
+  pix_merchant_name: text("pix_merchant_name"),
+  pix_merchant_city: text("pix_merchant_city"),
+  whatsapp_number: text("whatsapp_number"),
+  whatsapp_message_template: text("whatsapp_message_template"),
+  created_at: timestamp("created_at").defaultNow().notNull(),
+  updated_at: timestamp("updated_at")
+    .defaultNow()
+    .$onUpdate(() => /* @__PURE__ */ new Date())
+    .notNull(),
+});
+export type StoreSettings = typeof store_settings.$inferSelect;
+
 export const warehouses = pgTable(
   "warehouses",
   {
@@ -238,10 +264,11 @@ export const orders = pgTable(
       city: string;
       state: string;
       zip_code: string;
+      phone?: string;
     }>(),
     notes: text("notes"),
     payment_meta: jsonb("payment_meta").$type<{
-      provider?: "mercado_pago" | "manual";
+      provider?: "mercado_pago" | "static_pix" | "manual";
       external_id?: string;
       pix_copy_paste?: string;
       pix_qr_base64?: string;
@@ -273,13 +300,19 @@ export const order_items = pgTable(
     variant_id: uuid("variant_id")
       .notNull()
       .references(() => product_variants.id, { onDelete: "restrict" }),
+    warehouse_id: uuid("warehouse_id").references(() => warehouses.id, {
+      onDelete: "restrict",
+    }),
     product_name: text("product_name").notNull(),
     variant_label: text("variant_label").notNull(),
     quantity: integer("quantity").notNull(),
     unit_price_cents: integer("unit_price_cents").notNull(),
     created_at: timestamp("created_at").defaultNow().notNull(),
   },
-  (table) => [index("order_items_order_id_idx").on(table.order_id)],
+  (table) => [
+    index("order_items_order_id_idx").on(table.order_id),
+    index("order_items_warehouse_id_idx").on(table.warehouse_id),
+  ],
 );
 export type OrderItem = typeof order_items.$inferSelect;
 
@@ -351,5 +384,9 @@ export const order_items_relations = relations(order_items, ({ one }) => ({
   variant: one(product_variants, {
     fields: [order_items.variant_id],
     references: [product_variants.id],
+  }),
+  warehouse: one(warehouses, {
+    fields: [order_items.warehouse_id],
+    references: [warehouses.id],
   }),
 }));

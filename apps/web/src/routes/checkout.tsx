@@ -61,6 +61,7 @@ function CheckoutPage() {
   const [form, setForm] = useState({
     guest_email: "",
     name: "",
+    phone: "",
     street: "",
     number: "",
     complement: "",
@@ -175,6 +176,7 @@ function CheckoutPage() {
         city: form.city,
         state: form.state,
         zip_code: form.zip_code.replace(/\D/g, ""),
+        phone: form.phone.replace(/\D/g, "") || undefined,
       },
       notes: form.notes || undefined,
       coupon_code: form.coupon_code || undefined,
@@ -223,6 +225,19 @@ function CheckoutPage() {
                       updateField("name", event.target.value)
                     }
                     className={storeInputClass}
+                  />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="phone">WhatsApp (opcional)</Label>
+                  <Input
+                    id="phone"
+                    inputMode="tel"
+                    value={form.phone}
+                    onChange={(event) =>
+                      updateField("phone", event.target.value)
+                    }
+                    className={storeInputClass}
+                    placeholder="79999816511"
                   />
                 </div>
                 <div className="space-y-2 sm:col-span-2">

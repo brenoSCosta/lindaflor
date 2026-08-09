@@ -44,6 +44,7 @@ import { Route as authDashboardIndexRouteImport } from './routes/(auth)/dashboar
 import { Route as AdminProdutosNovoRouteImport } from './routes/admin/produtos/novo'
 import { Route as AdminProdutosIdRouteImport } from './routes/admin/produtos/$id'
 import { Route as AdminPedidosIdRouteImport } from './routes/admin/pedidos/$id'
+import { Route as AdminConfiguracoesLojaRouteImport } from './routes/admin/configuracoes/loja'
 
 const VerifyEmailRoute = VerifyEmailRouteImport.update({
   id: '/verify-email',
@@ -219,6 +220,11 @@ const AdminPedidosIdRoute = AdminPedidosIdRouteImport.update({
   path: '/pedidos/$id',
   getParentRoute: () => AdminRouteRoute,
 } as any)
+const AdminConfiguracoesLojaRoute = AdminConfiguracoesLojaRouteImport.update({
+  id: '/configuracoes/loja',
+  path: '/configuracoes/loja',
+  getParentRoute: () => AdminRouteRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -246,6 +252,7 @@ export interface FileRoutesByFullPath {
   '/colecoes/': typeof ColecoesIndexRoute
   '/exemplos/': typeof ExemplosIndexRoute
   '/produtos/': typeof ProdutosIndexRoute
+  '/admin/configuracoes/loja': typeof AdminConfiguracoesLojaRoute
   '/admin/pedidos/$id': typeof AdminPedidosIdRoute
   '/admin/produtos/$id': typeof AdminProdutosIdRoute
   '/admin/produtos/novo': typeof AdminProdutosNovoRoute
@@ -281,6 +288,7 @@ export interface FileRoutesByTo {
   '/colecoes': typeof ColecoesIndexRoute
   '/exemplos': typeof ExemplosIndexRoute
   '/produtos': typeof ProdutosIndexRoute
+  '/admin/configuracoes/loja': typeof AdminConfiguracoesLojaRoute
   '/admin/pedidos/$id': typeof AdminPedidosIdRoute
   '/admin/produtos/$id': typeof AdminProdutosIdRoute
   '/admin/produtos/novo': typeof AdminProdutosNovoRoute
@@ -319,6 +327,7 @@ export interface FileRoutesById {
   '/colecoes/': typeof ColecoesIndexRoute
   '/exemplos/': typeof ExemplosIndexRoute
   '/produtos/': typeof ProdutosIndexRoute
+  '/admin/configuracoes/loja': typeof AdminConfiguracoesLojaRoute
   '/admin/pedidos/$id': typeof AdminPedidosIdRoute
   '/admin/produtos/$id': typeof AdminProdutosIdRoute
   '/admin/produtos/novo': typeof AdminProdutosNovoRoute
@@ -357,6 +366,7 @@ export interface FileRouteTypes {
     | '/colecoes/'
     | '/exemplos/'
     | '/produtos/'
+    | '/admin/configuracoes/loja'
     | '/admin/pedidos/$id'
     | '/admin/produtos/$id'
     | '/admin/produtos/novo'
@@ -392,6 +402,7 @@ export interface FileRouteTypes {
     | '/colecoes'
     | '/exemplos'
     | '/produtos'
+    | '/admin/configuracoes/loja'
     | '/admin/pedidos/$id'
     | '/admin/produtos/$id'
     | '/admin/produtos/novo'
@@ -429,6 +440,7 @@ export interface FileRouteTypes {
     | '/colecoes/'
     | '/exemplos/'
     | '/produtos/'
+    | '/admin/configuracoes/loja'
     | '/admin/pedidos/$id'
     | '/admin/produtos/$id'
     | '/admin/produtos/novo'
@@ -715,6 +727,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminPedidosIdRouteImport
       parentRoute: typeof AdminRouteRoute
     }
+    '/admin/configuracoes/loja': {
+      id: '/admin/configuracoes/loja'
+      path: '/configuracoes/loja'
+      fullPath: '/admin/configuracoes/loja'
+      preLoaderRoute: typeof AdminConfiguracoesLojaRouteImport
+      parentRoute: typeof AdminRouteRoute
+    }
   }
 }
 
@@ -736,6 +755,7 @@ const authRouteRouteWithChildren = authRouteRoute._addFileChildren(
 
 interface AdminRouteRouteChildren {
   AdminIndexRoute: typeof AdminIndexRoute
+  AdminConfiguracoesLojaRoute: typeof AdminConfiguracoesLojaRoute
   AdminPedidosIdRoute: typeof AdminPedidosIdRoute
   AdminProdutosIdRoute: typeof AdminProdutosIdRoute
   AdminProdutosNovoRoute: typeof AdminProdutosNovoRoute
@@ -746,6 +766,7 @@ interface AdminRouteRouteChildren {
 
 const AdminRouteRouteChildren: AdminRouteRouteChildren = {
   AdminIndexRoute: AdminIndexRoute,
+  AdminConfiguracoesLojaRoute: AdminConfiguracoesLojaRoute,
   AdminPedidosIdRoute: AdminPedidosIdRoute,
   AdminProdutosIdRoute: AdminProdutosIdRoute,
   AdminProdutosNovoRoute: AdminProdutosNovoRoute,

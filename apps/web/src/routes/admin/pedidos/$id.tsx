@@ -26,6 +26,28 @@ const nextStatuses: Record<
   cancelled: [],
 };
 
+const brlFormatter = new Intl.NumberFormat("pt-BR", {
+  style: "currency",
+  currency: "BRL",
+});
+
+function buildCustomerWhatsAppUrl(params: {
+  phone?: string;
+  orderId: string;
+  totalCents: number;
+}) {
+  if (!params.phone) {
+    return null;
+  }
+  const digits = params.phone.replace(/\D/g, "");
+  if (!digits) {
+    return null;
+  }
+  const total = brlFormatter.format(params.totalCents / 100);
+  const message = `Olá! Recebemos seu PIX do pedido ${params.orderId.slice(0, 8)} no valor de ${total}. Vamos preparar o envio.`;
+  return `https://wa.me/${digits}?text=${encodeURIComponent(message)}`;
+}
+
 function AdminOrderDetailPage() {
   const { id } = Route.useParams();
   const queryClient = useQueryClient();
@@ -36,11 +58,15 @@ function AdminOrderDetailPage() {
 
   const updateMutation = useMutation(
     orpc.commerce.admin.updateOrderStatus.mutationOptions({
-      onSuccess: async () => {
+      onSuccess: async (_data, variables) => {
         await queryClient.invalidateQueries({
           queryKey: orpc.commerce.admin.getOrder.key({ input: { id } }),
         });
-        toast.success("Status atualizado");
+        toast.success(
+          variables.status === "paid"
+            ? "Pagamento confirmado e estoque baixado"
+            : "Status atualizado",
+        );
       },
       onError: (error) => toast.error(error.message),
     }),
@@ -56,6 +82,11 @@ function AdminOrderDetailPage() {
 
   const order = orderQuery.data;
   const actions = nextStatuses[order.status];
+  const customerWa = buildCustomerWhatsAppUrl({
+    phone: order.shipping_address?.phone,
+    orderId: order.id,
+    totalCents: order.total_cents,
+  });
 
   return (
     <div className="space-y-6">
@@ -68,8 +99,22 @@ function AdminOrderDetailPage() {
             {orderStatusLabels[order.status]}
           </h2>
           <p className="text-stone-600">{order.guest_email}</p>
+          {order.status === "pending_payment" &&
+          order.reservation_expires_at ? (
+            <p className="mt-1 text-sm text-amber-700">
+              Reserva expira em{" "}
+              {new Date(order.reservation_expires_at).toLocaleString("pt-BR")}
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
+          {customerWa ? (
+            <a href={customerWa} target="_blank" rel="noreferrer">
+              <Button variant="outline" size="sm">
+                WhatsApp cliente
+              </Button>
+            </a>
+          ) : null}
           {actions.map((status) => (
             <Button
               key={status}
@@ -78,11 +123,28 @@ function AdminOrderDetailPage() {
               disabled={updateMutation.isPending}
               onClick={() => updateMutation.mutate({ id: order.id, status })}
             >
-              {orderStatusLabels[status]}
+              {status === "paid"
+                ? "Confirmar pagamento"
+                : orderStatusLabels[status]}
             </Button>
           ))}
         </div>
       </div>
+
+      {order.payment_meta ? (
+        <div className="rounded-xl border bg-white p-4 text-sm">
+          <p>
+            <span className="text-stone-500">Provedor:</span>{" "}
+            {order.payment_meta.provider ?? "—"}
+          </p>
+          {order.payment_meta.external_id ? (
+            <p>
+              <span className="text-stone-500">ID externo:</span>{" "}
+              {order.payment_meta.external_id}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="rounded-xl border bg-white p-6">
         <h3 className="mb-4 font-medium">Itens</h3>
@@ -95,6 +157,11 @@ function AdminOrderDetailPage() {
               <div>
                 <p className="font-medium">{item.product_name}</p>
                 <p className="text-stone-500">{item.variant_label}</p>
+                {item.warehouse_name || item.warehouse_code ? (
+                  <p className="text-xs text-stone-400">
+                    Depósito: {item.warehouse_name ?? item.warehouse_code}
+                  </p>
+                ) : null}
               </div>
               <div className="text-right">
                 <p>× {item.quantity}</p>
@@ -137,6 +204,9 @@ function AdminOrderDetailPage() {
             {order.shipping_address.city}/{order.shipping_address.state}
           </p>
           <p>CEP {order.shipping_address.zip_code}</p>
+          {order.shipping_address.phone ? (
+            <p>Tel. {order.shipping_address.phone}</p>
+          ) : null}
         </div>
       ) : null}
     </div>

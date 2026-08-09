@@ -63,6 +63,11 @@ function AdminLayout() {
                 Estoque
               </Button>
             </Link>
+            <Link to="/admin/configuracoes/loja">
+              <Button variant="ghost" size="sm">
+                Configurações
+              </Button>
+            </Link>
             <Link to="/">
               <Button variant="outline" size="sm">
                 Loja

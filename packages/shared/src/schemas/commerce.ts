@@ -19,6 +19,7 @@ const productVariant = z.object({
   color: z.string(),
   price_in_cents: z.number().nullable(),
   available: z.number().int().nonnegative(),
+  low_stock_threshold: z.number().int().nonnegative().optional(),
 });
 
 const productListItem = z.object({
@@ -125,7 +126,10 @@ export const shippingAddressSchema = z.object({
   city: z.string().min(1),
   state: z.string().length(2),
   zip_code: z.string().min(8).max(9),
+  phone: z.string().min(10).max(20).optional(),
 });
+
+export const pixKeyTypes = ["cpf", "cnpj", "email", "phone", "random"] as const;
 
 const orderItemSnapshot = z.object({
   id: z.uuid(),
@@ -133,6 +137,9 @@ const orderItemSnapshot = z.object({
   variant_label: z.string(),
   quantity: z.number().int(),
   unit_price_cents: z.number().int(),
+  warehouse_id: z.uuid().nullable().optional(),
+  warehouse_code: z.string().nullable().optional(),
+  warehouse_name: z.string().nullable().optional(),
 });
 
 const storeOrder = z.object({
@@ -146,7 +153,7 @@ const storeOrder = z.object({
   shipping_address: shippingAddressSchema.nullable(),
   payment_meta: z
     .object({
-      provider: z.enum(["mercado_pago", "manual"]).optional(),
+      provider: z.enum(["mercado_pago", "static_pix", "manual"]).optional(),
       external_id: z.string().optional(),
       pix_copy_paste: z.string().optional(),
       pix_qr_base64: z.string().optional(),
@@ -155,6 +162,18 @@ const storeOrder = z.object({
     .nullable(),
   items: z.array(orderItemSnapshot),
   created_at: z.coerce.date(),
+  reservation_expires_at: z.coerce.date().nullable().optional(),
+});
+
+const storeSettings = z.object({
+  id: z.uuid(),
+  pix_key: z.string().nullable(),
+  pix_key_type: z.enum(pixKeyTypes).nullable(),
+  pix_merchant_name: z.string().nullable(),
+  pix_merchant_city: z.string().nullable(),
+  whatsapp_number: z.string().nullable(),
+  whatsapp_message_template: z.string().nullable(),
+  updated_at: z.coerce.date(),
 });
 
 const collectionListItem = z.object({
@@ -323,6 +342,15 @@ export const schema = {
       }),
       output: inventoryItem,
     },
+    issueInventory: {
+      input: z.object({
+        variant_id: z.uuid(),
+        warehouse_id: z.uuid().optional(),
+        quantity: z.number().int().positive(),
+        notes: z.string().max(500).optional(),
+      }),
+      output: inventoryItem,
+    },
     transferInventory: {
       input: z.object({
         variant_id: z.uuid(),
@@ -393,6 +421,31 @@ export const schema = {
       }),
       output: storeOrder,
     },
+    getStoreSettings: {
+      input: z.undefined(),
+      output: storeSettings,
+    },
+    updateStoreSettings: {
+      input: z.object({
+        pix_key: z.string().max(120).nullable(),
+        pix_key_type: z.enum(pixKeyTypes).nullable(),
+        pix_merchant_name: z.string().max(25).nullable(),
+        pix_merchant_city: z.string().max(15).nullable(),
+        whatsapp_number: z.string().max(20).nullable(),
+        whatsapp_message_template: z.string().max(500).nullable(),
+      }),
+      output: storeSettings,
+    },
+    updateVariantLowStockThreshold: {
+      input: z.object({
+        variant_id: z.uuid(),
+        low_stock_threshold: z.number().int().nonnegative().max(10_000),
+      }),
+      output: z.object({
+        variant_id: z.uuid(),
+        low_stock_threshold: z.number().int(),
+      }),
+    },
     uploadProductImage: {
       input: z.object({
         product_id: z.uuid(),
@@ -425,3 +478,4 @@ export type InventoryItem = z.infer<typeof inventoryItem>;
 export type OrderListItem = z.infer<typeof orderListItem>;
 export type StoreOrder = z.infer<typeof storeOrder>;
 export type ShippingAddress = z.infer<typeof shippingAddressSchema>;
+export type StoreSettingsDto = z.infer<typeof storeSettings>;

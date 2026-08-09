@@ -1,6 +1,8 @@
 import { releaseFulfillmentStock } from "@lindaflor/core/commerce/inventory";
+import { confirmOrderPayment } from "@lindaflor/core/commerce/payments";
 import { db } from "@lindaflor/db";
-import { order_items, orders } from "@lindaflor/db/schema/commerce";
+import { order_items, orders, warehouses } from "@lindaflor/db/schema/commerce";
+import { env } from "@lindaflor/env/server";
 import type { orderStatuses } from "@lindaflor/shared/enums/commerce";
 import { schema } from "@lindaflor/shared/schemas/commerce";
 import { ORPCError } from "@orpc/server";
@@ -18,6 +20,12 @@ const STATUS_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   cancelled: [],
 };
 
+function reservationExpiresAt(createdAt: Date) {
+  return new Date(
+    createdAt.getTime() + env.ORDER_RESERVATION_HOURS * 60 * 60 * 1000,
+  );
+}
+
 async function mapOrder(orderId: string) {
   const [order] = await db
     .select()
@@ -30,8 +38,18 @@ async function mapOrder(orderId: string) {
   }
 
   const items = await db
-    .select()
+    .select({
+      id: order_items.id,
+      product_name: order_items.product_name,
+      variant_label: order_items.variant_label,
+      quantity: order_items.quantity,
+      unit_price_cents: order_items.unit_price_cents,
+      warehouse_id: order_items.warehouse_id,
+      warehouse_code: warehouses.code,
+      warehouse_name: warehouses.name,
+    })
     .from(order_items)
+    .leftJoin(warehouses, eq(warehouses.id, order_items.warehouse_id))
     .where(eq(order_items.order_id, orderId));
 
   return schema.store.getOrder.output.parse({
@@ -50,8 +68,15 @@ async function mapOrder(orderId: string) {
       variant_label: item.variant_label,
       quantity: item.quantity,
       unit_price_cents: item.unit_price_cents,
+      warehouse_id: item.warehouse_id,
+      warehouse_code: item.warehouse_code,
+      warehouse_name: item.warehouse_name,
     })),
     created_at: order.created_at,
+    reservation_expires_at:
+      order.status === "pending_payment"
+        ? reservationExpiresAt(order.created_at)
+        : null,
   });
 }
 
@@ -124,6 +149,7 @@ async function releaseOrderReservations(orderId: string) {
         variant_id: item.variant_id,
         quantity: item.quantity,
         order_id: orderId,
+        warehouse_id: item.warehouse_id,
       }),
     ),
   );
@@ -145,6 +171,16 @@ export async function updateOrderStatus(input: UpdateOrderStatusInput) {
     throw new ORPCError("BAD_REQUEST", {
       message: `Não é possível mudar de ${order.status} para ${input.status}`,
     });
+  }
+
+  if (input.status === "paid" && order.status === "pending_payment") {
+    const confirmed = await confirmOrderPayment(order.id);
+    if (!confirmed) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: "Não foi possível confirmar o pagamento",
+      });
+    }
+    return mapOrder(order.id);
   }
 
   if (input.status === "cancelled" && order.status === "pending_payment") {

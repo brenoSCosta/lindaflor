@@ -1,3 +1,5 @@
+import { allocateFulfillment } from "@lindaflor/core/commerce/fulfillment";
+import { reserveFulfillmentStock } from "@lindaflor/core/commerce/inventory";
 import { createPixPayment } from "@lindaflor/core/commerce/payments";
 import { resolveImageUrl } from "@lindaflor/core/commerce/product-images";
 import { formatVariantLabel } from "@lindaflor/core/commerce/products";
@@ -5,28 +7,32 @@ import {
   calculateCouponDiscountCents,
   calculateShippingCents,
 } from "@lindaflor/core/commerce/shipping";
-import { getDefaultWarehouseId } from "@lindaflor/core/commerce/warehouses";
 import { db } from "@lindaflor/db";
 import {
-  inventory,
-  inventory_movements,
   order_items,
   orders,
   product_images,
   product_variants,
   products,
+  warehouses,
 } from "@lindaflor/db/schema/commerce";
 import { env } from "@lindaflor/env/server";
 import { sendOrderConfirmationEmail } from "@lindaflor/mail/templates/order-confirmation";
 import { PRODUCTS_IMAGES_PREFIX, deleteFile, uploadFile } from "@lindaflor/s3";
 import { schema } from "@lindaflor/shared/schemas/commerce";
 import { ORPCError } from "@orpc/server";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { Effect } from "effect";
 import { v7 as uuidv7 } from "uuid";
 import type { z } from "zod";
 
 type CreateOrderInput = z.infer<typeof schema.store.createOrder.input>;
+
+function reservationExpiresAt(createdAt: Date) {
+  return new Date(
+    createdAt.getTime() + env.ORDER_RESERVATION_HOURS * 60 * 60 * 1000,
+  );
+}
 
 async function mapOrder(orderId: string) {
   const [order] = await db
@@ -40,8 +46,18 @@ async function mapOrder(orderId: string) {
   }
 
   const items = await db
-    .select()
+    .select({
+      id: order_items.id,
+      product_name: order_items.product_name,
+      variant_label: order_items.variant_label,
+      quantity: order_items.quantity,
+      unit_price_cents: order_items.unit_price_cents,
+      warehouse_id: order_items.warehouse_id,
+      warehouse_code: warehouses.code,
+      warehouse_name: warehouses.name,
+    })
     .from(order_items)
+    .leftJoin(warehouses, eq(warehouses.id, order_items.warehouse_id))
     .where(eq(order_items.order_id, orderId));
 
   return schema.store.getOrder.output.parse({
@@ -60,8 +76,15 @@ async function mapOrder(orderId: string) {
       variant_label: item.variant_label,
       quantity: item.quantity,
       unit_price_cents: item.unit_price_cents,
+      warehouse_id: item.warehouse_id,
+      warehouse_code: item.warehouse_code,
+      warehouse_name: item.warehouse_name,
     })),
     created_at: order.created_at,
+    reservation_expires_at:
+      order.status === "pending_payment"
+        ? reservationExpiresAt(order.created_at)
+        : null,
   });
 }
 
@@ -74,9 +97,8 @@ export async function createStoreOrder(
   userId?: string | null,
 ) {
   const variantIds = input.items.map((item) => item.variant_id);
-  const warehouseId = await getDefaultWarehouseId();
 
-  const order = await db.transaction(async (tx) => {
+  const orderId = await db.transaction(async (tx) => {
     const variantRows = await tx
       .select({
         id: product_variants.id,
@@ -86,18 +108,9 @@ export async function createStoreOrder(
         price_in_cents: product_variants.price_in_cents,
         product_name: products.name,
         product_price: products.price_in_cents,
-        quantity: inventory.quantity,
-        reserved: inventory.reserved,
       })
       .from(product_variants)
       .innerJoin(products, eq(products.id, product_variants.product_id))
-      .innerJoin(
-        inventory,
-        and(
-          eq(inventory.variant_id, product_variants.id),
-          eq(inventory.warehouse_id, warehouseId),
-        ),
-      )
       .where(inArray(product_variants.id, variantIds));
 
     if (variantRows.length !== input.items.length) {
@@ -116,17 +129,11 @@ export async function createStoreOrder(
           message: "Variante não encontrada",
         });
       }
-
-      const available = variant.quantity - variant.reserved;
-      if (available < item.quantity) {
-        throw new ORPCError("BAD_REQUEST", {
-          message: `${variant.product_name} não tem estoque suficiente`,
-        });
-      }
-
       const unitPrice = variant.price_in_cents ?? variant.product_price;
       subtotal_cents += unitPrice * item.quantity;
     }
+
+    const allocation = await allocateFulfillment(input.items, tx);
 
     const discount_cents = calculateCouponDiscountCents({
       subtotal_cents,
@@ -172,8 +179,8 @@ export async function createStoreOrder(
     }
 
     await Promise.all(
-      input.items.map(async (item) => {
-        const variant = variantById.get(item.variant_id);
+      allocation.map(async (line) => {
+        const variant = variantById.get(line.variant_id);
         if (!variant) {
           throw new ORPCError("BAD_REQUEST", {
             message: "Variante não encontrada",
@@ -185,66 +192,53 @@ export async function createStoreOrder(
         await tx.insert(order_items).values({
           order_id: created.id,
           variant_id: variant.id,
+          warehouse_id: line.warehouse_id,
           product_name: variant.product_name,
           variant_label: formatVariantLabel(variant.size, variant.color),
-          quantity: item.quantity,
+          quantity: line.quantity,
           unit_price_cents: unitPrice,
         });
 
-        await tx
-          .update(inventory)
-          .set({
-            reserved: sql`${inventory.reserved} + ${item.quantity}`,
-          })
-          .where(
-            and(
-              eq(inventory.variant_id, variant.id),
-              eq(inventory.warehouse_id, warehouseId),
-            ),
-          );
-
-        await tx.insert(inventory_movements).values({
-          variant_id: variant.id,
-          warehouse_id: warehouseId,
-          type: "reserva",
-          quantity: item.quantity,
-          reference_type: "order",
-          reference_id: created.id,
-          notes: "Reserva de checkout",
-        });
+        await reserveFulfillmentStock(
+          {
+            variant_id: line.variant_id,
+            quantity: line.quantity,
+            order_id: created.id,
+            warehouse_id: line.warehouse_id,
+          },
+          tx,
+        );
       }),
     );
 
-    return created;
-  });
-
-  try {
     const payment_meta = await createPixPayment({
-      orderId: order.id,
-      total_cents: order.total_cents,
+      orderId: created.id,
+      total_cents: created.total_cents,
       guest_email: input.guest_email,
-      description: `Pedido Linda Flor ${order.id.slice(0, 8)}`,
+      description: `Pedido Linda Flor ${created.id.slice(0, 8)}`,
     });
 
-    await db
+    await tx
       .update(orders)
       .set({ payment_meta })
-      .where(eq(orders.id, order.id));
-  } catch {
-    // Order exists; payment can be retried manually via WhatsApp
-  }
+      .where(eq(orders.id, created.id));
 
-  const orderResult = await mapOrder(order.id);
+    return created.id;
+  });
 
-  try {
-    await sendOrderConfirmationEmail({
-      to: input.guest_email,
-      order: orderResult,
-      orderUrl: `${env.WEB_ORIGIN}/pedido/${order.id}`,
-    });
-  } catch {
-    // Email failure should not block checkout
-  }
+  const orderResult = await mapOrder(orderId);
+
+  await Effect.runPromise(
+    Effect.tryPromise({
+      try: () =>
+        sendOrderConfirmationEmail({
+          to: input.guest_email,
+          order: orderResult,
+          orderUrl: `${env.WEB_ORIGIN}/pedido/${orderId}`,
+        }),
+      catch: () => undefined,
+    }).pipe(Effect.orElseSucceed(() => undefined)),
+  );
 
   return orderResult;
 }

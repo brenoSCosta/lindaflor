@@ -250,6 +250,20 @@ export const contract = {
           }
         }
       },
+      "issueInventory": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "POST",
+            "path": "/admin/inventory/issue",
+            "summary": "Saída de estoque",
+            "tags": [
+              "Admin"
+            ]
+          }
+        }
+      },
       "transferInventory": {
         "~orpc": {
           "errorMap": {},
@@ -376,6 +390,48 @@ export const contract = {
           }
         }
       },
+      "getStoreSettings": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "GET",
+            "path": "/admin/store-settings",
+            "summary": "Configurações da loja",
+            "tags": [
+              "Admin"
+            ]
+          }
+        }
+      },
+      "updateStoreSettings": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "PUT",
+            "path": "/admin/store-settings",
+            "summary": "Atualizar configurações da loja",
+            "tags": [
+              "Admin"
+            ]
+          }
+        }
+      },
+      "updateVariantLowStockThreshold": {
+        "~orpc": {
+          "errorMap": {},
+          "meta": {},
+          "route": {
+            "method": "PATCH",
+            "path": "/admin/variants/{variant_id}/low-stock-threshold",
+            "summary": "Atualizar limiar de estoque baixo",
+            "tags": [
+              "Admin"
+            ]
+          }
+        }
+      },
       "uploadProductImage": {
         "~orpc": {
           "errorMap": {},
@@ -404,6 +460,85 @@ export const contract = {
           }
         }
       }
+    }
+  },
+  "user": {
+    "v1": {
+      "avatar": {
+        "update": {
+          "~orpc": {
+            "errorMap": {},
+            "meta": {},
+            "route": {
+              "method": "POST",
+              "path": "/v1/users/me/avatar",
+              "description": "Update current user avatar",
+              "summary": "v1 UpdateAvatar",
+              "tags": [
+                "User"
+              ]
+            }
+          }
+        },
+        "get": {
+          "~orpc": {
+            "errorMap": {},
+            "meta": {},
+            "route": {
+              "method": "GET",
+              "path": "/v1/users/{userId}/avatar-url",
+              "description": "Get avatar URL for a user",
+              "summary": "v1 GetAvatarUrl",
+              "tags": [
+                "User"
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "organization": {
+    "v1": {
+      "logo": {
+        "update": {
+          "~orpc": {
+            "errorMap": {},
+            "meta": {},
+            "route": {
+              "method": "POST",
+              "path": "/v1/organizations/logo",
+              "description": "Update organization logo",
+              "summary": "v1 UpdateOrganizationLogo",
+              "tags": [
+                "Organization"
+              ]
+            }
+          }
+        },
+        "get": {
+          "~orpc": {
+            "errorMap": {},
+            "meta": {},
+            "route": {
+              "method": "GET",
+              "path": "/v1/organizations/{id}/logo-url",
+              "description": "Get logo URL for an organization",
+              "summary": "v1 GetOrganizationLogoUrl",
+              "tags": [
+                "Organization"
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "privateData": {
+    "~orpc": {
+      "errorMap": {},
+      "meta": {},
+      "route": {}
     }
   }
 } as const;

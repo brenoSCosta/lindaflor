@@ -22,7 +22,13 @@ export const Route = createFileRoute("/admin/estoque/")({
   component: AdminInventoryPage,
 });
 
-type Tab = "saldo" | "entrada" | "movimentos" | "depositos" | "importar";
+type Tab =
+  | "saldo"
+  | "entrada"
+  | "saida"
+  | "movimentos"
+  | "depositos"
+  | "importar";
 
 function AdminInventoryPage() {
   const [tab, setTab] = useState<Tab>("saldo");
@@ -31,6 +37,12 @@ function AdminInventoryPage() {
   const [adjustingId, setAdjustingId] = useState<string | null>(null);
   const [delta, setDelta] = useState("0");
   const [receiveForm, setReceiveForm] = useState({
+    variant_id: "",
+    warehouse_id: "",
+    quantity: "1",
+    notes: "",
+  });
+  const [issueForm, setIssueForm] = useState({
     variant_id: "",
     warehouse_id: "",
     quantity: "1",
@@ -103,6 +115,22 @@ function AdminInventoryPage() {
     }),
   );
 
+  const issueMutation = useMutation(
+    orpc.commerce.admin.issueInventory.mutationOptions({
+      onSuccess: async () => {
+        await invalidate();
+        toast.success("Saída registrada");
+        setIssueForm({
+          variant_id: "",
+          warehouse_id: "",
+          quantity: "1",
+          notes: "",
+        });
+      },
+      onError: (error) => toast.error(error.message),
+    }),
+  );
+
   const transferMutation = useMutation(
     orpc.commerce.admin.transferInventory.mutationOptions({
       onSuccess: async () => {
@@ -155,14 +183,24 @@ function AdminInventoryPage() {
     }),
   );
 
-  const variantOptions = useMemo(
-    () => inventoryQuery.data?.data ?? [],
-    [inventoryQuery.data?.data],
-  );
+  const variantOptions = useMemo(() => {
+    const rows = inventoryQuery.data?.data ?? [];
+    const seen = new Set<string>();
+    const unique: typeof rows = [];
+    for (const row of rows) {
+      if (seen.has(row.variant_id)) {
+        continue;
+      }
+      seen.add(row.variant_id);
+      unique.push(row);
+    }
+    return unique;
+  }, [inventoryQuery.data?.data]);
 
   const tabs: { id: Tab; label: string }[] = [
     { id: "saldo", label: "Saldo" },
     { id: "entrada", label: "Entrada" },
+    { id: "saida", label: "Saída" },
     { id: "movimentos", label: "Movimentações" },
     { id: "depositos", label: "Depósitos" },
     { id: "importar", label: "Importar / Exportar" },
@@ -351,6 +389,94 @@ function AdminInventoryPage() {
           </div>
           <Button type="submit" disabled={receiveMutation.isPending}>
             Registrar entrada
+          </Button>
+        </form>
+      ) : null}
+
+      {tab === "saida" ? (
+        <form
+          className="max-w-lg space-y-4 rounded-xl border bg-white p-6"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!issueForm.variant_id) {
+              toast.error("Selecione uma variante");
+              return;
+            }
+            issueMutation.mutate({
+              variant_id: issueForm.variant_id,
+              warehouse_id: issueForm.warehouse_id || undefined,
+              quantity: Number(issueForm.quantity),
+              notes: issueForm.notes || undefined,
+            });
+          }}
+        >
+          <h3 className="font-medium">Saída de estoque</h3>
+          <p className="text-sm text-stone-500">
+            Baixa por perda, brinde, dano ou uso interno.
+          </p>
+          <div className="space-y-2">
+            <Label htmlFor="issue-variant">Variante (SKU)</Label>
+            <select
+              id="issue-variant"
+              aria-label="Variante (SKU)"
+              className="h-10 w-full rounded-md border px-3 text-sm"
+              value={issueForm.variant_id}
+              onChange={(e) =>
+                setIssueForm((f) => ({ ...f, variant_id: e.target.value }))
+              }
+              required
+            >
+              <option value="">Selecione…</option>
+              {variantOptions.map((item) => (
+                <option key={item.variant_id} value={item.variant_id}>
+                  {item.sku} · {item.product_name} (
+                  {productSizeLabels[item.size]})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="issue-warehouse">Depósito</Label>
+            <select
+              id="issue-warehouse"
+              aria-label="Depósito"
+              className="h-10 w-full rounded-md border px-3 text-sm"
+              value={issueForm.warehouse_id}
+              onChange={(e) =>
+                setIssueForm((f) => ({ ...f, warehouse_id: e.target.value }))
+              }
+            >
+              <option value="">Padrão (loja principal)</option>
+              {warehousesQuery.data?.data.map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-2">
+            <Label>Quantidade</Label>
+            <Input
+              type="number"
+              min={1}
+              value={issueForm.quantity}
+              onChange={(e) =>
+                setIssueForm((f) => ({ ...f, quantity: e.target.value }))
+              }
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Observações</Label>
+            <Textarea
+              value={issueForm.notes}
+              onChange={(e) =>
+                setIssueForm((f) => ({ ...f, notes: e.target.value }))
+              }
+              placeholder="Motivo da saída..."
+            />
+          </div>
+          <Button type="submit" disabled={issueMutation.isPending}>
+            Registrar saída
           </Button>
         </form>
       ) : null}

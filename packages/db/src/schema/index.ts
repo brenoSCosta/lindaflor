@@ -18,6 +18,7 @@ import {
   product_images,
   product_variants,
   products,
+  store_settings,
   warehouses,
 } from "@lindaflor/db/schema/commerce";
 
@@ -40,5 +41,6 @@ export const schema = {
   orders,
   order_items,
   warehouses,
+  store_settings,
 };
 export type DBSchema = typeof schema;

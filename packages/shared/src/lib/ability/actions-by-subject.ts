@@ -8,6 +8,7 @@ export const SUBJECT_ACTIONS = {
   Product: ["create", "read", "update", "delete", "manage"],
   Inventory: ["create", "read", "update", "delete", "manage"],
   Order: ["create", "read", "update", "delete", "manage"],
+  StoreSettings: ["read", "update", "manage"],
 } as const satisfies {
   [K in keyof ActionsBySubject]: ReadonlyArray<ActionsBySubject[K]>;
 };

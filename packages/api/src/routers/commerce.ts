@@ -16,11 +16,13 @@ import {
   adjustInventory,
   exportInventoryCsv,
   importInventoryCsv,
+  issueInventory,
   listInventory,
   listInventoryMovements,
   listLowStockAlerts,
   receiveInventory,
   transferInventory,
+  updateVariantLowStockThreshold,
 } from "@lindaflor/core/commerce/inventory";
 import {
   getAdminOrder,
@@ -36,6 +38,10 @@ import {
   updateProduct,
 } from "@lindaflor/core/commerce/products";
 import { calculateShippingCents } from "@lindaflor/core/commerce/shipping";
+import {
+  getStoreSettings,
+  updateStoreSettings,
+} from "@lindaflor/core/commerce/store-settings";
 import {
   createWarehouse,
   listWarehouses,
@@ -212,6 +218,19 @@ const adminRoutes = {
       receiveInventory(input, context.session.user.id),
     ),
 
+  issueInventory: authorizedProcedure
+    .use(authorize("update", "Inventory"))
+    .route({
+      method: "POST",
+      path: "/inventory/issue",
+      summary: "Saída de estoque",
+    })
+    .input(schema.admin.issueInventory.input)
+    .output(schema.admin.issueInventory.output)
+    .handler(async ({ input, context }) =>
+      issueInventory(input, context.session.user.id),
+    ),
+
   transferInventory: authorizedProcedure
     .use(authorize("update", "Inventory"))
     .route({
@@ -316,6 +335,39 @@ const adminRoutes = {
     .input(schema.admin.updateOrderStatus.input)
     .output(schema.admin.updateOrderStatus.output)
     .handler(async ({ input }) => updateOrderStatus(input)),
+
+  getStoreSettings: authorizedProcedure
+    .use(authorize("read", "StoreSettings"))
+    .route({
+      method: "GET",
+      path: "/store-settings",
+      summary: "Configurações da loja",
+    })
+    .input(schema.admin.getStoreSettings.input)
+    .output(schema.admin.getStoreSettings.output)
+    .handler(async () => getStoreSettings()),
+
+  updateStoreSettings: authorizedProcedure
+    .use(authorize("update", "StoreSettings"))
+    .route({
+      method: "PUT",
+      path: "/store-settings",
+      summary: "Atualizar configurações da loja",
+    })
+    .input(schema.admin.updateStoreSettings.input)
+    .output(schema.admin.updateStoreSettings.output)
+    .handler(async ({ input }) => updateStoreSettings(input)),
+
+  updateVariantLowStockThreshold: authorizedProcedure
+    .use(authorize("update", "Inventory"))
+    .route({
+      method: "PATCH",
+      path: "/variants/{variant_id}/low-stock-threshold",
+      summary: "Atualizar limiar de estoque baixo",
+    })
+    .input(schema.admin.updateVariantLowStockThreshold.input)
+    .output(schema.admin.updateVariantLowStockThreshold.output)
+    .handler(async ({ input }) => updateVariantLowStockThreshold(input)),
 
   uploadProductImage: authorizedProcedure
     .use(authorize("update", "Product"))
