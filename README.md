@@ -49,11 +49,14 @@ Then, start Valkey and MinIO (local Postgres is no longer required):
 bun run docker:dev
 ```
 
-Run migrations against Supabase:
+Run migrations against Supabase (only needed after schema changes):
 
 ```bash
 bun run db-migrate:run
 ```
+
+> In development, migrations do not run automatically on `bun run dev`.
+> Use the command above when you change the database schema.
 
 Then, start the development server:
 

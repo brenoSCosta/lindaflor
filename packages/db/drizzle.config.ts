@@ -1,10 +1,15 @@
 import { config } from "dotenv";
 import { defineConfig } from "drizzle-kit";
 
+import { resolveMigrationConnectionString } from "./src/migration-url";
+
 config({ path: "../../.env", quiet: true });
 
-const migrationUrl =
-  process.env.DATABASE_URL_DIRECT ?? process.env.DATABASE_URL;
+const migrationUrl = process.env.DATABASE_URL_DIRECT
+  ? process.env.DATABASE_URL_DIRECT
+  : process.env.DATABASE_URL
+    ? resolveMigrationConnectionString(process.env.DATABASE_URL)
+    : undefined;
 
 if (!migrationUrl) {
   throw new Error(

@@ -68,6 +68,7 @@ export const env = createEnv({
       .nonnegative()
       .default(5),
     YOUTUBE_API_KEY: z.string().min(1).optional(),
+    RUN_MIGRATIONS_ON_STARTUP: z.coerce.boolean().optional(),
     PS_URL: z.url().default("http://localhost:8080"),
   },
   runtimeEnv: process.env,

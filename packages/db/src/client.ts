@@ -1,5 +1,6 @@
 import { schema } from "@lindaflor/db/schema";
 import { env } from "@lindaflor/env/server";
+import { resolveMigrationConnectionString } from "@lindaflor/db/migration-url";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 
@@ -30,7 +31,9 @@ const runtimeSql = createPostgresClient(env.DATABASE_URL);
 export const db: Database = drizzle(runtimeSql, { schema });
 
 export function createMigrationDb() {
-  const connectionString = env.DATABASE_URL_DIRECT ?? env.DATABASE_URL;
+  const connectionString = env.DATABASE_URL_DIRECT
+    ? env.DATABASE_URL_DIRECT
+    : resolveMigrationConnectionString(env.DATABASE_URL);
   const sql = createPostgresClient(connectionString);
   return {
     sql,

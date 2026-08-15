@@ -165,7 +165,16 @@ export const app = new Elysia()
   .get("/", () => "OK");
 
 const program = Effect.gen(function* () {
-  yield* runMigrations();
+  const shouldRunMigrations =
+    env.RUN_MIGRATIONS_ON_STARTUP ?? env.NODE_ENV === "production";
+
+  if (shouldRunMigrations) {
+    yield* runMigrations();
+  } else {
+    yield* Effect.log(
+      "Skipping startup migrations in development (run bun run db-migrate:run when needed)",
+    );
+  }
 
   yield* connectValkey();
 
@@ -173,26 +182,42 @@ const program = Effect.gen(function* () {
     yield* ensureBucket();
   }
 
+  app.listen(env.SERVER_PORT);
+
   yield* Effect.log(
     `Server is running on ${env.SERVER_HOST}:${env.SERVER_PORT}`,
   );
 
-  const released = yield* Effect.tryPromise({
+  const releaseReservations = Effect.tryPromise({
     try: () => releaseExpiredReservations(env.ORDER_RESERVATION_HOURS),
-    catch: () => new Error("releaseExpiredReservations failed"),
-  });
-  if (released > 0) {
-    yield* Effect.log(`Released ${released} expired order reservations`);
-  }
+    catch: (error): Error =>
+      error instanceof Error
+        ? error
+        : new Error("releaseExpiredReservations failed"),
+  }).pipe(
+    Effect.matchEffect({
+      onFailure: (error) => {
+        const cause =
+          error.cause instanceof Error ? ` (${error.cause.message})` : "";
+        return Effect.logError(
+          `Failed to release expired reservations: ${error.message}${cause}`,
+        );
+      },
+      onSuccess: (released) =>
+        released > 0
+          ? Effect.log(`Released ${released} expired order reservations`)
+          : Effect.void,
+    }),
+  );
+
+  void Effect.runPromise(releaseReservations);
 
   setInterval(
     () => {
-      void releaseExpiredReservations(env.ORDER_RESERVATION_HOURS);
+      void Effect.runPromise(releaseReservations);
     },
     60 * 60 * 1000,
   );
-
-  app.listen(env.SERVER_PORT);
 });
 
 void Effect.runPromise(
