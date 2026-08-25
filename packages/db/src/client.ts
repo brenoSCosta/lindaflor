@@ -1,6 +1,6 @@
+import { resolveMigrationConnectionString } from "@lindaflor/db/migration-url";
 import { schema } from "@lindaflor/db/schema";
 import { env } from "@lindaflor/env/server";
-import { resolveMigrationConnectionString } from "@lindaflor/db/migration-url";
 import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 

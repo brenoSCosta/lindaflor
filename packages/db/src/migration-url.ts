@@ -3,7 +3,9 @@
  * For migrations, prefer DATABASE_URL_DIRECT when set; otherwise use the
  * session pooler (:5432) on the same host.
  */
-export function resolveMigrationConnectionString(connectionString: string): string {
+export function resolveMigrationConnectionString(
+  connectionString: string,
+): string {
   try {
     const url = new URL(connectionString);
 
