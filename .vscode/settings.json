@@ -1,65 +1,63 @@
 {
-  "editor.defaultFormatter": "oxc.oxc-vscode",
-  "[javascript]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
-  },
-  "[javascriptreact]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
+  "editor.defaultFormatter": "rust-lang.rust-analyzer",
+  "[rust]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer"
   },
   "[json]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
+    "editor.defaultFormatter": "rust-lang.rust-analyzer"
   },
   "[jsonc]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
+    "editor.defaultFormatter": "rust-lang.rust-analyzer"
   },
   "[markdown]": {
+    "editor.defaultFormatter": "rust-lang.rust-analyzer"
+  },
+  "[tailwindcss]": {
     "editor.defaultFormatter": "oxc.oxc-vscode"
   },
-  "[typescript]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
+  "rust-analyzer.linkedProjects": ["Cargo.toml"],
+  "rust-analyzer.server.path": "${workspaceFolder}/.devenv/profile/bin/rust-analyzer",
+  "rust-analyzer.cargo.targetDir": true,
+  "rust-analyzer.server.extraEnv": {
+    "PATH": "${workspaceFolder}/.devenv/profile/bin:${env:PATH}",
+    "PKG_CONFIG_PATH": "${workspaceFolder}/.devenv/profile/lib/pkgconfig",
+    "LD_LIBRARY_PATH": "${workspaceFolder}/.devenv/profile/lib:${env:LD_LIBRARY_PATH}",
+    "DATABASE_URL": "postgresql://postgres:postgres@localhost:4201/topcoat"
   },
-  "[typescriptreact]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
+  "rust-analyzer.cargo.extraEnv": {
+    "PATH": "${workspaceFolder}/.devenv/profile/bin:${env:PATH}",
+    "PKG_CONFIG_PATH": "${workspaceFolder}/.devenv/profile/lib/pkgconfig",
+    "LD_LIBRARY_PATH": "${workspaceFolder}/.devenv/profile/lib:${env:LD_LIBRARY_PATH}",
+    "DATABASE_URL": "postgresql://postgres:postgres@localhost:4201/topcoat"
   },
-  "editor.codeActionsOnSave": {
-    "source.fixAll.oxc": "always",
-    "source.organizeImports": "always",
-    "source.removeUnusedImports": "always"
+  "rust-analyzer.check.extraEnv": {
+    "PATH": "${workspaceFolder}/.devenv/profile/bin:${env:PATH}",
+    "PKG_CONFIG_PATH": "${workspaceFolder}/.devenv/profile/lib/pkgconfig",
+    "LD_LIBRARY_PATH": "${workspaceFolder}/.devenv/profile/lib:${env:LD_LIBRARY_PATH}",
+    "DATABASE_URL": "postgresql://postgres:postgres@localhost:4201/topcoat"
   },
+  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.procMacro.enable": true,
+  "rust-analyzer.cargo.buildScripts.enable": true,
   "editor.formatOnSave": true,
-  "editor.quickSuggestions": {
-    "strings": "on"
-  },
-  "explorer.fileNesting.patterns": {
-    "*.ts": "$(capture).*.ts, $(capture).*.tsx",
-    "*.tsx": "$(capture).*.ts, $(capture).*.tsx",
-    "package.json": ".*, *.md, *.json, *.mjs, *.lock, *.html, *.ts, LICENSE, docker*, Dockerfile*, tsconfig.*, *.toml, *.js, *.css, Caddyfile"
+  "editor.codeActionsOnSave": {
+    "source.removeUnusedImports": "always"
   },
   "files.associations": {
     "*.css": "tailwindcss"
   },
-  "files.readonlyInclude": {
-    "**/routeTree.gen.ts": true
-  },
   "files.watcherExclude": {
-    "**/routeTree.gen.ts": true
+    "**/target/**": true,
+    "**/node_modules/**": true
   },
-  "js/ts.experimental.useTsgo": true,
-  "js/ts.preferences.importModuleSpecifier": "non-relative",
-  "json.schemaDownload.trustedDomains": {
-    "https://turbo.build": true,
-    "https://ui.shadcn.com": true,
-    "https://railway.com/railway.schema.json": true
-  },
-  "npm.packageManager": "bun",
-  "oxc.enable": true,
-  "oxc.typeAware": true,
   "search.exclude": {
-    "**/routeTree.gen.ts": true,
-    "bun.lock": true
+    "**/target": true,
+    "**/*.lock": true
   },
-  "tailwindCSS.classFunctions": ["tw", "clsx", "cva", "tw\\.[a-z-]+"],
-  "tailwindCSS.experimental.classRegex": [["(`.*?`)", "(\".*?\")", "('.*?')"]],
-  "prettier.enable": false,
-  "eslint.enable": false
+  "explorer.fileNesting.enabled": true,
+  "explorer.compactFolders": true,
+  "explorer.fileNesting.patterns": {
+    "package.json": "*.ts, *.lock",
+    "flake.nix": "*.lock, *.toml, *.yml, *.yaml, .*, *.md, *.html, *.rdb, *.rs, *.css, *.nix"
+  }
 }

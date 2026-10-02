@@ -1,119 +1,151 @@
-## Features
+# topcoat
 
-- **TypeScript** - For type safety and improved developer experience
-- **TanStack Router** - File-based routing with full type safety
-- **React Native** - Build mobile apps using React
-- **Expo** - Tools for React Native development
-- **TailwindCSS** - Utility-first CSS for rapid UI development
-- **shadcn/ui** - Reusable UI components
-- **Elysia** - Type-safe, high-performance framework
-- **oRPC** - End-to-end type-safe APIs with OpenAPI integration
-- **Bun** - Runtime environment
-- **Drizzle** - TypeScript-first ORM
-- **PostgreSQL** - Database engine
-- **Authentication** - Better-Auth
-- **Husky** - Git hooks for code quality
-- **Oxlint** - Oxlint + Oxfmt (linting & formatting)
-- **Changesets** - Versioning and publishing
-- **Turborepo** - Optimized monorepo build system.
-- **Docker Sandboxes** - Run OpenCode in an isolated microVM with clone-mode Git workflow
+Rust web API built with axum, sqlx (PostgreSQL), and Valkey.
 
-## Getting Started
+- **Backend**: Rust with Axum, sqlx, and redis-rs (Valkey-compatible)
+- **Environment**: Nix + [devenv](https://devenv.sh) 2.3 or newer for toolchain, Postgres, and Valkey services
+- **Auth storage**: Valkey for sessions and secondary auth data
 
-First, copy the example environment variables file:
+## Tech Stack
+
+- **[Rust](https://www.rust-lang.org/learn)** — Systems language
+- **[Axum](https://docs.rs/axum/latest/axum/)** — Web framework
+- **[sqlx](https://github.com/launchbadge/sqlx)** — Async SQL toolkit (Postgres)
+- **[Valkey](https://valkey.io/)** — In-memory data store (Redis-compatible)
+- **[postgresql_embedded](https://crates.io/crates/postgresql_embedded)** — Ephemeral Postgres for tests
+
+## Quick start
+
+Requires [devenv](https://devenv.sh) 2.3 or newer. That release fast-shuts Postgres on cancel; earlier versions can leave the data directory stuck in `stopping`.
+
+### 1. Allow direnv (first time only)
 
 ```bash
-cp .env.example .env
+direnv allow
 ```
 
-Then, install the dependencies:
+This auto-activates the devenv shell when entering the project directory — no need to manually run `devenv shell`.
+
+### 2. Start the stack
 
 ```bash
-bun install
+devenv up
 ```
 
-and
+Starts PostgreSQL (port 4201), Valkey (port 4202), pgweb (port 4205), and the app under `topcoat dev` (build, asset bundle, watch, hot reload).
+
+### 3. Run migrations
 
 ```bash
-bun run prepare
+sqlx migrate run
 ```
 
-Then, configure Supabase in `.env`:
+### 4. Seed the database
 
-- `DATABASE_URL` — transaction pooler (`:6543`, used by the API at runtime)
-- `DATABASE_URL_DIRECT` — direct Postgres (`db.[ref].supabase.co:5432`, used for migrations)
+```sh
+cargo run --bin seed
+```
 
-Then, start Valkey and MinIO (local Postgres is no longer required):
+Seeds the database with an admin user and sample commerce data. Optional environment variables override the defaults:
+
+| Variable | Default | Description |
+|---|---|---|
+| `SEED_ADMIN_EMAIL` | `admin@lindaflor.com` | Admin user email |
+| `SEED_ADMIN_PASSWORD` | `admin123` | Admin user password |
+| `SEED_ADMIN_NAME` | `Admin User` | Admin user display name |
+| `SEED_PRODUCT_COUNT` | `12` | Number of products to seed |
+| `SEED_COLLECTIONS` | `Verão 2026,Clássicos,Pôr do sol` | Comma-separated collection names |
+| `SEED_PRICE_MIN` | `6990` | Minimum product price in cents |
+| `SEED_PRICE_MAX` | `29990` | Maximum product price in cents |
+| `SEED_STOCK_MIN` | `5` | Minimum stock quantity |
+| `SEED_STOCK_MAX` | `30` | Maximum stock quantity |
+
+### 5. Run the server
+
+With the stack up (`devenv up`), the app is already watched by `topcoat dev`. Standalone:
 
 ```bash
-bun run docker:dev
+topcoat dev --bin lindaflor
 ```
 
-Run migrations against Supabase (only needed after schema changes):
+The app listens on `http://localhost:4200`.
+
+OpenAPI docs (served only when `APP_ENV=development`):
+
+| UI | URL |
+| --- | --- |
+| Scalar | http://localhost:4200/api/docs |
+| Swagger | http://localhost:4200/api/swagger |
+| Spec JSON | http://localhost:4200/api/openapi.json |
+
+pgweb is a local Postgres viewer started by `devenv up` at http://127.0.0.1:4205. It does not manage schema — sqlx owns migrations.
+
+## Configuration
+
+devenv exports the process environment. `DATABASE_URL` follows the Postgres port it allocated.
+
+| Variable       | Set by devenv                                         | Description |
+| -------------- | ----------------------------------------------------- | ----------- |
+| `PORT`         | `4200`                                                | HTTP listen port |
+| `DATABASE_URL` | `postgres://postgres:postgres@127.0.0.1:$PGPORT/topcoat` | PostgreSQL connection |
+| `VALKEY_URL`   | `redis://127.0.0.1:4202`                              | Valkey connection |
+| `APP_ENV`      | `development`                                         | `development` / `dev` enables OpenAPI docs |
+| `S3_ENDPOINT`  | `http://127.0.0.1:4203`                               | RustFS S3 API endpoint |
+| `S3_REGION`    | `us-east-1`                                           | S3 region |
+| `S3_ACCESS_KEY_ID` | `rustfsadmin`                                     | RustFS access key |
+| `S3_SECRET_ACCESS_KEY` | `rustfsadmin`                                 | RustFS secret key |
+| `S3_BUCKET`    | `lindaflor`                                           | Object bucket |
+
+Avatars are stored in RustFS (S3 API). The console is http://127.0.0.1:4204.
+
+## Development
 
 ```bash
-bun run db-migrate:run
+# Format
+cargo fmt
+
+# Lint
+cargo clippy --all-targets
+
+# Run tests (uses embedded PostgreSQL)
+cargo test
+
+# Live server (build + assets + reload)
+topcoat dev --bin lindaflor
 ```
 
-> In development, migrations do not run automatically on `bun run dev`.
-> Use the command above when you change the database schema.
-
-Then, start the development server:
+## Reset database
 
 ```bash
-bun run dev
+devenv shell db-reset
+devenv up   # recreates Postgres; server runs `sqlx migrate run` before build
 ```
 
-Then, seed the database (development only — resets commerce data):
+After a reset the DB is empty. `sqlx::query!` needs tables at compile time, so migrations must run before the first build (`devenv up` does this automatically).
 
-```bash
-bun run db-seed
-```
-
-Dev users: `admin@lindaflor.com`, `org-alpha-owner@lindaflor.com`, `org-alpha-admin@lindaflor.com`, etc. Same password for all (default: `password`; override with `SEED_DEV_PASSWORD`). Requires `NODE_ENV=development`.
-
-Open [http://localhost:9021](http://localhost:9021) in your browser to see the web application.
-The API is running at [http://localhost:9020](http://localhost:9020).
-
-## Project Structure
+## Project structure
 
 ```
-lindaflor/
-├── docs/            # Documentation
-├── apps/
-│   ├── web/         # Frontend application (React + TanStack Router)
-│   ├── native/      # Mobile application (React Native, Expo)
-│   └── server/      # Backend API (Elysia, ORPC)
-├── packages/
-│   ├── api/         # API layer / business logic
-│   ├── auth/        # Authentication configuration & logic
-│   ├── config/      # TypeScript configuration files
-│   ├── db/          # Database schema & queries
-│   ├── env/         # Environment variable
-│   ├── mail/        # Mail configuration & logic
-│   └── valkey/      # Valkey (Redis-compatible) in-memory data store
+├── migrations/           # SQL migrations (sqlx)
+├── src/
+│   ├── main.rs           # Entry point
+│   ├── config.rs         # Environment config
+│   ├── db.rs             # PostgreSQL pool + migrations
+│   ├── openapi.rs        # OpenAPI spec + Scalar/Swagger routes
+│   ├── valkey.rs         # Valkey client
+│   ├── storage.rs        # S3-compatible object store (RustFS)
+│   ├── bin/
+│   │   └── seed/
+│   │       ├── main.rs       # Seed binary entry
+│   │       └── seeders/      # Database seeders
+│   │           ├── mod.rs    # Seeder orchestration
+│   │           ├── admin.rs  # Admin user seeder
+│   │           └── commerce.rs # Commerce data seeder
+│   └── app/              # Pages
+├── tests/
+│   └── health.rs         # Integration test (embedded postgres)
+├── devenv.nix            # devenv configuration
+├── devenv.yaml           # devenv inputs
+├── rust-toolchain.toml   # Pinned Rust 1.98.1
+└── .envrc                # direnv auto-activation
 ```
-
-## Available Scripts
-
-- `bun run dev`: Start all applications in development mode
-- `bun run build`: Build all applications
-- `bun run check`: Run Oxlint and Oxfmt
-- `bun run check-types`: Check TypeScript types across all apps
-- `bun run clean`: Clean the projects artifacts
-- `bun run clean:root`: Clean the root projects artifacts
-- `bun run test`: Run the tests
-- `bun run version`: Create a new version
-- `bun run dev:web`: Start only the web application
-- `bun run dev:server`: Start only the server
-- `bun run db:push`: Push schema changes to database
-- `bun run db:studio`: Open database studio UI
-- `bun run db:migrate`: Run the migrations
-- `bun run db:generate`: Generate a new migration
-- `bun run db-seed`: Seed the database with sample data (development only)
-- `bun run docker:dev`: Start the database and run the migrations and seed the database
-- `bun run docker:build`: Build the Docker images
-- `bun run docker:down`: Stop and remove the Docker containers
-- `bun run prebuild`: Run Expo prebuild for native apps (iOS/Android)
-- `bun run dev-android`: Start the native Android app in development mode
-- `bun run docker:clean`: Stop and remove the Docker containers and clean up the Docker system

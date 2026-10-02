@@ -1,4 +1,0 @@
-User-agent: *
-Allow: /
-
-Sitemap: https://lindaflor.com.br/sitemap.xml

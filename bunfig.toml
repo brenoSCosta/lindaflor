@@ -1,4 +1,0 @@
-[install]
-linker = "isolated"
-ignoreScripts = true
-minimumReleaseAge = 604800

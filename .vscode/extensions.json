@@ -1,8 +1,9 @@
 {
   "recommendations": [
-    "oxc.oxc-vscode",
-    "blazejkustra.react-compiler-marker",
-    "bradlc.vscode-tailwindcss",
-    "TypeScriptTeam.native-preview"
+    "mkhl.direnv",
+    "vadimcn.vscode-lldb",
+    "tamasfe.even-better-toml",
+    "rust-lang.rust-analyzer",
+    "oxc.oxc-vscode"
   ]
 }
