@@ -185,7 +185,7 @@ pub fn session_cookie_from(response: &Response<Body>) -> Option<String> {
 
 pub struct JsonResponse {
   pub status: StatusCode,
-  #[allow(dead_code)]
+
   pub cookie: Option<String>,
   pub json: serde_json::Value,
   /// Merged cookie to send on the next request (request cookie overwritten by Set-Cookie).

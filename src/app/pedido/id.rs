@@ -18,13 +18,14 @@ use crate::components::table::{
   table, table_body, table_cell, table_head, table_header, table_row,
 };
 
-use crate::app::store::queries::format_price;
+use crate::app::store::queries::{
+  DEFAULT_WHATSAPP_NUMBER, format_price, get_store_settings,
+  render_whatsapp_template, urlencode,
+};
 
 path_param!(id: Uuid, error = not_found);
 
 struct OrderItem {
-  #[allow(dead_code)]
-  id: Uuid,
   product_name: String,
   variant_label: String,
   quantity: i32,
@@ -64,7 +65,7 @@ async fn get_order(
   };
 
   let items = sqlx::query!(
-    "SELECT id, product_name, variant_label, quantity, unit_price_cents
+    "SELECT product_name, variant_label, quantity, unit_price_cents
          FROM order_items WHERE order_id = $1",
     id
   )
@@ -85,7 +86,6 @@ async fn get_order(
     items: items
       .into_iter()
       .map(|i| OrderItem {
-        id: i.id,
         product_name: i.product_name,
         variant_label: i.variant_label,
         quantity: i.quantity,
@@ -113,6 +113,16 @@ fn status_badge_variant(status: &str) -> BadgeVariant {
     "cancelled" => BadgeVariant::Destructive,
     _ => BadgeVariant::Primary,
   }
+}
+
+fn coupon_code_from_meta(
+  payment_meta: Option<&serde_json::Value>,
+) -> Option<String> {
+  payment_meta
+    .and_then(|meta| meta.get("coupon_code"))
+    .and_then(|value| value.as_str())
+    .filter(|code| !code.is_empty())
+    .map(str::to_string)
 }
 
 #[page]
@@ -151,6 +161,32 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     .and_then(|v| v.as_str())
     .map(|s| s.to_string());
   let order_id_short = order.id.to_string().chars().take(8).collect::<String>();
+  let order_total = format_price(order.total_cents);
+  let settings = get_store_settings(pool).await?;
+  let whatsapp_number = settings
+    .whatsapp_number
+    .as_deref()
+    .map(str::trim)
+    .filter(|s| !s.is_empty())
+    .unwrap_or(DEFAULT_WHATSAPP_NUMBER)
+    .to_string();
+  let whatsapp_fallback = format!(
+    "Olá! Fiz o pedido {} no valor de {} e quero confirmar o pagamento via PIX.",
+    order_id_short, order_total
+  );
+  let whatsapp_message = render_whatsapp_template(
+    settings.whatsapp_message_template.as_deref(),
+    &[
+      ("order_id", order_id_short.as_str()),
+      ("total", order_total.as_str()),
+    ],
+    &whatsapp_fallback,
+  );
+  let whatsapp_url = format!(
+    "https://wa.me/{}?text={}",
+    whatsapp_number,
+    urlencode(&whatsapp_message)
+  );
   let guest_email = order.guest_email.clone().unwrap_or_default();
   let address_display = order
     .shipping_address
@@ -168,6 +204,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
       ))
     })
     .unwrap_or_default();
+  let coupon_code = coupon_code_from_meta(order.payment_meta.as_ref());
 
   Ok(view! {
         <main class="mx-auto max-w-3xl px-4 py-12 md:px-8">
@@ -214,7 +251,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                     )
                     card_footer(
                         <a
-                            href="https://wa.me/5579998165115"
+                            href=(whatsapp_url)
                             target="_blank"
                             rel="noreferrer"
                             class=(button_variants(ButtonVariant::Primary, ButtonSize::Lg))
@@ -275,7 +312,13 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                         </div>
                         if order.discount_cents > 0 {
                             <div class="flex justify-between">
-                                <span class="text-muted-foreground">"Desconto"</span>
+                                <span class="text-muted-foreground">
+                                    if let Some(code) = coupon_code {
+                                        "Desconto (" (code) ")"
+                                    } else {
+                                        "Desconto"
+                                    }
+                                </span>
                                 <span>"-" (format_price(order.discount_cents))</span>
                             </div>
                         }

@@ -1053,7 +1053,6 @@ pub async fn delete_user_confirmed(
   Ok(())
 }
 
-#[allow(dead_code)]
 pub async fn request_delete_user(
   pool: &PgPool,
   user: &User,

@@ -10,6 +10,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .init();
 
   let cfg = Config::from_env()?;
+  tracing::debug!(port = cfg.port, "seed loaded config");
   let pool = db::create_pool(&cfg.database_url).await?;
 
   seeders::run(&pool).await?;

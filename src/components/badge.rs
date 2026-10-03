@@ -7,7 +7,7 @@ use topcoat::{
 ///
 /// [`Default`] is `BadgeVariant::Primary`, used when no variant is given.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[allow(dead_code)]
+
 pub enum BadgeVariant {
   /// The primary-filled badge for highlighted statuses.
   #[default]

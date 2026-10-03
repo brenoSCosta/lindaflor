@@ -7,7 +7,6 @@ use topcoat::{
 ///
 /// [`Default`] is `ButtonVariant::Primary`, used when no variant is given.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum ButtonVariant {
   /// The primary-filled button for the main action.
   #[default]
@@ -56,7 +55,6 @@ impl ButtonVariant {
 ///
 /// [`Default`] is `ButtonSize::Md`, used when no size is given.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum ButtonSize {
   /// A compact button.
   Sm,

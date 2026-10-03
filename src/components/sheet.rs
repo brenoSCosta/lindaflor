@@ -69,7 +69,7 @@ pub async fn sheet(
 ///
 /// [`Default`] is `SheetSide::Right`, used when no side is given.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[allow(dead_code)]
+
 pub enum SheetSide {
   /// Along the left edge, full height.
   Left,

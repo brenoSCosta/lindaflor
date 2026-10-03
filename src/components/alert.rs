@@ -7,7 +7,7 @@ use topcoat::{
 ///
 /// [`Default`] is `AlertVariant::Neutral`, used when no variant is given.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[allow(dead_code)]
+
 pub enum AlertVariant {
   /// A plain alert for informational notices.
   #[default]

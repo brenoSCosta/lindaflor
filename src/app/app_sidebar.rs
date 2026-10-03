@@ -1,10 +1,8 @@
-//! App sidebar matching the React `AppSidebar` + `NavUser` (org switcher → brand).
-
 use lindaflor::auth::user::SessionUser;
 use topcoat::{
   Result,
   context::Cx,
-  cookie::{Cookie, Cookies, cookies, time::Duration},
+  cookie::{Cookies, cookies},
   icon::{icon, iconify::iconify_icon},
   router::{
     content::Form,
@@ -12,6 +10,7 @@ use topcoat::{
     request::uri,
     route,
   },
+  runtime::{Event, signal},
   view::{Child, StaticClass, View, attributes, class, component, view},
 };
 
@@ -35,6 +34,9 @@ use lindaflor::auth::avatar::{self as auth_avatar, object_store};
 
 pub const SIDEBAR_COOKIE: &str = "sidebar_state";
 
+/// Cookie lifetime for the sidebar preference: seven days.
+const SIDEBAR_COOKIE_MAX_AGE: &str = "604800";
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SidebarState {
   Expanded,
@@ -45,50 +47,12 @@ impl SidebarState {
   pub fn is_collapsed(self) -> bool {
     matches!(self, Self::Collapsed)
   }
-
-  pub fn toggled(self) -> Self {
-    match self {
-      Self::Expanded => Self::Collapsed,
-      Self::Collapsed => Self::Expanded,
-    }
-  }
-
-  pub fn as_str(self) -> &'static str {
-    match self {
-      Self::Expanded => "expanded",
-      Self::Collapsed => "collapsed",
-    }
-  }
 }
 
 pub fn read_sidebar_state(cx: &Cx) -> SidebarState {
   match cookies(cx).get(SIDEBAR_COOKIE) {
     Some(cookie) if cookie.value() == "collapsed" => SidebarState::Collapsed,
     _ => SidebarState::Expanded,
-  }
-}
-
-pub fn write_sidebar_state(cx: &Cx, state: SidebarState) {
-  cookies(cx).add(
-    Cookie::build((SIDEBAR_COOKIE, state.as_str()))
-      .path("/")
-      .max_age(Duration::days(7))
-      .build(),
-  );
-}
-
-fn current_path(cx: &Cx) -> String {
-  let uri = uri(cx);
-  match uri.query() {
-    Some(query) => format!("{}?{query}", uri.path()),
-    None => uri.path().to_owned(),
-  }
-}
-
-fn safe_redirect(path: Option<&str>) -> String {
-  match path {
-    Some(p) if p.starts_with('/') && !p.starts_with("//") => p.to_owned(),
-    _ => "/dashboard".to_owned(),
   }
 }
 
@@ -113,26 +77,9 @@ fn initials(name: &str) -> String {
 
 /// Whether this request path should use the authenticated app chrome + sidebar.
 pub fn is_app_shell_path(path: &str) -> bool {
-  matches!(
-    path,
-    "/dashboard" | "/settings" | "/permissions" | "/accept-invitation"
-  ) || path.starts_with("/conta")
+  matches!(path, "/dashboard" | "/settings" | "/accept-invitation")
+    || path.starts_with("/conta")
     || path.starts_with("/admin")
-}
-
-#[derive(serde::Deserialize)]
-pub struct SidebarToggleInput {
-  redirect: Option<String>,
-}
-
-#[route(POST "/sidebar")]
-pub async fn toggle_sidebar(
-  cx: &Cx,
-  Form(input): Form<SidebarToggleInput>,
-) -> Result<SeeOther> {
-  let next = read_sidebar_state(cx).toggled();
-  write_sidebar_state(cx, next);
-  Ok(see_other(safe_redirect(input.redirect.as_deref())))
 }
 
 #[derive(serde::Deserialize)]
@@ -164,9 +111,22 @@ pub async fn app_shell(
   user: SessionUser,
   #[default] child: Child<'_>,
 ) -> Result<impl View> {
-  let expanded = !read_sidebar_state(cx).is_collapsed();
+  let expanded = signal(cx, || !read_sidebar_state(cx).is_collapsed());
+  let toggle_sidebar = attributes! {
+      @click=$(|_e: Event| {
+          expanded.toggle();
+          let state = if expanded.get() { "expanded" } else { "collapsed" };
+          let max_age = SIDEBAR_COOKIE_MAX_AGE;
+          raw!(
+              r#"document.cookie = "sidebar_state=" + String(${state}) + "; Path=/; Max-Age=" + String(${max_age});"#,
+              {
+                  let _ = (state, max_age);
+              }
+          );
+      })
+  };
+  let rail_toggle = toggle_sidebar.clone();
   let pathname = uri(cx).path().to_owned();
-  let home_active = path_active(&pathname, "/");
   let dashboard_active = path_active(&pathname, "/dashboard");
   let users_active = path_active(&pathname, "/admin/usuarios");
   let show_users =
@@ -184,12 +144,11 @@ pub async fn app_shell(
   let menu_email = email.clone();
   let trigger_name = name.clone();
   let trigger_initials = user_initials.clone();
-  let redirect = current_path(cx);
 
   Ok(view! {
       sidebar_provider(
           sidebar(
-              open: expanded,
+              open: $(expanded.get()),
               collapsible: SidebarCollapsible::Icon,
               sheet_attrs: attributes! { aria-label="Menu lateral" },
               sidebar_header(
@@ -215,15 +174,6 @@ pub async fn app_shell(
                       sidebar_group_label("Geral")
                       sidebar_group_content(
                           sidebar_menu(
-                              sidebar_menu_item(
-                                  sidebar_menu_button(
-                                      href: Some("/"),
-                                      active: home_active,
-                                      tooltip: Some("Início"),
-                                      icon(data: iconify_icon!("lucide:grid"))
-                                      <span>"Início"</span>
-                                  )
-                              )
                               sidebar_menu_item(
                                   sidebar_menu_button(
                                       href: Some("/dashboard"),
@@ -331,25 +281,20 @@ pub async fn app_shell(
                   )
               )
               sidebar_rail(
-                  open: expanded,
-                  attrs: attributes! {
-                      onclick="document.getElementById('sidebar-toggle').requestSubmit()"
-                  },
+                  open: $(expanded.get()),
+                  attrs: rail_toggle,
               )
           )
           sidebar_inset(
               sidebar_header(
-                  <form id="sidebar-toggle" method="post" action="/sidebar" class="inline-flex">
-                      <input type="hidden" name="redirect" value=(redirect)>
-                      sidebar_trigger(
-                          open: expanded,
-                          attrs: attributes! {
-                              type="submit"
-                              aria-label="Alternar menu lateral"
-                              title="Alternar menu lateral"
-                          },
-                      )
-                  </form>
+                  sidebar_trigger(
+                      open: $(expanded.get()),
+                      attrs: attributes! {
+                          aria-label="Alternar menu lateral"
+                          title="Alternar menu lateral"
+                          (toggle_sidebar)
+                      },
+                  )
                   <div class="ml-auto flex items-center gap-2">
                       theme_toggle()
                   </div>
@@ -376,7 +321,6 @@ pub async fn storefront_shell(
           <header class="sticky top-0 z-50 border-b border-border bg-background backdrop-blur">
               <div class="mx-auto grid h-20 max-w-7xl grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 md:px-8">
                   <nav class="hidden items-center gap-6 md:flex">
-                      <a href="/" class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">"Início"</a>
                       <a href="/produtos" class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">"Catálogo"</a>
                       <a href="/colecoes" class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">"Coleções"</a>
                       <a href="/#sobre" class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">"Sobre"</a>

@@ -9,6 +9,8 @@ use topcoat::{
 };
 use uuid::Uuid;
 
+use lindaflor::auth::user::current_user_owned;
+
 use crate::components::button::{
   ButtonSize, ButtonVariant, button, button_variants,
 };
@@ -22,6 +24,9 @@ use crate::components::separator::separator;
 use crate::components::textarea::textarea;
 
 use crate::app::store::cart::{cart_subtotal_cents, clear_cart, read_cart};
+use crate::app::store::coupons::{
+  CouponReject, ResolvedCoupon, resolve_coupon,
+};
 use crate::app::store::queries::format_price;
 
 #[derive(Deserialize)]
@@ -37,8 +42,12 @@ pub struct CheckoutInput {
   state: String,
   zip_code: String,
   notes: String,
-  #[allow(dead_code)]
-  coupon_code: String,
+
+  #[serde(default)]
+  coupon_code: Option<String>,
+
+  #[serde(default)]
+  intent: Option<String>,
 }
 
 const BRAZILIAN_STATES: [&str; 27] = [
@@ -74,18 +83,58 @@ pub async fn page(
   }
 
   let subtotal = cart_subtotal_cents(&items);
+  let session_user_id: Option<Uuid> =
+    current_user_owned(cx).await?.map(|session| session.user.id);
 
-  if let Some(Form(form_input)) = body {
-    let order_id = create_order(pool, &items, form_input).await?;
+  let mut body = body;
+  let coupon_input = input_coupon(body.as_ref());
+
+  // DB-backed coupon validation. Preview reads through a rolled-back
+  // transaction; order creation re-validates inside its own transaction
+  // with `SELECT ... FOR UPDATE`.
+  let mut preview_tx = pool.begin().await?;
+  let coupon_outcome = resolve_coupon(
+    &mut preview_tx,
+    &coupon_input,
+    subtotal,
+    session_user_id,
+    false,
+  )
+  .await;
+  preview_tx.rollback().await?;
+
+  let (resolved_coupon, coupon_error): (
+    Option<ResolvedCoupon>,
+    Option<String>,
+  ) = match coupon_outcome {
+    Ok(coupon) => (coupon, None),
+    Err(CouponReject::Db(error)) => return Err(error.into()),
+    Err(CouponReject::Invalid(message)) => (None, Some(message)),
+  };
+
+  let intent = body
+    .as_ref()
+    .and_then(|form| form.0.intent.clone())
+    .unwrap_or_default();
+
+  if coupon_error.is_none()
+    && intent == "pay"
+    && let Some(Form(form_input)) = body.take()
+  {
+    let order_id =
+      create_order(pool, &items, form_input, session_user_id).await?;
     clear_cart(cx);
     return Err(redirect(format!("/pedido/{}", order_id)).into());
   }
 
   let zip_digits: String = input_zip_digits(body.as_ref());
-  let shipping = calculate_shipping(subtotal, "SE", &zip_digits);
-  let total = subtotal + shipping.0;
-
   let state = input_state(body.as_ref());
+  let shipping = calculate_shipping(subtotal, &state, &zip_digits);
+  let discount = resolved_coupon
+    .as_ref()
+    .map(|coupon| coupon.discount_cents)
+    .unwrap_or(0);
+  let total = subtotal - discount + shipping.0;
 
   Ok(view! {
         <main class="mx-auto max-w-6xl px-4 py-12 md:px-8">
@@ -214,7 +263,10 @@ pub async fn page(
                             card_title("Observações")
                         )
                         card_content(
-                            textarea(attrs: attributes! { id="notes" name="notes" rows="3" })
+                            textarea(
+                                attrs: attributes! { id="notes" name="notes" rows="3" },
+                                (input_notes(body.as_ref()))
+                            )
                         )
                     )
                 </div>
@@ -247,17 +299,58 @@ pub async fn page(
                                         <span>(format_price(shipping.0))</span>
                                     }
                                 </div>
+                                if discount > 0 {
+                                    <div class="flex justify-between">
+                                        <span class="text-muted-foreground">"Desconto"</span>
+                                        <span>"-" (format_price(discount))</span>
+                                    </div>
+                                }
                                 <div class="flex justify-between pt-2 text-base font-medium">
                                     <span>"Total"</span>
                                     <span class="text-primary">(format_price(total))</span>
                                 </div>
                             </div>
+                            field(
+                                field_label(attrs: attributes! { for="coupon" }, "Cupom")
+                                <div class="flex items-center gap-2">
+                                    input(attrs: attributes! {
+                                        id="coupon"
+                                        name="coupon_code"
+                                        placeholder="CUPOM10"
+                                        class="min-w-0 flex-1"
+                                        value=(input_coupon(body.as_ref()))
+                                    })
+                                    button(
+                                        variant: ButtonVariant::Outline,
+                                        attrs: attributes! {
+                                            type="submit"
+                                            name="intent"
+                                            value="apply"
+                                            formnovalidate="formnovalidate"
+                                        },
+                                        "Aplicar"
+                                    )
+                                </div>
+                            )
+                            if let Some(ref coupon) = resolved_coupon {
+                                <p class="text-sm text-muted-foreground">
+                                    "Cupom " (coupon.code.as_str()) " aplicado."
+                                </p>
+                            }
+                            if let Some(ref message) = coupon_error {
+                                <p class="text-sm text-destructive">(message.as_str())</p>
+                            }
                         )
                         card_footer(
                             button(
                                 variant: ButtonVariant::Primary,
                                 size: ButtonSize::Lg,
-                                attrs: attributes! { type="submit" class="w-full" },
+                                attrs: attributes! {
+                                    type="submit"
+                                    name="intent"
+                                    value="pay"
+                                    class="w-full"
+                                },
                                 "Pagar com PIX"
                             )
                         )
@@ -275,6 +368,7 @@ async fn create_order(
   pool: &PgPool,
   items: &[crate::app::store::cart::CartItem],
   form_data: CheckoutInput,
+  user_id: Option<Uuid>,
 ) -> Result<Uuid, sqlx::Error> {
   let order_id = Uuid::now_v7();
   let zip_digits: String = form_data
@@ -282,13 +376,27 @@ async fn create_order(
     .chars()
     .filter(|c| c.is_ascii_digit())
     .collect();
-  let shipping = calculate_shipping(
-    cart_subtotal_cents(items),
-    &form_data.state,
-    &zip_digits,
-  );
   let subtotal = cart_subtotal_cents(items);
-  let total = subtotal + shipping.0;
+  let shipping = calculate_shipping(subtotal, &form_data.state, &zip_digits);
+
+  let mut tx = pool.begin().await?;
+  let coupon_code = form_data.coupon_code.clone().unwrap_or_default();
+  let resolved = resolve_coupon(&mut tx, &coupon_code, subtotal, user_id, true)
+    .await
+    .map_err(|outcome| match outcome {
+      // Preview validated the coupon just before submit; landing here
+      // means a concurrent redemption exhausted it inside this
+      // transaction.
+      CouponReject::Db(error) => error,
+      CouponReject::Invalid(message) => sqlx::Error::Protocol(message),
+    })?;
+  let discount = resolved
+    .as_ref()
+    .map(|coupon| coupon.discount_cents)
+    .unwrap_or(0);
+  let coupon_id = resolved.as_ref().map(|coupon| coupon.id);
+  let applied_code = resolved.as_ref().map(|coupon| coupon.code.clone());
+  let total = subtotal - discount + shipping.0;
 
   let address = serde_json::json!({
       "name": form_data.name,
@@ -302,18 +410,28 @@ async fn create_order(
       "phone": form_data.phone,
   });
 
-  sqlx::query!(
-        "INSERT INTO orders (id, guest_email, status, subtotal_cents, shipping_cents, total_cents, shipping_address, notes)
-         VALUES ($1, $2, 'pending_payment', $3, $4, $5, $6, $7)",
-        order_id,
-        form_data.guest_email,
-        subtotal,
-        shipping.0,
-        total,
-        address,
-        if form_data.notes.trim().is_empty() { None } else { Some(form_data.notes.trim()) },
+  let trimmed_notes = form_data.notes.trim().to_string();
+  let notes: Option<String> = if trimmed_notes.is_empty() {
+    None
+  } else {
+    Some(trimmed_notes)
+  };
+
+  sqlx::query(
+        "INSERT INTO orders (id, user_id, guest_email, status, subtotal_cents, shipping_cents, discount_cents, total_cents, shipping_address, notes, coupon_id)
+         VALUES ($1, $2, $3, 'pending_payment', $4, $5, $6, $7, $8, $9, $10)",
     )
-    .execute(pool)
+    .bind(order_id)
+    .bind(user_id)
+    .bind(form_data.guest_email)
+    .bind(subtotal)
+    .bind(shipping.0)
+    .bind(discount)
+    .bind(total)
+    .bind(address)
+    .bind(notes.as_deref())
+    .bind(coupon_id)
+    .execute(&mut *tx)
     .await?;
 
   for item in items {
@@ -328,8 +446,21 @@ async fn create_order(
             item.quantity,
             item.unit_price_cents,
         )
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+  }
+
+  if let Some(coupon) = resolved.as_ref() {
+    sqlx::query(
+      "INSERT INTO coupon_redemptions (id, coupon_id, user_id, order_id)
+             VALUES ($1, $2, $3, $4)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(coupon.id)
+    .bind(user_id)
+    .bind(order_id)
+    .execute(&mut *tx)
+    .await?;
   }
 
   let settings = crate::app::store::queries::get_store_settings(pool).await?;
@@ -348,6 +479,9 @@ async fn create_order(
   let payment_meta = serde_json::json!({
       "pix_copy_paste": pix_code,
       "total_cents": total,
+      "coupon_code": applied_code,
+      "coupon_id": coupon_id,
+      "discount_cents": discount,
   });
 
   sqlx::query!(
@@ -355,8 +489,10 @@ async fn create_order(
     payment_meta,
     order_id
   )
-  .execute(pool)
+  .execute(&mut *tx)
   .await?;
+
+  tx.commit().await?;
 
   Ok(order_id)
 }
@@ -516,4 +652,189 @@ fn input_zip_digits(body: Option<&Form<CheckoutInput>>) -> String {
     .chars()
     .filter(|c| c.is_ascii_digit())
     .collect()
+}
+
+fn input_notes(body: Option<&Form<CheckoutInput>>) -> String {
+  body.map(|b| b.0.notes.clone()).unwrap_or_default()
+}
+
+fn input_coupon(body: Option<&Form<CheckoutInput>>) -> String {
+  body
+    .and_then(|b| b.0.coupon_code.clone())
+    .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::app::store::cart::CartItem;
+
+  const UNIT_PRICE_CENTS: i32 = 10_000;
+  const DISCOUNT_CENTS: i32 = 1_500;
+
+  fn checkout_input(email: &str, code: &str) -> CheckoutInput {
+    CheckoutInput {
+      guest_email: email.to_string(),
+      name: "Maria Silva".to_string(),
+      phone: "79999816511".to_string(),
+      street: "Rua da Praia".to_string(),
+      number: "10".to_string(),
+      complement: String::new(),
+      neighborhood: "Centro".to_string(),
+      city: "Aracaju".to_string(),
+      state: "SE".to_string(),
+      zip_code: "49000-000".to_string(),
+      notes: String::new(),
+      coupon_code: Some(code.to_string()),
+      intent: Some("pay".to_string()),
+    }
+  }
+
+  fn cart_line(product_id: Uuid, variant_id: Uuid) -> CartItem {
+    CartItem {
+      variant_id: variant_id.to_string(),
+      product_id: product_id.to_string(),
+      product_slug: format!("peca-{product_id}"),
+      product_name: "Peça teste".to_string(),
+      variant_label: "M / azul".to_string(),
+      image_url: None,
+      unit_price_cents: UNIT_PRICE_CENTS,
+      quantity: 1,
+      max_quantity: 5,
+    }
+  }
+
+  #[tokio::test]
+  async fn create_order_redeems_unique_coupon_once() {
+    let pool = crate::test_support::pool().await;
+    let product_id = Uuid::now_v7();
+    let variant_id = Uuid::now_v7();
+    let coupon_id = Uuid::now_v7();
+    let code = format!("Pay{}", Uuid::now_v7().simple());
+    let email = format!("checkout-{}@example.com", Uuid::now_v7().simple());
+
+    sqlx::query(
+      "INSERT INTO products (id, name, slug, price_in_cents)
+       VALUES ($1, 'Peça teste', $2, $3)",
+    )
+    .bind(product_id)
+    .bind(format!("peca-{product_id}"))
+    .bind(UNIT_PRICE_CENTS)
+    .execute(&pool)
+    .await
+    .expect("insert product");
+
+    sqlx::query(
+      "INSERT INTO product_variants (id, product_id, sku, size, color)
+       VALUES ($1, $2, $3, 'm', 'azul')",
+    )
+    .bind(variant_id)
+    .bind(product_id)
+    .bind(format!("sku-{variant_id}"))
+    .execute(&pool)
+    .await
+    .expect("insert variant");
+
+    sqlx::query(
+      "INSERT INTO coupons (id, code, discount_type, discount_value, usage_type)
+       VALUES ($1, $2, 'fixed', $3, 'unique')",
+    )
+    .bind(coupon_id)
+    .bind(&code)
+    .bind(DISCOUNT_CENTS)
+    .execute(&pool)
+    .await
+    .expect("insert coupon");
+
+    let items = vec![cart_line(product_id, variant_id)];
+    let subtotal = UNIT_PRICE_CENTS;
+    let zip_digits = "49000000";
+    let (shipping_cents, _) = calculate_shipping(subtotal, "SE", zip_digits);
+    let expected_total = subtotal - DISCOUNT_CENTS + shipping_cents;
+
+    let order_id = create_order(
+      &pool,
+      &items,
+      checkout_input(&email, &code.to_lowercase()),
+      None,
+    )
+    .await
+    .expect("create order");
+
+    #[derive(sqlx::FromRow)]
+    struct SavedOrder {
+      coupon_id: Option<Uuid>,
+      discount_cents: i32,
+      total_cents: i32,
+      subtotal_cents: i32,
+      shipping_cents: i32,
+    }
+
+    let saved = sqlx::query_as::<_, SavedOrder>(
+      "SELECT coupon_id, discount_cents, total_cents, subtotal_cents, shipping_cents
+       FROM orders WHERE id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .expect("load order");
+
+    assert_eq!(saved.coupon_id, Some(coupon_id));
+    assert_eq!(saved.discount_cents, DISCOUNT_CENTS);
+    assert_eq!(saved.subtotal_cents, subtotal);
+    assert_eq!(saved.shipping_cents, shipping_cents);
+    assert_eq!(
+      saved.total_cents,
+      saved.subtotal_cents - saved.discount_cents + saved.shipping_cents
+    );
+    assert_eq!(saved.total_cents, expected_total);
+
+    let coupon_code: Option<String> = sqlx::query_scalar(
+      "SELECT payment_meta->>'coupon_code' FROM orders WHERE id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .expect("coupon code");
+    assert_eq!(coupon_code.as_deref(), Some(code.as_str()));
+
+    let redemptions: i64 = sqlx::query_scalar(
+      "SELECT COUNT(*) FROM coupon_redemptions WHERE coupon_id = $1",
+    )
+    .bind(coupon_id)
+    .fetch_one(&pool)
+    .await
+    .expect("count redemptions");
+    assert_eq!(redemptions, 1);
+
+    let second = create_order(
+      &pool,
+      &items,
+      checkout_input(&email, &code.to_lowercase()),
+      None,
+    )
+    .await;
+    let err = second.expect_err("unique coupon is already redeemed");
+    assert!(
+      err.to_string().contains("limite de utilizações"),
+      "unexpected error: {err}"
+    );
+
+    let orders: i64 =
+      sqlx::query_scalar("SELECT COUNT(*) FROM orders WHERE coupon_id = $1")
+        .bind(coupon_id)
+        .fetch_one(&pool)
+        .await
+        .expect("count orders");
+    assert_eq!(orders, 1);
+
+    let redemptions: i64 = sqlx::query_scalar(
+      "SELECT COUNT(*) FROM coupon_redemptions WHERE coupon_id = $1",
+    )
+    .bind(coupon_id)
+    .fetch_one(&pool)
+    .await
+    .expect("count redemptions after retry");
+    assert_eq!(redemptions, 1);
+  }
 }

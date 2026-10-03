@@ -6,12 +6,15 @@ mod openapi;
 mod theme;
 mod valkey;
 
+#[cfg(test)]
+mod test_support;
+
 // Link library API + auth modules (routes register via inventory discover).
 use lindaflor::api;
 use lindaflor::auth;
-#[allow(unused_imports)]
 use lindaflor::auth::routes;
 
+use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -49,9 +52,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     None => lindaflor::storage::ObjectStore::unavailable(),
   };
 
-  topcoat::start(crate::app::router(pool, valkey_conn, storage))
-    .await
-    .unwrap();
+  let host = std::env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+  let listener = TcpListener::bind((host.as_str(), cfg.port)).await?;
+  tracing::info!("listening on http://{}", listener.local_addr()?);
+
+  topcoat::serve(listener, crate::app::router(pool, valkey_conn, storage))
+    .await?;
 
   Ok(())
 }

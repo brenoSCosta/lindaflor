@@ -9,7 +9,7 @@ use topcoat::{
 ///
 /// [`Default`] is `ToggleKind::Independent`, used when no kind is given.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[allow(dead_code)]
+
 pub enum ToggleKind {
   /// A toggle that presses and unpresses on its own, like a checkbox.
   #[default]
@@ -32,7 +32,6 @@ impl ToggleKind {
 ///
 /// [`Default`] is `ToggleSize::Md`, used when no size is given.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum ToggleSize {
   /// A compact toggle.
   Sm,

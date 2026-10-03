@@ -1,8 +1,13 @@
 use serde::Deserialize;
+use sqlx::PgPool;
 use topcoat::{
   Result,
-  context::Cx,
-  router::{content::Form, page, query_params},
+  context::{Cx, app_context},
+  router::{
+    content::Form,
+    error::{SeeOther, see_other},
+    page, query_params, route,
+  },
   view::{View, view},
 };
 
@@ -12,27 +17,24 @@ use crate::components::button::{
 use crate::components::card::{
   card, card_content, card_description, card_footer, card_header, card_title,
 };
+use lindaflor::auth::service;
 use topcoat::view::attributes;
 
 #[derive(Deserialize)]
 pub struct ResendInput {
-  #[allow(dead_code)]
   email: Option<String>,
 }
 
 #[query_params(error = bad_request)]
 struct CheckEmailQuery {
   email: Option<String>,
+  resent: Option<String>,
 }
 
-#[page([GET, POST] "/check-email")]
-pub async fn page(
-  cx: &Cx,
-  body: Option<Form<ResendInput>>,
-) -> Result<impl View> {
+#[page(GET "/check-email")]
+pub async fn page(cx: &Cx) -> Result<impl View> {
   let query = query_params::<CheckEmailQuery>(cx)?;
-  let resent =
-    body.is_some() && topcoat::router::request::method(cx).as_str() == "POST";
+  let resent = query.resent.is_some();
   let email = query.email.clone().unwrap_or_default();
 
   Ok(view! {
@@ -66,14 +68,15 @@ pub async fn page(
                               } else {
                                   <span>
                                       "Enviamos um link de verificação para "
-                                      <strong>(email)</strong>
+                                      <strong>(email.clone())</strong>
                                       ". Clique no link para concluir o login."
                                   </span>
                               }
                           )
                       )
                       card_content(
-                          <form method="post" action="/check-email">
+                          <form method="post" action="/check-email/resend">
+                              <input type="hidden" name="email" value=(email.clone())>
                               button(
                                   variant: ButtonVariant::Primary,
                                   attrs: attributes! { type="submit" },
@@ -91,4 +94,55 @@ pub async fn page(
           </div>
       </div>
   })
+}
+
+#[route(POST "/check-email/resend")]
+pub async fn resend(
+  cx: &Cx,
+  Form(body): Form<ResendInput>,
+) -> Result<SeeOther> {
+  let pool = app_context::<PgPool>(cx);
+  let query = query_params::<CheckEmailQuery>(cx)?;
+  let email = if let Some(email) = body
+    .email
+    .as_deref()
+    .map(str::trim)
+    .filter(|e| !e.is_empty())
+  {
+    email.to_owned()
+  } else if let Some(email) = query
+    .email
+    .as_deref()
+    .map(str::trim)
+    .filter(|e| !e.is_empty())
+  {
+    email.to_owned()
+  } else {
+    return Ok(see_other("/check-email"));
+  };
+
+  let _ =
+    service::send_verification_email(pool, &email, Some("/verify-email")).await;
+  Ok(see_other(format!(
+    "/check-email?email={}&resent=1",
+    percent_encode(&email)
+  )))
+}
+
+fn percent_encode(input: &str) -> String {
+  let mut out = String::with_capacity(input.len());
+  for byte in input.bytes() {
+    match byte {
+      b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+        out.push(byte as char);
+      }
+      _ => {
+        const HEX: &[u8; 16] = b"0123456789ABCDEF";
+        out.push('%');
+        out.push(HEX[(byte >> 4) as usize] as char);
+        out.push(HEX[(byte & 0xf) as usize] as char);
+      }
+    }
+  }
+  out
 }

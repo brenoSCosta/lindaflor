@@ -11,7 +11,6 @@ pub struct S3Config {
 
 #[derive(Clone, Debug)]
 pub struct Config {
-  #[allow(dead_code)]
   pub port: u16,
   pub database_url: String,
   pub valkey_url: String,

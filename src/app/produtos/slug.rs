@@ -10,8 +10,9 @@ use topcoat::{
 
 use crate::app::store::cart::{CartItem, add_to_cart};
 use crate::app::store::queries::{
-  category_label, format_price, get_product_by_slug, get_store_settings,
-  list_products, size_label,
+  DEFAULT_WHATSAPP_NUMBER, category_label, format_price, get_product_by_slug,
+  get_store_settings, list_products, render_whatsapp_template, size_label,
+  urlencode,
 };
 use crate::components::accordion::{
   accordion, accordion_content, accordion_item, accordion_trigger,
@@ -144,13 +145,16 @@ pub async fn page(
 
   let whatsapp_number = settings
     .whatsapp_number
-    .clone()
-    .unwrap_or_else(|| "5579998165115".to_string());
+    .as_deref()
+    .map(str::trim)
+    .filter(|s| !s.is_empty())
+    .unwrap_or(DEFAULT_WHATSAPP_NUMBER)
+    .to_string();
   let variant_label = selected_variant
     .as_ref()
     .map(|v| format!("{} · {}", size_label(&v.size), v.color))
     .unwrap_or_default();
-  let whatsapp_message = format!(
+  let whatsapp_fallback = format!(
     "Olá! Tenho interesse no {}{}",
     product.name,
     if variant_label.is_empty() {
@@ -158,6 +162,14 @@ pub async fn page(
     } else {
       format!(" ({})", variant_label)
     }
+  );
+  let whatsapp_message = render_whatsapp_template(
+    settings.whatsapp_message_template.as_deref(),
+    &[
+      ("product", product.name.as_str()),
+      ("variant", variant_label.as_str()),
+    ],
+    &whatsapp_fallback,
   );
   let whatsapp_url = format!(
     "https://wa.me/{}?text={}",
@@ -371,19 +383,4 @@ pub async fn page(
             }
         </main>
     }.boxed())
-}
-
-fn urlencode(text: &str) -> String {
-  let mut result = String::new();
-  for b in text.bytes() {
-    match b {
-      b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-        result.push(b as char);
-      }
-      _ => {
-        result.push_str(&format!("%{:02X}", b));
-      }
-    }
-  }
-  result
 }

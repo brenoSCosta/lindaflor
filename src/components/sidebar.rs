@@ -18,7 +18,6 @@ use super::{
 
 /// The edge of the page occupied by a sidebar.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum SidebarSide {
   #[default]
   Left,
@@ -43,7 +42,6 @@ impl SidebarSide {
 
 /// The desktop sidebar's surface and its relationship to the page.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum SidebarVariant {
   /// A panel separated from the page by a border.
   #[default]
@@ -66,7 +64,6 @@ impl SidebarVariant {
 
 /// How the desktop sidebar behaves when its `open` expression is false.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum SidebarCollapsible {
   /// Hide the panel and release its space to the page.
   #[default]
@@ -495,7 +492,6 @@ pub async fn sidebar_separator(
 
 /// The visual style of a sidebar menu button.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum SidebarMenuButtonVariant {
   #[default]
   Default,
@@ -513,7 +509,6 @@ impl SidebarMenuButtonVariant {
 
 /// The size of a sidebar menu button.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum SidebarMenuButtonSize {
   Sm,
   #[default]

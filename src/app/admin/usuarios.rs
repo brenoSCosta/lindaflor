@@ -652,7 +652,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                   label(attrs: attributes! { for="role" }, "Papel")
                                   select(
                                       attrs: attributes! { name="role" id="role" },
-                                      <option value="admin" selected=(role_admin)>"Administrador"</option>
+                                      <option value="admin" selected=(role_admin) class="bg-red-500 text-primary-foreground">"Administrador"</option>
                                       <option value="moderator" selected=(role_moderator)>"Moderador"</option>
                                       <option value="user" selected=(role_user)>"Usuário"</option>
                                   )

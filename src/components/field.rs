@@ -9,7 +9,7 @@ use super::label::label;
 
 /// The layout of a [`field`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[allow(dead_code)]
+
 pub enum FieldOrientation {
   /// Stack the label, control, and supporting text.
   #[default]
@@ -38,7 +38,7 @@ impl FieldOrientation {
 
 /// The text size of a [`field_legend`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[allow(dead_code)]
+
 pub enum FieldLegendVariant {
   /// A heading for a section of the form.
   #[default]

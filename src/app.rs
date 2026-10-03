@@ -1,4 +1,3 @@
-pub mod accept_invitation;
 pub mod admin;
 pub mod app_sidebar;
 pub mod auth_helpers;
@@ -12,7 +11,6 @@ pub mod exemplos;
 pub mod forgot_password;
 pub mod login;
 pub mod pedido;
-pub mod permissions;
 pub mod politica_privacidade;
 pub mod produtos;
 pub mod reset_password;

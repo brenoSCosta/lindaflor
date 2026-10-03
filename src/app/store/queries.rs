@@ -6,12 +6,10 @@ pub struct ProductSummary {
   pub id: Uuid,
   pub name: String,
   pub slug: String,
-  #[allow(dead_code)]
-  pub description: Option<String>,
+
   pub price_in_cents: i32,
   pub category: String,
-  #[allow(dead_code)]
-  pub featured: bool,
+
   pub image_url: Option<String>,
   pub available_total: i32,
 }
@@ -34,14 +32,9 @@ pub struct ProductDetail {
   pub description: Option<String>,
   pub price_in_cents: i32,
   pub category: String,
-  #[allow(dead_code)]
-  pub featured: bool,
-  #[allow(dead_code)]
-  pub available_total: i32,
+
   pub images: Vec<ProductImage>,
   pub variants: Vec<ProductVariant>,
-  #[allow(dead_code)]
-  pub collection: Option<CollectionBrief>,
 }
 
 #[derive(Clone)]
@@ -49,18 +42,6 @@ pub struct ProductImage {
   pub id: Uuid,
   pub url: String,
   pub alt: Option<String>,
-  #[allow(dead_code)]
-  pub sort_order: i32,
-}
-
-#[derive(Clone)]
-pub struct CollectionBrief {
-  #[allow(dead_code)]
-  pub id: Uuid,
-  #[allow(dead_code)]
-  pub name: String,
-  #[allow(dead_code)]
-  pub slug: String,
 }
 
 #[derive(Clone)]
@@ -74,12 +55,45 @@ pub struct CollectionSummary {
 
 pub struct StoreSettings {
   pub whatsapp_number: Option<String>,
-  #[allow(dead_code)]
+
   pub whatsapp_message_template: Option<String>,
   pub pix_key: Option<String>,
   pub pix_key_type: Option<String>,
   pub pix_merchant_name: Option<String>,
   pub pix_merchant_city: Option<String>,
+}
+
+pub const DEFAULT_WHATSAPP_NUMBER: &str = "5521992314267";
+
+pub fn render_whatsapp_template(
+  template: Option<&str>,
+  vars: &[(&str, &str)],
+  fallback: &str,
+) -> String {
+  let template = template.map(str::trim).filter(|t| !t.is_empty());
+  let Some(template) = template else {
+    return fallback.to_string();
+  };
+  let mut rendered = template.to_string();
+  for (key, value) in vars {
+    rendered = rendered.replace(&format!("{{{{{}}}}}", key), value);
+  }
+  rendered
+}
+
+pub fn urlencode(text: &str) -> String {
+  let mut result = String::new();
+  for b in text.bytes() {
+    match b {
+      b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+        result.push(b as char);
+      }
+      _ => {
+        result.push_str(&format!("%{:02X}", b));
+      }
+    }
+  }
+  result
 }
 
 pub fn format_price(cents: i32) -> String {
@@ -128,7 +142,7 @@ pub async fn list_products(
   collection_slug: Option<&str>,
 ) -> Result<Vec<ProductSummary>, sqlx::Error> {
   let mut sql = String::from(
-        "SELECT p.id, p.name, p.slug, p.description, p.price_in_cents, p.category::text AS category, p.featured,
+        "SELECT p.id, p.name, p.slug, p.price_in_cents, p.category::text AS category,
             (SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.sort_order ASC LIMIT 1) AS image_url,
             COALESCE((SELECT SUM(GREATEST(i.quantity - i.reserved, 0))::int
                 FROM inventory i
@@ -194,7 +208,7 @@ pub async fn get_product_by_slug(
   slug: &str,
 ) -> Result<Option<ProductDetail>, sqlx::Error> {
   let row = sqlx::query!(
-        "SELECT id, name, slug, description, price_in_cents, category::text AS \"category!\", featured, collection_id
+        "SELECT id, name, slug, description, price_in_cents, category::text AS \"category!\"
          FROM products WHERE slug = $1 AND active = true",
         slug
     )
@@ -208,7 +222,7 @@ pub async fn get_product_by_slug(
 
   let images = sqlx::query_as!(
         ProductImageRow,
-        "SELECT id, url, alt, sort_order FROM product_images WHERE product_id = $1 ORDER BY sort_order ASC",
+        "SELECT id, url, alt FROM product_images WHERE product_id = $1 ORDER BY sort_order ASC",
         product.id
     )
     .fetch_all(pool)
@@ -226,21 +240,6 @@ pub async fn get_product_by_slug(
     .fetch_all(pool)
     .await?;
 
-  let available_total: i32 =
-    variants.iter().map(|v| v.available.unwrap_or(0)).sum();
-
-  let collection = match &product.collection_id {
-    Some(cid) => sqlx::query_as!(
-      CollectionBriefRow,
-      "SELECT id, name, slug FROM collections WHERE id = $1",
-      cid
-    )
-    .fetch_optional(pool)
-    .await?
-    .map(|c| c.into()),
-    None => None,
-  };
-
   Ok(Some(ProductDetail {
     id: product.id,
     name: product.name,
@@ -248,8 +247,6 @@ pub async fn get_product_by_slug(
     description: product.description,
     price_in_cents: product.price_in_cents,
     category: product.category,
-    featured: product.featured,
-    available_total,
     images: images.into_iter().map(|i| i.into()).collect(),
     variants: variants
       .into_iter()
@@ -262,7 +259,6 @@ pub async fn get_product_by_slug(
         available: v.available.unwrap_or(0),
       })
       .collect(),
-    collection,
   }))
 }
 
@@ -360,10 +356,8 @@ struct ProductSummaryRow {
   id: Uuid,
   name: String,
   slug: String,
-  description: Option<String>,
   price_in_cents: i32,
   category: String,
-  featured: bool,
   image_url: Option<String>,
   available_total: Option<i32>,
 }
@@ -374,10 +368,8 @@ impl From<ProductSummaryRow> for ProductSummary {
       id: r.id,
       name: r.name,
       slug: r.slug,
-      description: r.description,
       price_in_cents: r.price_in_cents,
       category: r.category,
-      featured: r.featured,
       image_url: r.image_url,
       available_total: r.available_total.unwrap_or(0),
     }
@@ -389,7 +381,6 @@ struct ProductImageRow {
   id: Uuid,
   url: String,
   alt: Option<String>,
-  sort_order: i32,
 }
 
 impl From<ProductImageRow> for ProductImage {
@@ -398,24 +389,6 @@ impl From<ProductImageRow> for ProductImage {
       id: r.id,
       url: r.url,
       alt: r.alt,
-      sort_order: r.sort_order,
-    }
-  }
-}
-
-#[derive(sqlx::FromRow)]
-struct CollectionBriefRow {
-  id: Uuid,
-  name: String,
-  slug: String,
-}
-
-impl From<CollectionBriefRow> for CollectionBrief {
-  fn from(r: CollectionBriefRow) -> Self {
-    CollectionBrief {
-      id: r.id,
-      name: r.name,
-      slug: r.slug,
     }
   }
 }

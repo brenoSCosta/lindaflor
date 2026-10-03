@@ -7,7 +7,6 @@ use topcoat::{
 ///
 /// [`Default`] is `AvatarSize::Md`, used when no size is given.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum AvatarSize {
   /// A compact avatar for dense lists.
   Sm,

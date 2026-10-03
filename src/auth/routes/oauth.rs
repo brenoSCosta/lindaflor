@@ -234,35 +234,21 @@ pub async fn google_callback(cx: &Cx) -> Result<()> {
 
   let access_expires = tokens.expires_in.map(expires_at_from_secs);
 
+  let account = GoogleAccountUpsert {
+    google_sub: &google_sub,
+    image: image.as_deref(),
+    email_verified,
+    access_token: &tokens.access_token,
+    refresh_token: tokens.refresh_token.as_deref(),
+    id_token: tokens.id_token.as_deref(),
+    scope: tokens.scope.as_deref(),
+    access_expires,
+  };
+
   let user_id = if let Some(link_user_id) = oauth_state.link_user_id {
-    link_google_account(
-      pool,
-      link_user_id,
-      &google_sub,
-      image.as_deref(),
-      email_verified,
-      &tokens.access_token,
-      tokens.refresh_token.as_deref(),
-      tokens.id_token.as_deref(),
-      tokens.scope.as_deref(),
-      access_expires,
-    )
-    .await?
+    link_google_account(pool, link_user_id, account).await?
   } else {
-    find_or_create_google_user(
-      pool,
-      &google_sub,
-      &email,
-      &name,
-      image.as_deref(),
-      email_verified,
-      &tokens.access_token,
-      tokens.refresh_token.as_deref(),
-      tokens.id_token.as_deref(),
-      tokens.scope.as_deref(),
-      access_expires,
-    )
-    .await?
+    find_or_create_google_user(pool, &email, &name, account).await?
   };
 
   let user_row = sqlx::query!(
@@ -295,20 +281,33 @@ pub async fn google_callback(cx: &Cx) -> Result<()> {
   Err(redirect(callback_path).into())
 }
 
+/// Grouped Google account upsert data to keep fn signatures small.
+#[derive(Debug, Clone, Copy)]
+struct GoogleAccountUpsert<'a> {
+  google_sub: &'a str,
+  image: Option<&'a str>,
+  email_verified: bool,
+  access_token: &'a str,
+  refresh_token: Option<&'a str>,
+  id_token: Option<&'a str>,
+  scope: Option<&'a str>,
+  access_expires: Option<PrimitiveDateTime>,
+}
+
 /// Link a Google account to an already-authenticated user (link-social flow).
-#[allow(clippy::too_many_arguments)]
 async fn link_google_account(
   pool: &PgPool,
   link_user_id: Uuid,
-  google_sub: &str,
-  image: Option<&str>,
-  email_verified: bool,
-  access_token: &str,
-  refresh_token: Option<&str>,
-  id_token: Option<&str>,
-  scope: Option<&str>,
-  access_expires: Option<PrimitiveDateTime>,
+  account: GoogleAccountUpsert<'_>,
 ) -> Result<Uuid> {
+  let image = account.image;
+  let email_verified = account.email_verified;
+  let google_sub = account.google_sub;
+  let access_token = account.access_token;
+  let refresh_token = account.refresh_token;
+  let id_token = account.id_token;
+  let scope = account.scope;
+  let access_expires = account.access_expires;
   let user_exists =
     sqlx::query!("SELECT id FROM users WHERE id = $1", link_user_id)
       .fetch_optional(pool)
@@ -404,20 +403,20 @@ async fn link_google_account(
   Ok(link_user_id)
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn find_or_create_google_user(
   pool: &PgPool,
-  google_sub: &str,
   email: &str,
   name: &str,
-  image: Option<&str>,
-  email_verified: bool,
-  access_token: &str,
-  refresh_token: Option<&str>,
-  id_token: Option<&str>,
-  scope: Option<&str>,
-  access_expires: Option<PrimitiveDateTime>,
+  account: GoogleAccountUpsert<'_>,
 ) -> Result<Uuid> {
+  let google_sub = account.google_sub;
+  let image = account.image;
+  let email_verified = account.email_verified;
+  let access_token = account.access_token;
+  let refresh_token = account.refresh_token;
+  let id_token = account.id_token;
+  let scope = account.scope;
+  let access_expires = account.access_expires;
   // Existing Google account linkage.
   if let Some(existing) = sqlx::query!(
     r#"

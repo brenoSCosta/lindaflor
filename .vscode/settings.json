@@ -39,10 +39,6 @@
   "rust-analyzer.check.command": "clippy",
   "rust-analyzer.procMacro.enable": true,
   "rust-analyzer.cargo.buildScripts.enable": true,
-  "editor.formatOnSave": true,
-  "editor.codeActionsOnSave": {
-    "source.removeUnusedImports": "always"
-  },
   "files.associations": {
     "*.css": "tailwindcss"
   },

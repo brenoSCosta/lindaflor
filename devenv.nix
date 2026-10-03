@@ -1,5 +1,6 @@
 {
   pkgs,
+  lib,
   ...
 }:
 
@@ -31,6 +32,7 @@
     pkgs.zlib
   ];
   env.DATABASE_URL = "postgres://postgres:postgres@127.0.0.1:4201/topcoat";
+  env.PGPORT = lib.mkForce "4201";
   env.VALKEY_URL = "redis://127.0.0.1:4202";
   env.S3_ENDPOINT = "http://127.0.0.1:4203";
   env.S3_REGION = "us-east-1";
@@ -96,10 +98,42 @@
       host    all             all             127.0.0.1/32            trust
       host    all             all             ::1/128                 trust
     '';
+    settings.port = lib.mkForce 4201;
   };
 
+  processes.postgres.exec = lib.mkForce ''
+    set -euo pipefail
+    state_dir="''${PGDATA:-''${DEVENV_STATE:-.devenv/state}/postgres}"
+    if [ -f "$state_dir/postmaster.pid" ]; then
+      pid=$(head -n 1 "$state_dir/postmaster.pid" || true)
+      if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        echo "Stopping leftover Postgres (pid $pid)"
+        pg_ctl -D "$state_dir" stop -m fast || kill "$pid" || true
+      fi
+    fi
+    exec start-postgres
+  '';
+
   processes.valkey = {
-    exec = "valkey-server --port 4202";
+    exec = ''
+      # Valkey rewrites its cmdline to "valkey-server *:4202", so match the port.
+      for pid in $(pgrep -x valkey-server || true); do
+        cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" || true)
+        case "$cmd" in
+          *4202*)
+            echo "Stopping leftover Valkey (pid $pid) on port 4202"
+            kill "$pid" || true
+            ;;
+        esac
+      done
+      for _ in $(seq 1 50); do
+        if ! { ss -H -ltn 'sport = :4202' 2>/dev/null || true; } | grep -q .; then
+          break
+        fi
+        sleep 0.1
+      done
+      exec valkey-server --bind 127.0.0.1 --port 4202
+    '';
   };
 
   processes.rustfs = {
@@ -137,24 +171,6 @@
   processes.server = {
     exec = ''
       export PATH="''${DEVENV_ROOT}/.devenv/state/cargo-install/bin:''${PATH}"
-
-      echo ""
-      echo "┌─────────────────────────────────────────────────────────┐"
-      echo "│  topcoat full stack running                             │"
-      echo "├─────────────────────────────────────────────────────────┤"
-      echo "│  PostgreSQL: localhost:''${PGPORT:-4201} (db: topcoat, user: postgres)│"
-      echo "│  Valkey:     localhost:4202                             │"
-      echo "│  RustFS S3:  localhost:4203                             │"
-      echo "│  RustFS console: http://127.0.0.1:4204                  │"
-      echo "│  App:        http://localhost:4200                      │"
-      echo "│  Scalar:     http://localhost:4200/api/docs             │"
-      echo "│  Swagger:    http://localhost:4200/api/swagger          │"
-      echo "│  OpenAPI:    http://localhost:4200/api/openapi.json     │"
-      echo "│  DB Studio:  http://127.0.0.1:4205                      │"
-      echo "│                                                         │"
-      printf "│  Open: \033]8;;http://localhost:4200\033\\http://localhost:4200\033]8;;\033\\  │\n"
-      echo "└─────────────────────────────────────────────────────────┘"
-      echo ""
 
       # sqlx::query! needs live schema at compile time — migrate before topcoat builds.
       echo "Waiting for Postgres..."
@@ -207,7 +223,7 @@
     echo "┌─────────────────────────────────────────────────────────┐"
     echo "│  topcoat full stack running                             │"
     echo "├─────────────────────────────────────────────────────────┤"
-    echo "│  PostgreSQL: localhost:''${PGPORT:-4201} (db: topcoat, user: postgres)│"
+    echo "│  PostgreSQL: localhost:''${PGPORT:-4201}                │"
     echo "│  Valkey:     localhost:4202                             │"
     echo "│  RustFS S3:  localhost:4203                             │"
     echo "│  RustFS console: http://127.0.0.1:4204                  │"
@@ -216,8 +232,6 @@
     echo "│  Swagger:    http://localhost:4200/api/swagger          │"
     echo "│  OpenAPI:    http://localhost:4200/api/openapi.json     │"
     echo "│  DB Studio:  http://127.0.0.1:4205                      │"
-    echo "│                                                         │"
-    printf "│  Open: \033]8;;http://localhost:4200\033\\http://localhost:4200\033]8;;\033\\  │\n"
     echo "└─────────────────────────────────────────────────────────┘"
     echo ""
   '';

@@ -8,7 +8,7 @@ use topcoat::{
 /// [`Default`] is `SeparatorOrientation::Horizontal`, used when no
 /// orientation is given.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-#[allow(dead_code)]
+
 pub enum SeparatorOrientation {
   /// A rule across the full width of its container.
   #[default]

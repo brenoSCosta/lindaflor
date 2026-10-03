@@ -83,7 +83,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
               )
           )
 
-          <div class="my-6 grid gap-4 sm:grid-cols-3">
+          <div class="my-6 grid gap-4 sm:grid-cols-2">
               <a
                   href="/conta/pedidos"
                   class="rounded-xl border border-border bg-background p-5 shadow-sm transition-colors hover:border-primary"
@@ -97,13 +97,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
               >
                   <p class="text-sm text-muted-foreground">"Configurações"</p>
                   <p class="mt-1 text-2xl font-bold">"Ajustar conta"</p>
-              </a>
-              <a
-                  href="/permissions"
-                  class="rounded-xl border border-border bg-background p-5 shadow-sm transition-colors hover:border-primary"
-              >
-                  <p class="text-sm text-muted-foreground">"Permissões"</p>
-                  <p class="mt-1 text-2xl font-bold">"Ver acesso"</p>
               </a>
           </div>
 
