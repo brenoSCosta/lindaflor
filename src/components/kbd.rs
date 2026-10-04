@@ -7,7 +7,7 @@ use topcoat::{
 const KBD: StaticClass = class!(
   "inline-flex h-5 w-fit min-w-5 shrink-0 items-center justify-center gap-1 \
      rounded-sm border border-border bg-foreground/5 px-1.5 font-sans text-xs font-medium \
-     text-muted-foreground",
+     text-background",
 );
 
 /// A keyboard key label rendered as `<kbd>`.

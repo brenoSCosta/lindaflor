@@ -1,5 +1,3 @@
-//! POST `/api/auth/sign-out`
-
 use serde::Serialize;
 use sqlx::PgPool;
 use topcoat::{

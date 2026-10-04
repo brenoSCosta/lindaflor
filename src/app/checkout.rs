@@ -4,12 +4,12 @@ use topcoat::{
   Result,
   context::Cx,
   context::app_context,
-  router::{content::Form, error::redirect, page},
+  router::{content::Form, error::redirect, href, page},
   view::{View, ViewExt, attributes, view},
 };
 use uuid::Uuid;
 
-use lindaflor::auth::user::current_user_owned;
+use crate::auth::user::current_user_owned;
 
 use crate::components::button::{
   ButtonSize, ButtonVariant, button, button_variants,
@@ -17,6 +17,7 @@ use crate::components::button::{
 use crate::components::card::{
   card, card_content, card_footer, card_header, card_title,
 };
+use crate::components::container::{ContainerVariant, container};
 use crate::components::field::{field, field_label};
 use crate::components::input::input;
 use crate::components::select::select;
@@ -66,18 +67,19 @@ pub async fn page(
 
   if items.is_empty() {
     return Ok(view! {
-            <div class="mx-auto max-w-2xl px-4 py-24 text-center md:px-8">
+            container(
+                variant: ContainerVariant::Narrow,
                 <h1 class="text-4xl font-bold tracking-tight">"Seu carrinho está vazio"</h1>
-                <p class="mt-4 text-muted-foreground">
+                <p class="text-muted-foreground">
                     "Adicione peças ao carrinho antes de finalizar a compra."
                 </p>
                 <a
-                    href="/produtos"
+                    href=(href!(crate::app::produtos::page))
                     class=(button_variants(ButtonVariant::Primary, ButtonSize::Lg))
                 >
                     "Ver catálogo"
                 </a>
-            </div>
+            )
         }
         .boxed());
   }
@@ -124,7 +126,16 @@ pub async fn page(
     let order_id =
       create_order(pool, &items, form_input, session_user_id).await?;
     clear_cart(cx);
-    return Err(redirect(format!("/pedido/{}", order_id)).into());
+    return Err(
+      redirect(
+        href!(
+          crate::app::pedido::id::page,
+          crate::app::pedido::id::Id(order_id)
+        )
+        .resolve(cx),
+      )
+      .into(),
+    );
   }
 
   let zip_digits: String = input_zip_digits(body.as_ref());
@@ -137,11 +148,12 @@ pub async fn page(
   let total = subtotal - discount + shipping.0;
 
   Ok(view! {
-        <main class="mx-auto max-w-6xl px-4 py-12 md:px-8">
-            <h1 class="text-4xl font-bold tracking-tight md:text-5xl">"Checkout"</h1>
+        container(
+            variant: ContainerVariant::Wide,
+            <h1 class="text-4xl font-bold tracking-tight @md/page:text-5xl">"Checkout"</h1>
 
-            <form method="post" action="/checkout" class="mt-10 grid gap-12 lg:grid-cols-[1.2fr_0.8fr]">
-                <div class="flex flex-col gap-8">
+            <form method="post" action=(href!(page)) class="grid gap-4 @lg/page:grid-cols-[1.2fr_0.8fr]">
+                <div class="flex flex-col gap-4">
                     card(
                         card_header(
                             card_title("Contato")
@@ -165,8 +177,8 @@ pub async fn page(
                             card_title("Endereço de entrega")
                         )
                         card_content(
-                            <div class="grid gap-4 sm:grid-cols-2">
-                                <div class="sm:col-span-2">
+                            <div class="grid gap-4 @sm/page:grid-cols-2">
+                                <div class="@sm/page:col-span-2">
                                     field(
                                         field_label(attrs: attributes! { for="name" }, "Nome completo")
                                         input(attrs: attributes! {
@@ -177,7 +189,7 @@ pub async fn page(
                                         })
                                     )
                                 </div>
-                                <div class="sm:col-span-2">
+                                <div class="@sm/page:col-span-2">
                                     field(
                                         field_label(attrs: attributes! { for="phone" }, "WhatsApp (opcional)")
                                         input(attrs: attributes! {
@@ -189,7 +201,7 @@ pub async fn page(
                                         })
                                     )
                                 </div>
-                                <div class="sm:col-span-2">
+                                <div class="@sm/page:col-span-2">
                                     field(
                                         field_label(attrs: attributes! { for="street" }, "Rua")
                                         input(attrs: attributes! {
@@ -360,7 +372,7 @@ pub async fn page(
                     </p>
                 </aside>
             </form>
-        </main>
+        )
     }.boxed())
 }
 

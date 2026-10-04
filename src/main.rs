@@ -1,13 +1,7 @@
-mod app;
-pub mod components;
 mod config;
 mod db;
 mod openapi;
-mod theme;
 mod valkey;
-
-#[cfg(test)]
-mod test_support;
 
 // Link library API + auth modules (routes register via inventory discover).
 use lindaflor::api;
@@ -56,7 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let listener = TcpListener::bind((host.as_str(), cfg.port)).await?;
   tracing::info!("listening on http://{}", listener.local_addr()?);
 
-  topcoat::serve(listener, crate::app::router(pool, valkey_conn, storage))
+  topcoat::serve(listener, lindaflor::app::router(pool, valkey_conn, storage))
     .await?;
 
   Ok(())

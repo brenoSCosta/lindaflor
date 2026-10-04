@@ -1,13 +1,14 @@
 use serde::Deserialize;
 use topcoat::{
   Result,
+  asset::{Asset, asset},
   context::Cx,
   cookie::{Cookie, Cookies, cookies, time::Duration},
   icon::{icon, iconify::iconify_icon},
   router::{
     content::Form,
     error::{SeeOther, see_other},
-    route,
+    href, route,
   },
   view::{Attributes, View, attributes, class, component, view},
 };
@@ -16,36 +17,23 @@ use crate::components::button::{ButtonSize, ButtonVariant, button};
 
 pub const THEME_COOKIE: &str = "theme";
 
-/// Cookie `max-age` in seconds — matches [`write_theme`] (`Duration::days(365)`).
+/// Cookie `max-age` in seconds — matches [`write_theme`] (`Duration::days(365)`)
+/// and the `max-age` in `assets/theme-toggle.js`.
 const THEME_COOKIE_MAX_AGE_SECS: i64 = 365 * 24 * 60 * 60;
 
-/// Blocking inline script for `<head>`: sync `dark` on `<html>` from the `theme`
-/// cookie before paint (next-themes-style FOUC prevention). Default is dark.
-pub const THEME_INIT_SCRIPT: &str = concat!(
-  "<script>(function(){",
-  "var m=document.cookie.match(/(?:^|;\\s*)theme=([^;]*)/);",
-  "var t=m?decodeURIComponent(m[1]):'dark';",
-  "var d=document.documentElement;",
-  "if(t==='light')d.classList.remove('dark');",
-  "else d.classList.add('dark');",
-  "})();</script>"
-);
+/// Content-hashed URL for the blocking `<head>` init script: syncs `dark` on
+/// `<html>` from the `theme` cookie before paint (next-themes-style FOUC
+/// prevention). Default is dark. Rendered once in the root layout.
+pub const THEME_INIT_SCRIPT: Asset = asset!("assets/theme-init.js");
 
-/// Client-side toggle: flip `dark` on `<html>`, persist `theme` cookie, update labels.
-/// Icons swap via CSS (`dark:`) — no navigation.
-const THEME_TOGGLE_ONCLICK: &str = concat!(
-  "(function(b){",
-  "var r=document.documentElement;",
-  "var dark=r.classList.toggle('dark');",
-  "var t=dark?'dark':'light';",
-  "document.cookie='theme='+t+'; path=/; max-age=",
-  "31536000",
-  "';",
-  "var l=dark?'Ativar tema claro':'Ativar tema escuro';",
-  "b.setAttribute('aria-label',l);",
-  "b.setAttribute('title',l);",
-  "})(this)"
-);
+/// Content-hashed URL for the client-side toggle script backing
+/// [`theme_toggle`]. Rendered once in the root layout; the button calls the
+/// `themeToggle(this)` global it defines.
+pub const THEME_TOGGLE_SCRIPT: Asset = asset!("assets/theme-toggle.js");
+
+/// Client-side toggle handler: calls the `themeToggle` global from
+/// `assets/theme-toggle.js`. Icons swap via CSS (`dark:`) — no navigation.
+const THEME_TOGGLE_ONCLICK: &str = "themeToggle(this)";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Theme {
@@ -96,10 +84,12 @@ pub fn toggle_theme(cx: &Cx) -> Theme {
   next
 }
 
-fn safe_redirect(target: Option<&str>) -> &str {
+fn safe_redirect(cx: &Cx, target: Option<&str>) -> String {
   match target {
-    Some(path) if path.starts_with('/') && !path.starts_with("//") => path,
-    _ => "/",
+    Some(path) if path.starts_with('/') && !path.starts_with("//") => {
+      path.to_owned()
+    }
+    _ => href!(crate::app::page).resolve(cx),
   }
 }
 
@@ -116,7 +106,7 @@ pub async fn toggle(
   Form(input): Form<ThemeToggleInput>,
 ) -> Result<SeeOther> {
   toggle_theme(cx);
-  Ok(see_other(safe_redirect(input.redirect.as_deref())))
+  Ok(see_other(safe_redirect(cx, input.redirect.as_deref())))
 }
 
 /// Icon button that toggles theme client-side (class + cookie, no reload).
@@ -132,7 +122,8 @@ pub async fn theme_toggle(
     "Ativar tema escuro"
   };
 
-  // Compile-time check that the onclick max-age stays aligned with write_theme.
+  // Compile-time check that the `max-age` in `assets/theme-toggle.js` stays
+  // aligned with write_theme.
   const _: () = assert!(THEME_COOKIE_MAX_AGE_SECS == 31536000);
 
   Ok(view! {

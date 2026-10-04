@@ -7,23 +7,30 @@ use topcoat::{
   router::{
     content::Form,
     error::{SeeOther, see_other},
-    page, query_params, route,
+    href, page, query_params, route,
   },
   runtime::{Event, shard, signal},
-  view::{View, attributes, view},
+  view::{StaticClass, View, attributes, class, view},
 };
 use uuid::Uuid;
 
-use crate::app::auth_helpers::{encode_query, require_user};
+use crate::app::auth_helpers::require_user;
+use crate::auth::service;
+use crate::auth::user::SessionUser;
 use crate::components::alert::{AlertVariant, alert, alert_title};
 use crate::components::alert_dialog::alert_dialog;
 use crate::components::badge::{BadgeVariant, badge};
 use crate::components::button::{
   ButtonSize, ButtonVariant, button, button_variants,
 };
+use crate::components::container::container;
 use crate::components::dialog::{
   dialog, dialog_content, dialog_description, dialog_footer, dialog_header,
   dialog_title,
+};
+use crate::components::dropdown_menu::{
+  DropdownMenuAlign, DropdownMenuSide, dropdown_menu, dropdown_menu_content,
+  dropdown_menu_separator, dropdown_menu_trigger,
 };
 use crate::components::input::input;
 use crate::components::label::label;
@@ -34,11 +41,16 @@ use crate::components::select::select;
 use crate::components::table::{
   table, table_body, table_cell, table_head, table_header, table_row,
 };
-use lindaflor::auth::service;
-use lindaflor::auth::user::SessionUser;
 
-const ACTION_LINK: &str = "flex w-full items-center rounded-md px-2 py-1.5 text-left text-sm whitespace-nowrap hover:bg-foreground/5";
-const ACTION_DANGER: &str = "flex w-full items-center rounded-md px-2 py-1.5 text-left text-sm whitespace-nowrap text-destructive hover:bg-destructive/10";
+const MENU_ITEM: StaticClass = class!(
+  "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm \
+    whitespace-nowrap outline-none hover:bg-foreground/5 focus-visible:bg-foreground/5 \
+    active:bg-foreground/10",
+);
+
+const MENU_ITEM_DESTRUCTIVE: StaticClass = class!(
+  "text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10",
+);
 
 #[derive(Deserialize)]
 struct IdForm {
@@ -95,10 +107,6 @@ struct UsersQuery {
 
 struct UserRow {
   id: String,
-  menu_id: String,
-  menu_target: String,
-  trigger_style: String,
-  panel_style: String,
   q: String,
   page: String,
   name: String,
@@ -142,29 +150,27 @@ enum PanelKind {
 }
 
 fn users_url(
+  cx: &Cx,
   q: &str,
   page_num: i64,
   extra: Option<(&str, &str)>,
   erro: Option<&str>,
 ) -> String {
-  let mut parts = Vec::new();
+  let page_value = page_num.to_string();
+  let mut pairs = Vec::new();
   if !q.is_empty() {
-    parts.push(format!("q={}", encode_query(q)));
+    pairs.push(("q", q));
   }
   if page_num > 1 {
-    parts.push(format!("page={page_num}"));
+    pairs.push(("page", page_value.as_str()));
   }
   if let Some((key, value)) = extra {
-    parts.push(format!("{key}={}", encode_query(value)));
+    pairs.push((key, value));
   }
   if let Some(erro) = erro.map(str::trim).filter(|s| !s.is_empty()) {
-    parts.push(format!("erro={}", encode_query(erro)));
+    pairs.push(("erro", erro));
   }
-  if parts.is_empty() {
-    "/admin/usuarios".to_string()
-  } else {
-    format!("/admin/usuarios?{}", parts.join("&"))
-  }
+  href!(page).query(pairs).resolve(cx)
 }
 
 fn form_q(raw: &Option<String>) -> String {
@@ -204,12 +210,13 @@ fn admin_error_message(err: &topcoat::Error) -> String {
   }
 }
 
-fn back(q: &str, page_num: i64) -> SeeOther {
-  see_other(users_url(q, page_num, None, None))
+fn back(cx: &Cx, q: &str, page_num: i64) -> SeeOther {
+  see_other(users_url(cx, q, page_num, None, None))
 }
 
-fn fail(q: &str, page_num: i64, err: &topcoat::Error) -> SeeOther {
+fn fail(cx: &Cx, q: &str, page_num: i64, err: &topcoat::Error) -> SeeOther {
   see_other(users_url(
+    cx,
     q,
     page_num,
     None,
@@ -217,8 +224,9 @@ fn fail(q: &str, page_num: i64, err: &topcoat::Error) -> SeeOther {
   ))
 }
 
-fn invalid_id(q: &str, page_num: i64) -> SeeOther {
+fn invalid_id(cx: &Cx, q: &str, page_num: i64) -> SeeOther {
   see_other(users_url(
+    cx,
     q,
     page_num,
     None,
@@ -229,7 +237,9 @@ fn invalid_id(q: &str, page_num: i64) -> SeeOther {
 async fn require_admin(cx: &Cx) -> Result<SessionUser> {
   let su = require_user(cx).await?;
   if !service::is_admin(su.user.role.as_deref()) {
-    return Err(see_other("/dashboard").into());
+    return Err(
+      see_other(href!(crate::app::dashboard::page).resolve(cx)).into(),
+    );
   }
   Ok(su)
 }
@@ -260,8 +270,8 @@ fn role_variant(role: Option<&str>) -> BadgeVariant {
   }
 }
 
-fn action_href(q: &str, page_num: i64, key: &str, id: &str) -> String {
-  users_url(q, page_num, Some((key, id)), None)
+fn action_href(cx: &Cx, q: &str, page_num: i64, key: &str, id: &str) -> String {
+  users_url(cx, q, page_num, Some((key, id)), None)
 }
 
 const USER_QUERY_MAX: usize = 80;
@@ -327,18 +337,9 @@ async fn user_directory(
     .iter()
     .map(|user| {
       let id = user.id.to_string();
-      let menu_id = format!("user-actions-{id}");
-      let menu_target = menu_id.clone();
-      let anchor = format!("--user-actions-{id}");
       let is_self = user.id == actor.user.id;
       let target_admin = service::is_admin(user.role.as_deref());
       UserRow {
-        menu_id,
-        menu_target,
-        trigger_style: format!("anchor-name: {anchor}"),
-        panel_style: format!(
-          "position-anchor: {anchor}; margin: 0; inset: auto; top: calc(anchor(bottom) + 4px); right: anchor(right)"
-        ),
         q: query.clone(),
         page: page_value.clone(),
         name: user.name.clone(),
@@ -350,13 +351,13 @@ async fn user_directory(
         show_unban: !is_self && user.banned,
         show_impersonate: !is_self && !target_admin,
         show_remove: !is_self,
-        href_papel: action_href(&query, page_num, "papel", &id),
-        href_editar: action_href(&query, page_num, "editar", &id),
-        href_banir: action_href(&query, page_num, "banir", &id),
-        href_desbanir: action_href(&query, page_num, "desbanir", &id),
-        href_sessoes: action_href(&query, page_num, "sessoes", &id),
-        href_revogar: action_href(&query, page_num, "revogar_todas", &id),
-        href_remover: action_href(&query, page_num, "remover", &id),
+        href_papel: action_href(cx, &query, page_num, "papel", &id),
+        href_editar: action_href(cx, &query, page_num, "editar", &id),
+        href_banir: action_href(cx, &query, page_num, "banir", &id),
+        href_desbanir: action_href(cx, &query, page_num, "desbanir", &id),
+        href_sessoes: action_href(cx, &query, page_num, "sessoes", &id),
+        href_revogar: action_href(cx, &query, page_num, "revogar_todas", &id),
+        href_remover: action_href(cx, &query, page_num, "remover", &id),
         id,
       }
     })
@@ -374,7 +375,7 @@ async fn user_directory(
   };
 
   Ok(view! {
-      <div class="mb-6 max-w-xl">
+      
           input(attrs: attributes! {
               id="user-search"
               type="search"
@@ -386,7 +387,7 @@ async fn user_directory(
                   current_page.set(1i64);
               })
           })
-      </div>
+      
 
       if is_empty {
           <p class="text-sm text-muted-foreground">"Nenhum usuário encontrado."</p>
@@ -416,47 +417,44 @@ async fn user_directory(
                               }
                           )
                           table_cell(
-                              <button
-                                  type="button"
-                                  popovertarget=(row.menu_target)
-                                  style=(row.trigger_style)
-                                  class=(button_variants(ButtonVariant::Ghost, ButtonSize::Icon))
-                                  aria-label="Abrir menu"
-                              >
-                                  icon(data: iconify_icon!("lucide:more-horizontal"))
-                              </button>
-                              <div
-                                  id=(row.menu_id)
-                                  popover="auto"
-                                  style=(row.panel_style)
-                                  class="min-w-56 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-sm"
-                              >
-                                  <a href=(row.href_papel) class=(ACTION_LINK)>"Definir papel"</a>
-                                  <a href=(row.href_editar) class=(ACTION_LINK)>"Atualizar usuário"</a>
-                                  if row.show_unban || row.show_ban {
-                                      <hr class="-mx-1 my-1 border-border">
-                                      if row.show_unban {
-                                          <a href=(row.href_desbanir) class=(ACTION_LINK)>"Revogar banimento"</a>
-                                      } else {
-                                          <a href=(row.href_banir) class=(ACTION_LINK)>"Banir usuário"</a>
+                              dropdown_menu(
+                                  dropdown_menu_trigger(
+                                      attrs: attributes! {
+                                          class=(button_variants(ButtonVariant::Ghost, ButtonSize::Icon))
+                                          aria-label="Abrir menu"
+                                      },
+                                      icon(data: iconify_icon!("lucide:more-horizontal"))
+                                  )
+                                  dropdown_menu_content(
+                                      align: DropdownMenuAlign::Start,
+                                      side: DropdownMenuSide::Left,
+                                      <a href=(row.href_papel) class=(class!(MENU_ITEM))>"Definir papel"</a>
+                                      <a href=(row.href_editar) class=(class!(MENU_ITEM))>"Atualizar usuário"</a>
+                                      if row.show_unban || row.show_ban {
+                                          dropdown_menu_separator()
+                                          if row.show_unban {
+                                              <a href=(row.href_desbanir) class=(class!(MENU_ITEM))>"Revogar banimento"</a>
+                                          } else {
+                                              <a href=(row.href_banir) class=(class!(MENU_ITEM))>"Banir usuário"</a>
+                                          }
                                       }
-                                  }
-                                  <a href=(row.href_sessoes) class=(ACTION_LINK)>"Listar sessões"</a>
-                                  <a href=(row.href_revogar) class=(ACTION_LINK)>"Revogar todas as sessões"</a>
-                                  if row.show_impersonate {
-                                      <hr class="-mx-1 my-1 border-border">
-                                      <form method="post" action="/admin/usuarios/atuar">
-                                          <input type="hidden" name="user_id" value=(row.id)>
-                                          <input type="hidden" name="q" value=(row.q)>
-                                          <input type="hidden" name="page" value=(row.page)>
-                                          <button type="submit" class=(ACTION_LINK)>"Atuar como usuário"</button>
-                                      </form>
-                                  }
-                                  if row.show_remove {
-                                      <hr class="-mx-1 my-1 border-border">
-                                      <a href=(row.href_remover) class=(ACTION_DANGER)>"Remover usuário"</a>
-                                  }
-                              </div>
+                                      <a href=(row.href_sessoes) class=(class!(MENU_ITEM))>"Listar sessões"</a>
+                                      <a href=(row.href_revogar) class=(class!(MENU_ITEM))>"Revogar todas as sessões"</a>
+                                      if row.show_impersonate {
+                                          dropdown_menu_separator()
+                                          <form method="post" action=(href!(impersonate))>
+                                              <input type="hidden" name="user_id" value=(row.id)>
+                                              <input type="hidden" name="q" value=(row.q)>
+                                              <input type="hidden" name="page" value=(row.page)>
+                                              <button type="submit" class=(class!(MENU_ITEM))>"Atuar como usuário"</button>
+                                          </form>
+                                      }
+                                      if row.show_remove {
+                                          dropdown_menu_separator()
+                                          <a href=(row.href_remover) class=(class!(MENU_ITEM, MENU_ITEM_DESTRUCTIVE))>"Remover usuário"</a>
+                                      }
+                                  )
+                              )
                           )
                       )
                   }
@@ -465,7 +463,6 @@ async fn user_directory(
       }
 
       if show_pagination {
-          <div class="mt-6">
               pagination(
                   pagination_content(
                       if has_prev {
@@ -495,7 +492,6 @@ async fn user_directory(
                       }
                   )
               )
-          </div>
       }
   })
 }
@@ -616,16 +612,17 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     "Isso excluirá permanentemente {subject_name} e seus dados. Esta ação não pode ser desfeita."
   );
   let sessions_title = format!("Sessões de {subject_name}");
-  let list_href = users_url(&q, page_num, None, None);
-  let revoke_all_href = action_href(&q, page_num, "revogar_todas", &dialog_id);
+  let list_href = users_url(cx, &q, page_num, None, None);
+  let revoke_all_href =
+    action_href(cx, &q, page_num, "revogar_todas", &dialog_id);
   let hidden_q = q.clone();
   let hidden_page = page_value;
   let cancel_href = list_href;
 
   Ok(view! {
-      <div class="p-8">
-              <h1 class="mb-2 text-2xl font-semibold tracking-tight">"Gerenciamento de usuários"</h1>
-              <p class="mb-8 text-muted-foreground">"Gerencie papéis, banimentos, sessões e representação de usuários."</p>
+      container(
+              <h1 class="text-2xl font-semibold tracking-tight">"Gerenciamento de usuários"</h1>
+              <p class="text-muted-foreground">"Gerencie papéis, banimentos, sessões e representação de usuários."</p>
 
               if let Some(message) = error_message {
                   <div class="mb-6">
@@ -644,7 +641,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                       attrs: attributes! { aria-label="Definir papel" },
                       dialog_content(
                           dialog_header(dialog_title("Definir papel"))
-                          <form method="post" action="/admin/usuarios/papel" class="flex flex-col gap-4">
+                          <form method="post" action=(href!(set_role)) class="flex flex-col gap-4">
                               <input type="hidden" name="user_id" value=(dialog_id)>
                               <input type="hidden" name="q" value=(hidden_q)>
                               <input type="hidden" name="page" value=(hidden_page)>
@@ -652,7 +649,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                   label(attrs: attributes! { for="role" }, "Papel")
                                   select(
                                       attrs: attributes! { name="role" id="role" },
-                                      <option value="admin" selected=(role_admin) class="bg-red-500 text-primary-foreground">"Administrador"</option>
+                                      <option value="admin" selected=(role_admin)>"Administrador"</option>
                                       <option value="moderator" selected=(role_moderator)>"Moderador"</option>
                                       <option value="user" selected=(role_user)>"Usuário"</option>
                                   )
@@ -674,7 +671,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                       attrs: attributes! { aria-label="Atualizar usuário" },
                       dialog_content(
                           dialog_header(dialog_title("Atualizar usuário"))
-                          <form method="post" action="/admin/usuarios/nome" class="flex flex-col gap-4">
+                          <form method="post" action=(href!(update_name)) class="flex flex-col gap-4">
                               <input type="hidden" name="user_id" value=(dialog_id)>
                               <input type="hidden" name="q" value=(hidden_q)>
                               <input type="hidden" name="page" value=(hidden_page)>
@@ -709,7 +706,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                               dialog_title("Banir usuário")
                               dialog_description((ban_text))
                           )
-                          <form method="post" action="/admin/usuarios/banir" class="flex flex-col gap-4">
+                          <form method="post" action=(href!(ban_user)) class="flex flex-col gap-4">
                               <input type="hidden" name="user_id" value=(dialog_id)>
                               <input type="hidden" name="q" value=(hidden_q)>
                               <input type="hidden" name="page" value=(hidden_page)>
@@ -740,7 +737,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                               dialog_title("Revogar banimento")
                               dialog_description((unban_text))
                           )
-                          <form method="post" action="/admin/usuarios/desbanir">
+                          <form method="post" action=(href!(unban_user))>
                               <input type="hidden" name="user_id" value=(dialog_id)>
                               <input type="hidden" name="q" value=(hidden_q)>
                               <input type="hidden" name="page" value=(hidden_page)>
@@ -772,7 +769,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                               <p class="truncate text-xs text-muted-foreground">(session.ip_address)</p>
                                               <p class="truncate text-xs text-muted-foreground">(session.user_agent)</p>
                                           </div>
-                                          <form method="post" action="/admin/usuarios/sessoes/revogar">
+                                          <form method="post" action=(href!(revoke_session))>
                                               <input type="hidden" name="session_id" value=(session.id)>
                                               <input type="hidden" name="user_id" value=(session.user_id)>
                                               <input type="hidden" name="q" value=(session.q)>
@@ -807,7 +804,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                               dialog_title("Revogar todas as sessões")
                               dialog_description((revoke_text))
                           )
-                          <form method="post" action="/admin/usuarios/sessoes/revogar-todas">
+                          <form method="post" action=(href!(revoke_sessions))>
                               <input type="hidden" name="user_id" value=(dialog_id)>
                               <input type="hidden" name="q" value=(hidden_q)>
                               <input type="hidden" name="page" value=(hidden_page)>
@@ -831,7 +828,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                               dialog_title("Remover usuário")
                               dialog_description((remove_text))
                           )
-                          <form method="post" action="/admin/usuarios/remover">
+                          <form method="post" action=(href!(remove_user))>
                               <input type="hidden" name="user_id" value=(dialog_id)>
                               <input type="hidden" name="q" value=(hidden_q)>
                               <input type="hidden" name="page" value=(hidden_page)>
@@ -847,7 +844,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                       )
                   )
               }
-      </div>
+      )
   })
 }
 
@@ -857,12 +854,12 @@ async fn set_role(cx: &Cx, Form(body): Form<RoleForm>) -> Result<SeeOther> {
   let q = form_q(&body.q);
   let page_num = form_page(&body.page);
   let Some(user_id) = parse_uuid(&body.user_id) else {
-    return Ok(invalid_id(&q, page_num));
+    return Ok(invalid_id(cx, &q, page_num));
   };
   let pool = app_context::<PgPool>(cx);
   match service::set_user_role(pool, &actor, user_id, &body.role).await {
-    Ok(_) => Ok(back(&q, page_num)),
-    Err(err) => Ok(fail(&q, page_num, &err)),
+    Ok(_) => Ok(back(cx, &q, page_num)),
+    Err(err) => Ok(fail(cx, &q, page_num, &err)),
   }
 }
 
@@ -872,13 +869,13 @@ async fn update_name(cx: &Cx, Form(body): Form<NameForm>) -> Result<SeeOther> {
   let q = form_q(&body.q);
   let page_num = form_page(&body.page);
   let Some(user_id) = parse_uuid(&body.user_id) else {
-    return Ok(invalid_id(&q, page_num));
+    return Ok(invalid_id(cx, &q, page_num));
   };
   let pool = app_context::<PgPool>(cx);
   match service::admin_update_user_name(pool, &actor, user_id, &body.name).await
   {
-    Ok(_) => Ok(back(&q, page_num)),
-    Err(err) => Ok(fail(&q, page_num, &err)),
+    Ok(_) => Ok(back(cx, &q, page_num)),
+    Err(err) => Ok(fail(cx, &q, page_num, &err)),
   }
 }
 
@@ -888,14 +885,14 @@ async fn ban_user(cx: &Cx, Form(body): Form<BanForm>) -> Result<SeeOther> {
   let q = form_q(&body.q);
   let page_num = form_page(&body.page);
   let Some(user_id) = parse_uuid(&body.user_id) else {
-    return Ok(invalid_id(&q, page_num));
+    return Ok(invalid_id(cx, &q, page_num));
   };
   let pool = app_context::<PgPool>(cx);
   match service::ban_user(pool, &actor, user_id, body.ban_reason.as_deref())
     .await
   {
-    Ok(_) => Ok(back(&q, page_num)),
-    Err(err) => Ok(fail(&q, page_num, &err)),
+    Ok(_) => Ok(back(cx, &q, page_num)),
+    Err(err) => Ok(fail(cx, &q, page_num, &err)),
   }
 }
 
@@ -905,12 +902,12 @@ async fn unban_user(cx: &Cx, Form(body): Form<IdForm>) -> Result<SeeOther> {
   let q = form_q(&body.q);
   let page_num = form_page(&body.page);
   let Some(user_id) = parse_uuid(&body.user_id) else {
-    return Ok(invalid_id(&q, page_num));
+    return Ok(invalid_id(cx, &q, page_num));
   };
   let pool = app_context::<PgPool>(cx);
   match service::unban_user(pool, &actor, user_id).await {
-    Ok(_) => Ok(back(&q, page_num)),
-    Err(err) => Ok(fail(&q, page_num, &err)),
+    Ok(_) => Ok(back(cx, &q, page_num)),
+    Err(err) => Ok(fail(cx, &q, page_num, &err)),
   }
 }
 
@@ -920,18 +917,18 @@ async fn impersonate(cx: &Cx, Form(body): Form<IdForm>) -> Result<SeeOther> {
   let q = form_q(&body.q);
   let page_num = form_page(&body.page);
   let Some(user_id) = parse_uuid(&body.user_id) else {
-    return Ok(invalid_id(&q, page_num));
+    return Ok(invalid_id(cx, &q, page_num));
   };
   let pool = app_context::<PgPool>(cx);
   match service::impersonate_user(cx, pool, &actor, user_id).await {
-    Ok(_) => Ok(see_other("/dashboard")),
+    Ok(_) => Ok(see_other(href!(crate::app::dashboard::page).resolve(cx))),
     Err(err) => {
       let message = if err.to_string() == "forbidden" {
         "Não é possível atuar como um administrador.".to_string()
       } else {
         admin_error_message(&err)
       };
-      Ok(see_other(users_url(&q, page_num, None, Some(&message))))
+      Ok(see_other(users_url(cx, &q, page_num, None, Some(&message))))
     }
   }
 }
@@ -945,14 +942,20 @@ async fn revoke_session(
   let q = form_q(&body.q);
   let page_num = form_page(&body.page);
   let Some(session_id) = parse_uuid(&body.session_id) else {
-    return Ok(invalid_id(&q, page_num));
+    return Ok(invalid_id(cx, &q, page_num));
   };
   let pool = app_context::<PgPool>(cx);
-  let back_to =
-    users_url(&q, page_num, Some(("sessoes", body.user_id.trim())), None);
+  let back_to = users_url(
+    cx,
+    &q,
+    page_num,
+    Some(("sessoes", body.user_id.trim())),
+    None,
+  );
   match service::revoke_admin_session(pool, &actor, session_id).await {
     Ok(_) => Ok(see_other(back_to)),
     Err(err) => Ok(see_other(users_url(
+      cx,
       &q,
       page_num,
       Some(("sessoes", body.user_id.trim())),
@@ -970,12 +973,12 @@ async fn revoke_sessions(
   let q = form_q(&body.q);
   let page_num = form_page(&body.page);
   let Some(user_id) = parse_uuid(&body.user_id) else {
-    return Ok(invalid_id(&q, page_num));
+    return Ok(invalid_id(cx, &q, page_num));
   };
   let pool = app_context::<PgPool>(cx);
   match service::revoke_admin_user_sessions(pool, &actor, user_id).await {
-    Ok(_) => Ok(back(&q, page_num)),
-    Err(err) => Ok(fail(&q, page_num, &err)),
+    Ok(_) => Ok(back(cx, &q, page_num)),
+    Err(err) => Ok(fail(cx, &q, page_num, &err)),
   }
 }
 
@@ -985,11 +988,11 @@ async fn remove_user(cx: &Cx, Form(body): Form<IdForm>) -> Result<SeeOther> {
   let q = form_q(&body.q);
   let page_num = form_page(&body.page);
   let Some(user_id) = parse_uuid(&body.user_id) else {
-    return Ok(invalid_id(&q, page_num));
+    return Ok(invalid_id(cx, &q, page_num));
   };
   let pool = app_context::<PgPool>(cx);
   match service::remove_user(pool, &actor, user_id).await {
-    Ok(_) => Ok(back(&q, page_num)),
-    Err(err) => Ok(fail(&q, page_num, &err)),
+    Ok(_) => Ok(back(cx, &q, page_num)),
+    Err(err) => Ok(fail(cx, &q, page_num, &err)),
   }
 }

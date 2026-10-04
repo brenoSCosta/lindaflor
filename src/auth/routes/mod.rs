@@ -1,5 +1,3 @@
-//! Better Auth-compatible JSON routes under `/api/auth/`.
-
 pub mod accounts;
 pub mod admin;
 pub mod change_email;

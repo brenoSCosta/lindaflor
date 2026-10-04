@@ -3,21 +3,24 @@ use sqlx::PgPool;
 use topcoat::{
   Result,
   context::{Cx, app_context},
-  router::{content::Form, page, query_params, response::Response, route},
+  router::{
+    content::Form, href, page, query_params, response::Response, route,
+  },
   view::{View, view},
 };
 
+use crate::auth::service::{
+  self, SignInOutcome, portuguese_error_message, set_pending_2fa_cookie,
+};
 use crate::components::button::{ButtonVariant, button};
 use crate::components::card::{
   card, card_content, card_description, card_footer, card_header, card_title,
 };
+use crate::components::container::{ContainerVariant, container};
 use crate::components::input::input;
 use crate::components::label::label;
 use crate::components::separator::separator;
 use crate::components::toast::{Toast, set_toast, toast_redirect};
-use lindaflor::auth::service::{
-  self, SignInOutcome, portuguese_error_message, set_pending_2fa_cookie,
-};
 use topcoat::view::attributes;
 
 #[derive(Deserialize)]
@@ -38,7 +41,7 @@ struct LoginQuery {
   next: Option<String>,
 }
 
-fn safe_next(invite_id: Option<&str>, next: Option<&str>) -> String {
+fn safe_next(cx: &Cx, invite_id: Option<&str>, next: Option<&str>) -> String {
   if let Some(id) = invite_id.filter(|s| !s.is_empty()) {
     return format!("/accept-invitation?id={id}");
   }
@@ -46,7 +49,7 @@ fn safe_next(invite_id: Option<&str>, next: Option<&str>) -> String {
     Some(path) if path.starts_with('/') && !path.starts_with("//") => {
       path.to_owned()
     }
-    _ => "/dashboard".to_string(),
+    _ => href!(crate::app::dashboard::page).resolve(cx),
   }
 }
 
@@ -68,9 +71,9 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let submit_label = if is_signup { "Cadastrar" } else { "Entrar" };
   let switch_label = if is_signup { "Entrar" } else { "Cadastre-se" };
   let switch_url = if is_signup {
-    "/login?mode=signin"
+    href!(page).query([("mode", "signin")])
   } else {
-    "/login?mode=signup"
+    href!(page).query([("mode", "signup")])
   };
   let switch_prompt = if is_signup {
     "Já tem uma conta? "
@@ -87,8 +90,8 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let next = query.next.clone().unwrap_or_default();
 
   Ok(view! {
-      <div class="flex min-h-screen items-center justify-center bg-background px-4 py-8">
-          <div class="w-full max-w-md">
+      container(
+          variant: ContainerVariant::Centered,
               card(
                   card_header(
                       card_title((title))
@@ -97,7 +100,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                   card_content(
                       <form
                           method="post"
-                          action="/login"
+                          action=(href!(login_post))
                           class="flex flex-col gap-4"
                           data-toast-promise=""
                           data-toast-loading=(loading_label)
@@ -125,7 +128,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                           </div>
                           if !is_signup {
                               <div class="text-right">
-                                  <a href="/forgot-password" class="text-sm text-primary">
+                                  <a href=(href!(crate::app::forgot_password::page)) class="text-sm text-primary">
                                       "Esqueceu a senha?"
                                   </a>
                               </div>
@@ -151,8 +154,8 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                               separator(attrs: attributes! { class="flex-1" })
                           </div>
                           <div class="flex w-full flex-col gap-2">
-                              <form method="post" action="/login/google" class="w-full">
-                                  <input type="hidden" name="callback_url" value=(safe_next(query.invite_id.as_deref(), query.next.as_deref()))>
+                              <form method="post" action=(href!(login_google)) class="w-full">
+                                  <input type="hidden" name="callback_url" value=(safe_next(cx, query.invite_id.as_deref(), query.next.as_deref()))>
                                   button(
                                       variant: ButtonVariant::Outline,
                                       attrs: attributes! { type="submit" class="w-full" },
@@ -165,13 +168,12 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
               )
               <p class="mt-6 text-center text-xs text-muted-foreground">
                   "Ao continuar, você concorda com nossos "
-                  <a href="/termos" class="text-primary">"Termos de Uso"</a>
+                  <a href=(href!(crate::app::termos::page)) class="text-primary">"Termos de Uso"</a>
                   " e "
-                  <a href="/politica-privacidade" class="text-primary">"Política de Privacidade"</a>
+                  <a href=(href!(crate::app::politica_privacidade::page)) class="text-primary">"Política de Privacidade"</a>
                   "."
               </p>
-          </div>
-      </div>
+      )
   })
 }
 
@@ -182,7 +184,7 @@ fn login_error_redirect(
 ) -> Result<Response> {
   set_toast(cx, Toast::error(message));
   let mode = if is_signup { "signup" } else { "signin" };
-  toast_redirect(cx, format!("/login?mode={mode}"))
+  toast_redirect(cx, href!(page).query([("mode", mode)]).resolve(cx))
 }
 
 #[route(POST "/login")]
@@ -192,7 +194,7 @@ pub async fn login_post(
 ) -> Result<Response> {
   let pool = app_context::<PgPool>(cx);
   let is_signup = body.mode.as_deref() == Some("signup");
-  let next = safe_next(body.invite_id.as_deref(), body.next.as_deref());
+  let next = safe_next(cx, body.invite_id.as_deref(), body.next.as_deref());
   let email = body.email.as_deref().unwrap_or("");
   let password = body.password.as_deref().unwrap_or("");
 
@@ -215,7 +217,7 @@ pub async fn login_post(
       }
       Ok(SignInOutcome::TwoFactorRequired { token }) => {
         set_pending_2fa_cookie(cx, &token);
-        toast_redirect(cx, "/two-factor")
+        toast_redirect(cx, href!(crate::app::two_factor::page).resolve(cx))
       }
       Err(err) => {
         login_error_redirect(cx, false, &portuguese_error_message(&err))

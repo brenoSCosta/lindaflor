@@ -1,5 +1,3 @@
-//! Linked accounts: list / link-social / unlink (authenticated).
-
 use http::StatusCode;
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;

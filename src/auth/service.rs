@@ -1,5 +1,3 @@
-//! Shared auth business logic used by JSON `/api/auth/*` routes and HTML pages.
-
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use sqlx::PgPool;
@@ -23,8 +21,8 @@ use crate::auth::routes::oauth::{OAUTH_STATE_TTL_SECS, store_oauth_state};
 use crate::auth::routes::two_factor::{PENDING_2FA_PREFIX, create_pending_2fa};
 use crate::auth::session_store::{self, token_hash_hex};
 use crate::auth::totp::{
-  consume_backup_code, encode_backup_codes, generate_backup_codes,
-  generate_secret, verify_code,
+  consume_backup_code, generate_backup_codes, generate_secret,
+  hash_backup_codes, verify_code,
 };
 use crate::auth::user::{SessionUser, User};
 
@@ -670,9 +668,8 @@ pub async fn complete_2fa_with_backup(
     return Err(unauthorized().into());
   }
 
-  let remaining =
+  let stored =
     consume_backup_code(&tf.backup_codes, code).ok_or_else(unauthorized)?;
-  let stored = encode_backup_codes(&remaining);
   sqlx::query!(
     r#"UPDATE two_factor SET backup_codes = $2 WHERE id = $1"#,
     tf.id,
@@ -1142,7 +1139,7 @@ pub async fn enable_two_factor(
 
   let (secret, totp_uri) = generate_secret(&user.email).map_err(bad_request)?;
   let backup_codes = generate_backup_codes();
-  let backup_stored = encode_backup_codes(&backup_codes);
+  let backup_stored = hash_backup_codes(&backup_codes);
   let id = Uuid::now_v7();
 
   sqlx::query!(r#"DELETE FROM two_factor WHERE user_id = $1"#, user.id)

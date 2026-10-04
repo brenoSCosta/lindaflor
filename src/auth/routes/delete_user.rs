@@ -1,5 +1,3 @@
-//! Delete user: request verification + confirm (Better Auth-style).
-
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use topcoat::{

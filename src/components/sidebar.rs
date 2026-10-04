@@ -1,5 +1,6 @@
 use topcoat::{
   Result,
+  asset::{Asset, asset},
   icon::{icon, iconify::iconify_icon},
   runtime::Expr,
   view::{
@@ -11,9 +12,13 @@ use topcoat::{
 use super::{
   button::{ButtonSize, ButtonVariant, button},
   input::input,
+  kbd::{kbd, kbd_group},
   separator::separator,
   sheet::{SheetSide, sheet, sheet_content},
   skeleton::skeleton,
+  tooltip::{
+    TooltipAlign, TooltipSide, tooltip as tooltip_wrap, tooltip_content,
+  },
 };
 
 /// The edge of the page occupied by a sidebar.
@@ -210,31 +215,74 @@ pub async fn sidebar(
   })
 }
 
+/// Content-hashed URL for the shared keyboard helpers (`window.__tcHotkey`).
+const HOTKEY_SCRIPT: Asset = asset!("assets/hotkey.js");
+
+/// Content-hashed URL for the sidebar toggle shortcut (`Mod+B`).
+const SIDEBAR_SCRIPT: Asset = asset!("assets/sidebar.js");
+
 /// A sidebar toggle button. Pass its signal update as an `@click` attribute.
 ///
 /// `open` controls the accessible expanded state. Set `aria-controls` in
 /// `attrs` to the controlled panel's ID. Responsive triggers can use separate
 /// desktop and mobile expressions and handlers.
+///
+/// `shortcut` registers the `Mod+B` toggle shortcut (Command on macOS,
+/// Control elsewhere) and shows it in a [`tooltip`] hint built from [`kbd`]
+/// labels. The hint opens below the trigger, left-aligned, so it stays on
+/// screen in sticky top toolbars. The modifier label renders `Ctrl` until the
+/// shortcut script swaps it to `⌘` on macOS. Set `shortcut` to `false` for a
+/// bare button with no keybinding or hint.
 #[component]
 pub async fn sidebar_trigger(
   #[into]
   #[default(true.into())]
   open: Expr<bool>,
+  #[default(true)] shortcut: bool,
   #[default] attrs: Attributes,
 ) -> Result<impl View> {
   Ok(view! {
-      button(
-          variant: ButtonVariant::Ghost,
-          size: ButtonSize::Icon,
-          attrs: attributes! {
-              type="button"
-              data-sidebar="trigger"
-              aria-label="Toggle sidebar"
-              :aria-expanded=$(if open { "true" } else { "false" })
-              (attrs)
-          },
-          icon(data: iconify_icon!("lucide:panel-left"))
-      )
+      if shortcut {
+          tooltip_wrap(
+              button(
+                  variant: ButtonVariant::Ghost,
+                  size: ButtonSize::Icon,
+                  attrs: attributes! {
+                      type="button"
+                      data-sidebar="trigger"
+                      data-sidebar-shortcut="mod+b"
+                      :aria-expanded=$(if open { "true" } else { "false" })
+                      (attrs)
+                  },
+                  icon(data: iconify_icon!("lucide:panel-left"))
+              )
+              tooltip_content(
+                  side: TooltipSide::Bottom,
+                  align: TooltipAlign::Start,
+                  attrs: attributes! { class="inline-flex items-center gap-2" },
+                  "Alterar menu lateral"
+                  kbd_group(
+                      kbd(attrs: attributes! { data-mod-key="ctrl" }, "Ctrl")
+                      kbd("B")
+                  )
+              )
+              <script src=(HOTKEY_SCRIPT)></script>
+              <script src=(SIDEBAR_SCRIPT)></script>
+          )
+      } else {
+          button(
+              variant: ButtonVariant::Ghost,
+              size: ButtonSize::Icon,
+              attrs: attributes! {
+                  type="button"
+                  data-sidebar="trigger"
+                  aria-label="Alternar menu lateral"
+                  :aria-expanded=$(if open { "true" } else { "false" })
+                  (attrs)
+              },
+              icon(data: iconify_icon!("lucide:panel-left"))
+          )
+      }
   })
 }
 
@@ -252,7 +300,7 @@ pub async fn sidebar_rail(
       <button
           type="button"
           data-sidebar="rail"
-          aria-label="Toggle sidebar"
+          aria-label="Alternar menu lateral"
           title="Toggle sidebar"
           :aria-expanded=$(if open { "true" } else { "false" })
           class=(class!(

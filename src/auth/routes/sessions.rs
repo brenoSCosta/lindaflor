@@ -1,5 +1,3 @@
-//! Session management: list / revoke / revoke-other (authenticated).
-
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use topcoat::{
@@ -22,7 +20,7 @@ use crate::auth::user::current_user;
 #[serde(rename_all = "camelCase")]
 pub struct ListedSessionJson {
   pub id: String,
-  /// Session id (for Better Auth `revokeSession({ token })` — we store a hash, not the raw token).
+  /// Session id (we store a hash, not the raw token).
   pub token: String,
   pub user_agent: Option<String>,
   pub ip_address: Option<String>,
@@ -36,7 +34,7 @@ pub struct ListedSessionJson {
 #[serde(rename_all = "camelCase")]
 pub struct RevokeSessionBody {
   pub session_id: Option<String>,
-  /// Alias for `sessionId` (Better Auth client sends `token`).
+  /// Alias for `sessionId`.
   pub token: Option<String>,
 }
 

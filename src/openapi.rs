@@ -141,7 +141,7 @@ fn require_openapi_docs() -> Result<()> {
     )),
     tags(
         (name = "system", description = "System health and metadata"),
-        (name = "auth", description = "Authentication (Better Auth–compatible); see /api/auth/* routes")
+        (name = "auth", description = "Authentication; see /api/auth/* routes")
     )
 )]
 struct ApiDoc;

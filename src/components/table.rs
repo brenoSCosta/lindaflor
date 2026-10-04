@@ -32,10 +32,10 @@ pub async fn table(
   #[default] child: Child<'_>,
 ) -> Result<impl View> {
   Ok(view! {
-      <div class="w-full overflow-x-auto">
+      <div class="relative w-full overflow-x-auto">
           <table
               class=(class!(
-                  "w-full caption-bottom border-collapse text-sm",
+                  "w-full caption-bottom text-sm",
                   attrs.remove("class"),
               ))
               (attrs)

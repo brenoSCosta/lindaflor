@@ -3,7 +3,8 @@ use topcoat::{
   Result,
   context::Cx,
   context::app_context,
-  router::{page, path_param},
+  router::{href, page, path_param},
+  runtime::{Event, procedure, signal},
   view::{View, ViewExt, attributes, view},
 };
 use uuid::Uuid;
@@ -13,6 +14,7 @@ use crate::components::button::{ButtonSize, ButtonVariant, button_variants};
 use crate::components::card::{
   card, card_content, card_footer, card_header, card_title,
 };
+use crate::components::container::{ContainerVariant, container};
 use crate::components::separator::separator;
 use crate::components::table::{
   table, table_body, table_cell, table_head, table_header, table_row,
@@ -20,10 +22,10 @@ use crate::components::table::{
 
 use crate::app::store::queries::{
   DEFAULT_WHATSAPP_NUMBER, format_price, get_store_settings,
-  render_whatsapp_template, urlencode,
+  render_whatsapp_template, whatsapp_link,
 };
 
-path_param!(id: Uuid, error = not_found);
+path_param!(pub(crate) id: Uuid, error = not_found);
 
 struct OrderItem {
   product_name: String,
@@ -125,6 +127,28 @@ fn coupon_code_from_meta(
     .map(str::to_string)
 }
 
+/// Re-read the order status without a document reload. No WebSocket:
+/// the buyer taps "Atualizar status" after paying. The id comes from the
+/// page URL; anything else is rejected as unknown.
+#[procedure("/pedido/status-proc")]
+async fn refresh_order_status(cx: &Cx, order_id: String) -> Result<String> {
+  let Ok(id) = Uuid::parse_str(order_id.trim()) else {
+    return Ok("unknown".to_string());
+  };
+  let pool = app_context::<PgPool>(cx);
+  let row = sqlx::query!(
+    "SELECT status::text AS \"status!\" FROM orders WHERE id = $1",
+    id
+  )
+  .fetch_optional(pool)
+  .await?;
+  Ok(
+    row
+      .map(|r| r.status)
+      .unwrap_or_else(|| "unknown".to_string()),
+  )
+}
+
 #[page]
 pub async fn page(cx: &Cx) -> Result<impl View> {
   let pool = app_context::<PgPool>(cx);
@@ -134,15 +158,17 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     Some(o) => o,
     None => {
       return Ok(view! {
-                <div class="mx-auto max-w-3xl px-4 py-24 text-center md:px-8">
+                container(
+                    variant: ContainerVariant::Narrow,
+                    attrs: attributes! { class="py-24 text-center" },
                     <h1 class="text-4xl font-bold tracking-tight">"Pedido não encontrado"</h1>
                     <a
-                        href="/produtos"
+                        href=(href!(crate::app::produtos::page))
                         class=(button_variants(ButtonVariant::Primary, ButtonSize::Lg))
                     >
                         "Voltar ao catálogo"
                     </a>
-                </div>
+                )
             }
             .boxed());
     }
@@ -182,11 +208,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     ],
     &whatsapp_fallback,
   );
-  let whatsapp_url = format!(
-    "https://wa.me/{}?text={}",
-    whatsapp_number,
-    urlencode(&whatsapp_message)
-  );
+  let whatsapp_url = whatsapp_link(&whatsapp_number, &whatsapp_message);
   let guest_email = order.guest_email.clone().unwrap_or_default();
   let address_display = order
     .shipping_address
@@ -205,21 +227,43 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     })
     .unwrap_or_default();
   let coupon_code = coupon_code_from_meta(order.payment_meta.as_ref());
+  let order_id_string = order.id.to_string();
+
+  // Browser-only UI state: copy feedback + manually refreshed status.
+  // No WebSocket; the buyer taps the button after paying on their bank app.
+  let copied = signal(cx, || false);
+  let live_status = signal(cx, || order.status.clone());
+  let refresh_id = order_id_string.clone();
 
   Ok(view! {
-        <main class="mx-auto max-w-3xl px-4 py-12 md:px-8">
+        container(
+            variant: ContainerVariant::Narrow,
             <p class="text-xs uppercase tracking-widest text-muted-foreground">"Pedido #" (order_id_short)</p>
-            <div class="mt-3 flex items-center gap-3">
+            <div class="flex flex-wrap items-center gap-3">
                 <h1 class="text-5xl font-bold tracking-tight">(heading)</h1>
                 badge(variant: status_badge_variant(&order.status), (status_label(&order.status)))
+                if is_pending {
+                    <button
+                        type="button"
+                        class="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-foreground/5"
+                        @click=$(async |_e: Event| {
+                            let next = refresh_order_status(refresh_id.to_owned()).await;
+                            live_status.set(next);
+                        })
+                    >
+                        "Atualizar status"
+                    </button>
+                }
             </div>
-            <p class="mt-2 text-muted-foreground">
+            <p class="text-sm text-muted-foreground">
+                "Status atual: " $(live_status.get())
+            </p>
+            <p class="text-muted-foreground">
                 "Enviamos as instruções para " (guest_email)
             </p>
 
             if is_pending {
                 card(
-                    attrs: attributes! { class="mt-10" },
                     card_header(
                         card_title("Pague com PIX")
                     )
@@ -237,11 +281,28 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                             "A reserva de estoque é válida por 24 horas após a criação do pedido."
                         </p>
                         if let Some(code) = pix_code {
+                            let code_text = code.clone();
                             <div class="space-y-2">
                                 <p class="text-sm text-muted-foreground">"PIX copia e cola:"</p>
                                 <code class="block overflow-x-auto rounded-lg border border-border bg-background p-3 text-xs">
                                     (code)
                                 </code>
+                                <button
+                                    type="button"
+                                    class="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-foreground/5"
+                                    @click=$(|_e: Event| {
+                                        let text = code_text.to_owned();
+                                        raw!(
+                                            "navigator.clipboard.writeText(${text})",
+                                            {
+                                                let _ = text.clone();
+                                            }
+                                        );
+                                        copied.set(true);
+                                    })
+                                >
+                                    $(if copied.get() { "Copiado!" } else { "Copiar código PIX" })
+                                </button>
                             </div>
                         } else {
                             <p class="text-sm text-destructive">
@@ -263,7 +324,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
             }
 
             card(
-                attrs: attributes! { class="mt-10" },
                 card_header(
                     card_title("Itens")
                 )
@@ -292,7 +352,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
             )
 
             card(
-                attrs: attributes! { class="mt-8" },
                 card_header(
                     card_title("Totais")
                 )
@@ -333,7 +392,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
 
             if !address_display.is_empty() {
                 card(
-                    attrs: attributes! { class="mt-8" },
                     card_header(
                         card_title("Endereço de entrega")
                     )
@@ -343,6 +401,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                     )
                 )
             }
-        </main>
+        )
     }.boxed())
 }

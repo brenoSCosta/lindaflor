@@ -3,20 +3,22 @@ use crate::components::breadcrumb::{
   breadcrumb_page, breadcrumb_separator,
 };
 use crate::components::card::{card, card_content, card_header, card_title};
+use crate::components::container::{ContainerVariant, container};
 use crate::components::separator::separator;
 use topcoat::{
   Result,
-  router::page,
+  router::{href, page},
   view::{View, attributes, view},
 };
 
 #[page]
 pub async fn page() -> Result<impl View> {
   Ok(view! {
-      <div class="mx-auto max-w-3xl px-4 py-8 md:px-8">
+      container(
+          variant: ContainerVariant::Narrow,
           breadcrumb(
               breadcrumb_list(
-                  breadcrumb_item(breadcrumb_link(attrs: attributes! { href="/" }, "Início"))
+                  breadcrumb_item(breadcrumb_link(attrs: attributes! { href=(href!(crate::app::page)) }, "Início"))
                   breadcrumb_separator()
                   breadcrumb_item(breadcrumb_page("Termos de Uso"))
               )
@@ -40,7 +42,7 @@ pub async fn page() -> Result<impl View> {
                   </p>
               )
           )
-          <div class="mt-4">
+    
               card(
                   card_header(card_title("2. Uso do Site"))
                   card_content(
@@ -49,8 +51,8 @@ pub async fn page() -> Result<impl View> {
                       </p>
                   )
               )
-          </div>
-          <div class="mt-4">
+    
+    
               card(
                   card_header(card_title("3. Produtos e Preços"))
                   card_content(
@@ -59,8 +61,8 @@ pub async fn page() -> Result<impl View> {
                       </p>
                   )
               )
-          </div>
-          <div class="mt-4">
+    
+    
               card(
                   card_header(card_title("4. Pagamentos"))
                   card_content(
@@ -69,8 +71,8 @@ pub async fn page() -> Result<impl View> {
                       </p>
                   )
               )
-          </div>
-          <div class="mt-4">
+    
+    
               card(
                   card_header(card_title("5. Envio e Entrega"))
                   card_content(
@@ -79,8 +81,8 @@ pub async fn page() -> Result<impl View> {
                       </p>
                   )
               )
-          </div>
-          <div class="mt-4">
+    
+    
               card(
                   card_header(card_title("6. Trocas e Devoluções"))
                   card_content(
@@ -89,8 +91,8 @@ pub async fn page() -> Result<impl View> {
                       </p>
                   )
               )
-          </div>
-          <div class="mt-4">
+    
+    
               card(
                   card_header(card_title("7. Limitação de Responsabilidade"))
                   card_content(
@@ -99,7 +101,7 @@ pub async fn page() -> Result<impl View> {
                       </p>
                   )
               )
-          </div>
-      </div>
+    
+      )
   })
 }

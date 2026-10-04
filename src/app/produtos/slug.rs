@@ -4,15 +4,14 @@ use topcoat::{
   Result,
   context::Cx,
   context::app_context,
-  router::{content::Form, page, path_param, query_params},
+  router::{content::Form, href, page, path_param, query_params},
   view::{View, ViewExt, attributes, class, view},
 };
 
 use crate::app::store::cart::{CartItem, add_to_cart};
 use crate::app::store::queries::{
   DEFAULT_WHATSAPP_NUMBER, category_label, format_price, get_product_by_slug,
-  get_store_settings, list_products, render_whatsapp_template, size_label,
-  urlencode,
+  get_store_settings, list_products,   render_whatsapp_template, size_label, whatsapp_link,
 };
 use crate::components::accordion::{
   accordion, accordion_content, accordion_item, accordion_trigger,
@@ -28,9 +27,10 @@ use crate::components::button::{
 use crate::components::card::{
   card, card_content, card_footer, card_header, card_title,
 };
+use crate::components::container::container;
 use crate::components::separator::separator;
 
-path_param!(slug);
+path_param!(pub(crate) slug);
 
 #[derive(Deserialize)]
 pub struct AddToCartInput {
@@ -90,15 +90,16 @@ pub async fn page(
         Some(p) => p,
         None => {
             return Ok(view! {
-                <div class="mx-auto max-w-7xl px-4 py-24 text-center md:px-8">
+                container(
+                    attrs: attributes! { class="py-24 text-center" },
                     <p class="text-2xl font-bold">"Produto não encontrado"</p>
                     <a
-                        href="/produtos"
+                        href=(href!(crate::app::produtos::page))
                         class=(class!(button_variants(ButtonVariant::Primary, ButtonSize::Md), "mx-auto mt-6 w-fit"))
                     >
                         "Voltar ao catálogo"
                     </a>
-                </div>
+                )
             }.boxed())
         }
     };
@@ -171,11 +172,7 @@ pub async fn page(
     ],
     &whatsapp_fallback,
   );
-  let whatsapp_url = format!(
-    "https://wa.me/{}?text={}",
-    whatsapp_number,
-    urlencode(&whatsapp_message)
-  );
+  let whatsapp_url = whatsapp_link(&whatsapp_number, &whatsapp_message);
 
   let product_name = product.name.clone();
   let product_slug = product.slug.clone();
@@ -190,18 +187,18 @@ pub async fn page(
     selected_variant_id.clone().unwrap_or_default();
 
   Ok(view! {
-        <main class="mx-auto max-w-7xl px-4 py-10 md:px-8 md:py-16">
+        container(
             breadcrumb(
                 breadcrumb_list(
-                    breadcrumb_item(breadcrumb_link(attrs: attributes! { href="/" }, "Início"))
+                    breadcrumb_item(breadcrumb_link(attrs: attributes! { href=(href!(crate::app::page)) }, "Início"))
                     breadcrumb_separator()
-                    breadcrumb_item(breadcrumb_link(attrs: attributes! { href="/produtos" }, "Catálogo"))
+                    breadcrumb_item(breadcrumb_link(attrs: attributes! { href=(href!(crate::app::produtos::page)) }, "Catálogo"))
                     breadcrumb_separator()
                     breadcrumb_item(breadcrumb_page((product_name.clone())))
                 )
             )
 
-            <div class="mt-8 grid gap-12 lg:grid-cols-2 lg:gap-16">
+            <div class="grid gap-4 @3xl/page:grid-cols-2">
                 <div class="space-y-4">
                     <div class="overflow-hidden rounded-xl border border-border">
                         <div class="aspect-[4/5]">
@@ -213,8 +210,9 @@ pub async fn page(
                     if product_images.len() > 1 {
                         <div class="grid grid-cols-4 gap-3">
                             for image in product_images {
+                                let image_id = image.id.to_string();
                                 <a
-                                    href=(format!("/produtos/{}?img={}", product_slug, image.id))
+                                    href=(href!(page, Slug(product_slug.clone())).query([("img", image_id.as_str())]))
                                     class=(class!(
                                         "aspect-square overflow-hidden rounded-lg border",
                                         "border-primary" if main_image_id.as_deref() == Some(image.id.to_string().as_str()) else "border-border",
@@ -227,7 +225,7 @@ pub async fn page(
                     }
                 </div>
 
-                <div class="space-y-8 lg:pt-8">
+                <div class="space-y-4">
                     card(
                         card_header(
                             badge(variant: BadgeVariant::Secondary, (product_category))
@@ -250,8 +248,9 @@ pub async fn page(
                                 for variant in product_variants {
                                     let is_selected = selected_variant_id.as_deref() == Some(variant.id.to_string().as_str());
                                     let disabled = variant.available == 0;
+                                    let variant_id = variant.id.to_string();
                                     <a
-                                        href=(format!("/produtos/{}?variant={}", product_slug, variant.id))
+                                        href=(href!(page, Slug(product_slug.clone())).query([("variant", variant_id.as_str())]))
                                         class=(class!(
                                             button_variants(
                                                 if is_selected { ButtonVariant::Primary } else { ButtonVariant::Outline },
@@ -280,7 +279,7 @@ pub async fn page(
 
                     card(
                         card_content(
-                            <form method="post" action=(format!("/produtos/{}", product_slug)) class="space-y-3">
+                            <form method="post" action=(href!(page, Slug(product_slug.clone()))) class="space-y-3">
                                 <input type="hidden" name="variant_id" value=(selected_variant_id_attr)>
                                 button(
                                     variant: ButtonVariant::Primary,
@@ -327,7 +326,7 @@ pub async fn page(
                             accordion_content(
                                 <p>
                                     "Você tem até 7 dias após o recebimento para solicitar troca ou devolução. Consulte nossa "
-                                    <a href="/trocas-devolucoes" class="text-primary underline">"política completa"</a>
+                                    <a href=(href!(crate::app::trocas_devolucoes::page)) class="text-primary underline">"política completa"</a>
                                     "."
                                 </p>
                             )
@@ -343,10 +342,11 @@ pub async fn page(
             </div>
 
             if !related.is_empty() {
-                <section class="mt-24 border-t border-border pt-16">
+                <section>
+                    separator(attrs: attributes! { class="my-4" })
                     <p class="text-sm font-medium tracking-tight text-primary uppercase">"Você também pode gostar"</p>
-                    <h2 class="mt-2 mb-10 text-4xl font-bold tracking-tight">"Complete o look"</h2>
-                    <div class="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
+                    <h2 class="mt-2 mb-4 text-4xl font-bold tracking-tight">"Complete o look"</h2>
+                    <div class="grid gap-8 @sm/page:grid-cols-2 @lg/page:grid-cols-4">
                         #[key(item.id.to_string())]
                         for item in related {
                             let image_url = item
@@ -354,7 +354,7 @@ pub async fn page(
                                 .clone()
                                 .unwrap_or_else(|| "/static/product-fallback.svg".to_string());
                             let name = item.name.clone();
-                            let item_url = format!("/produtos/{}", item.slug);
+                            let item_url = href!(page, Slug(item.slug.clone()));
                             let category_text = category_label(&item.category).to_string();
                             let price_text = format_price(item.price_in_cents);
 
@@ -381,6 +381,6 @@ pub async fn page(
                     </div>
                 </section>
             }
-        </main>
+        )
     }.boxed())
 }

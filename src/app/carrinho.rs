@@ -2,7 +2,7 @@ use serde::Deserialize;
 use topcoat::{
   Result,
   context::Cx,
-  router::{content::Form, page},
+  router::{content::Form, href, page},
   view::{View, attributes, view},
 };
 
@@ -13,6 +13,7 @@ use crate::components::button::{
 use crate::components::card::{
   card, card_content, card_footer, card_header, card_title,
 };
+use crate::components::container::{ContainerVariant, container};
 use crate::components::separator::separator;
 
 use crate::app::store::cart::{
@@ -50,10 +51,11 @@ pub async fn page(
   let missing_for_free_shipping = (free_shipping_threshold - subtotal).max(0);
 
   Ok(view! {
-      <main class="mx-auto max-w-3xl px-4 py-12 md:px-8 md:py-16">
-          <header class="mb-10 flex items-end justify-between gap-4">
+      container(
+          variant: ContainerVariant::Narrow,
+          <header class="flex items-end justify-between gap-4">
               <div>
-                  <h1 class="text-4xl font-bold tracking-tight md:text-5xl">"Carrinho"</h1>
+                  <h1 class="text-4xl font-bold tracking-tight @md/page:text-5xl">"Carrinho"</h1>
                   if item_count > 0 {
                       <p class="mt-2 text-sm text-muted-foreground">
                           (item_count) " " if item_count == 1 { "peça" } else { "peças" }
@@ -69,7 +71,7 @@ pub async fn page(
               <div class="py-16 text-center">
                   <p class="text-muted-foreground">"Seu carrinho está vazio."</p>
                   <a
-                      href="/produtos"
+                      href=(href!(crate::app::produtos::page))
                       class=(button_variants(ButtonVariant::Primary, ButtonSize::Lg))
                   >
                       "Ver catálogo"
@@ -82,7 +84,7 @@ pub async fn page(
                           card_content(
                               attrs: attributes! { class="flex items-center gap-4" },
                               <a
-                                  href=(format!("/produtos/{}", item.product_slug))
+                                  href=(href!(crate::app::produtos::slug::page, crate::app::produtos::slug::Slug(item.product_slug.clone())))
                                   class="shrink-0 overflow-hidden rounded-lg"
                               >
                                   if let Some(image_url) = &item.image_url {
@@ -95,14 +97,14 @@ pub async fn page(
                               </a>
                               <div class="min-w-0 flex-1 space-y-1">
                                   <a
-                                      href=(format!("/produtos/{}", item.product_slug))
+                                      href=(href!(crate::app::produtos::slug::page, crate::app::produtos::slug::Slug(item.product_slug.clone())))
                                       class="text-sm font-medium uppercase tracking-wide transition-colors hover:text-primary"
                                   >
                                       (item.product_name)
                                   </a>
                                   <p class="text-sm text-muted-foreground">(item.variant_label)</p>
                                   <div class="flex items-center gap-3 pt-2">
-                                      <form method="post" action="/carrinho" class="inline-flex items-center gap-1">
+                                      <form method="post" action=(href!(page)) class="inline-flex items-center gap-1">
                                           <input type="hidden" name="variant_id" value=(item.variant_id.clone())>
                                           <input type="hidden" name="quantity" value=(item.quantity - 1)>
                                           button(
@@ -115,7 +117,11 @@ pub async fn page(
                                               },
                                               "−"
                                           )
-                                          <span class="min-w-8 text-center text-sm">(item.quantity)</span>
+                                      </form>
+                                      <span class="min-w-8 text-center text-sm">(item.quantity)</span>
+                                      <form method="post" action=(href!(page)) class="inline-flex items-center gap-1">
+                                          <input type="hidden" name="variant_id" value=(item.variant_id.clone())>
+                                          <input type="hidden" name="quantity" value=(item.quantity + 1)>
                                           button(
                                               variant: ButtonVariant::Outline,
                                               size: ButtonSize::Sm,
@@ -127,7 +133,7 @@ pub async fn page(
                                               "+"
                                           )
                                       </form>
-                                      <form method="post" action="/carrinho">
+                                      <form method="post" action=(href!(page))>
                                           <input type="hidden" name="variant_id" value=(item.variant_id.clone())>
                                           <input type="hidden" name="remove" value="true">
                                           button(
@@ -147,7 +153,6 @@ pub async fn page(
                   }
 
                   card(
-                      attrs: attributes! { class="mt-6" },
                       card_header(
                           card_title("Resumo do pedido")
                       )
@@ -169,15 +174,15 @@ pub async fn page(
                           </p>
                       )
                       card_footer(
-                          <div class="flex w-full flex-col gap-3 sm:flex-row">
+                          <div class="flex w-full flex-col gap-3 @sm/page:flex-row">
                               <a
-                                  href="/produtos"
+                                  href=(href!(crate::app::produtos::page))
                                   class=(button_variants(ButtonVariant::Outline, ButtonSize::Lg))
                               >
                                   "Continuar comprando"
                               </a>
                               <a
-                                  href="/checkout"
+                                  href=(href!(crate::app::checkout::page))
                                   class=(button_variants(ButtonVariant::Primary, ButtonSize::Lg))
                               >
                                   "Finalizar compra"
@@ -187,6 +192,6 @@ pub async fn page(
                   )
               </div>
           }
-      </main>
+      )
   })
 }

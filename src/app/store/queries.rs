@@ -81,19 +81,14 @@ pub fn render_whatsapp_template(
   rendered
 }
 
-pub fn urlencode(text: &str) -> String {
-  let mut result = String::new();
-  for b in text.bytes() {
-    match b {
-      b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-        result.push(b as char);
-      }
-      _ => {
-        result.push_str(&format!("%{:02X}", b));
-      }
-    }
-  }
-  result
+pub fn whatsapp_link(number: &str, text: &str) -> String {
+  let mut url = reqwest::Url::parse("https://wa.me/").expect("wa.me base URL");
+  url.path_segments_mut()
+    .expect("wa.me can take a path")
+    .pop_if_empty()
+    .push(number);
+  url.query_pairs_mut().append_pair("text", text);
+  url.to_string()
 }
 
 pub fn format_price(cents: i32) -> String {

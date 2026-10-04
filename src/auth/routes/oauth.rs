@@ -1,5 +1,3 @@
-//! Google OAuth callback: GET `/api/auth/callback/google`
-
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use time::PrimitiveDateTime;
@@ -8,7 +6,7 @@ use topcoat::{
   context::{Cx, app_context},
   router::{
     error::{bad_request, redirect, unauthorized},
-    query_params, route,
+    href, query_params, route,
   },
   session,
 };
@@ -168,7 +166,7 @@ pub async fn google_callback(cx: &Cx) -> Result<()> {
         description = ?query.error_description,
         "Google OAuth denied or failed"
     );
-    return Err(redirect("/login").into());
+    return Err(redirect(href!(crate::app::login::page).resolve(cx)).into());
   }
 
   let Some(code) = query

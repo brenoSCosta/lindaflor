@@ -1,5 +1,3 @@
-//! POST `/api/auth/change-password` (authenticated).
-
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use topcoat::{
@@ -24,7 +22,7 @@ const MIN_PASSWORD_LEN: usize = 8;
 pub struct ChangePasswordBody {
   pub current_password: String,
   pub new_password: String,
-  /// When true (Better Auth default in our UI), drop other sessions for this user.
+  /// When true, drop other sessions for this user.
   #[serde(default)]
   pub revoke_other_sessions: Option<bool>,
 }

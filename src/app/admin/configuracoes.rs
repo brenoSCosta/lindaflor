@@ -3,9 +3,17 @@ use topcoat::{
   Result,
   context::Cx,
   context::app_context,
-  router::page,
-  view::{View, view},
+  router::{href, page},
+  view::{View, attributes, view},
 };
+
+use crate::components::button::{ButtonVariant, button};
+use crate::components::card::{card, card_content};
+use crate::components::container::container;
+use crate::components::input::input;
+use crate::components::label::label;
+use crate::components::select::select;
+use crate::components::textarea::textarea;
 
 #[page]
 pub async fn page(cx: &Cx) -> Result<impl View> {
@@ -18,71 +26,90 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     .await?;
 
   Ok(view! {
-      <div style="display: flex; min-height: 100vh;">
-          <aside style="width: 240px; background: #1a1a2e; color: white; padding: 1.5rem;">
-              <h2 style="font-size: 1.25rem; font-weight: 600; margin-bottom: 1.5rem;">"Admin"</h2>
-              <nav style="display: flex; flex-direction: column; gap: 0.5rem;">
-                  <a href="/admin" style="color: #ccc; text-decoration: none; padding: 0.5rem; border-radius: 4px;">"Dashboard"</a>
-                  <a href="/admin/usuarios" style="color: #ccc; text-decoration: none; padding: 0.5rem; border-radius: 4px;">"Usuários"</a>
-                  <a href="/admin/produtos" style="color: #ccc; text-decoration: none; padding: 0.5rem; border-radius: 4px;">"Produtos"</a>
-                  <a href="/admin/pedidos" style="color: #ccc; text-decoration: none; padding: 0.5rem; border-radius: 4px;">"Pedidos"</a>
-                  <a href="/admin/estoque" style="color: #ccc; text-decoration: none; padding: 0.5rem; border-radius: 4px;">"Estoque"</a>
-                  <a href="/admin/configuracoes" style="color: #e94560; text-decoration: none; padding: 0.5rem; border-radius: 4px; background: rgba(233,69,96,0.1);">"Configurações"</a>
-              </nav>
-          </aside>
-          <main style="flex: 1; padding: 2rem; background: #f5f5f5;">
-              <h1 style="font-size: 1.5rem; font-weight: 600; margin-bottom: 0.5rem;">"Configurações da loja"</h1>
-              <p style="color: #666; margin-bottom: 2rem;">"Chave PIX estática e WhatsApp usados no checkout."</p>
-
-              <form method="post" action="/admin/configuracoes" style="background: white; padding: 2rem; border-radius: 8px; border: 1px solid #e5e5e5; max-width: 600px;">
-                  <fieldset style="border: none; margin-bottom: 1.5rem;">
-                      <legend style="font-weight: 600; margin-bottom: 1rem;">"PIX (chave fixa)"</legend>
-                      <div style="margin-bottom: 1rem;">
-                          <label style="display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 0.25rem;">"Tipo da chave"</label>
-                          <select name="pix_key_type" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px;">
-                              <option value="cpf">"CPF"</option>
-                              <option value="cnpj">"CNPJ"</option>
-                              <option value="email">"E-mail"</option>
-                              <option value="phone">"Telefone"</option>
-                              <option value="random">"Chave aleatória"</option>
-                          </select>
-                      </div>
-                      <div style="margin-bottom: 1rem;">
-                          <label style="display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 0.25rem;">"Chave PIX"</label>
-                          <input type="text" name="pix_key" placeholder="CPF, CNPJ, e-mail, telefone ou chave aleatória" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px;" />
-                      </div>
-                      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem;">
-                          <div>
-                              <label style="display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 0.25rem;">"Nome do recebedor"</label>
-                              <input type="text" name="pix_merchant_name" placeholder="Linda Flor" maxlength="25" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px;" />
-                              <p style="font-size: 0.75rem; color: #666; margin-top: 0.25rem;">"Máx. 25 caracteres (Bacen)"</p>
+      container(
+        <div class="flex flex-col gap-1.5">
+          <h1 class="text-2xl font-semibold tracking-tight">"Configurações da loja"</h1>
+          <p class="text-muted-foreground">"Chave PIX estática e WhatsApp usados no checkout."</p>
+        </div>
+          card(
+              card_content(
+                  <form method="post" action=(href!(crate::app::admin::configuracoes::page)) class="flex flex-col gap-8">
+                      <fieldset class="space-y-4 border-0">
+                          <legend class="mb-4 text-base font-semibold">"PIX (chave fixa)"</legend>
+                          <div class="space-y-2">
+                              label(attrs: attributes! { for="pix_key_type" }, "Tipo da chave")
+                              select(
+                                  attrs: attributes! { name="pix_key_type" id="pix_key_type" },
+                                  <option value="cpf">"CPF"</option>
+                                  <option value="cnpj">"CNPJ"</option>
+                                  <option value="email">"E-mail"</option>
+                                  <option value="phone">"Telefone"</option>
+                                  <option value="random">"Chave aleatória"</option>
+                              )
                           </div>
-                          <div>
-                              <label style="display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 0.25rem;">"Cidade"</label>
-                              <input type="text" name="pix_merchant_city" placeholder="Aracaju" maxlength="15" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px;" />
-                              <p style="font-size: 0.75rem; color: #666; margin-top: 0.25rem;">"Máx. 15 caracteres (Bacen)"</p>
+                          <div class="space-y-2">
+                              label(attrs: attributes! { for="pix_key" }, "Chave PIX")
+                              input(attrs: attributes! {
+                                  type="text"
+                                  name="pix_key"
+                                  id="pix_key"
+                                  placeholder="CPF, CNPJ, e-mail, telefone ou chave aleatória"
+                              })
                           </div>
-                      </div>
-                  </fieldset>
-
-                  <fieldset style="border: none; margin-bottom: 1.5rem;">
-                      <legend style="font-weight: 600; margin-bottom: 1rem;">"WhatsApp da loja"</legend>
-                      <div style="margin-bottom: 1rem;">
-                          <label style="display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 0.25rem;">"Número (com DDI)"</label>
-                          <input type="text" name="whatsapp_number" placeholder="5579998165115" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px;" />
-                      </div>
-                      <div>
-                          <label style="display: block; font-size: 0.875rem; font-weight: 500; margin-bottom: 0.25rem;">"Modelo da mensagem do cliente"</label>
-                          <textarea name="whatsapp_message_template" rows="3" style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px;"></textarea>
-                          <p style="font-size: 0.75rem; color: #666; margin-top: 0.25rem;">"Use {{order_id}} e {{total}} como placeholders."</p>
-                      </div>
-                  </fieldset>
-
-                  <button type="submit" style="background: #e94560; color: white; padding: 0.75rem 1.5rem; border-radius: 6px; border: none; font-weight: 500; cursor: pointer;">
-                      "Salvar configurações"
-                  </button>
-              </form>
-          </main>
-      </div>
+                          <div class="grid gap-4 @sm/page:grid-cols-2">
+                              <div class="space-y-2">
+                                  label(attrs: attributes! { for="pix_merchant_name" }, "Nome do recebedor")
+                                  input(attrs: attributes! {
+                                      type="text"
+                                      name="pix_merchant_name"
+                                      id="pix_merchant_name"
+                                      placeholder="Linda Flor"
+                                      maxlength="25"
+                                  })
+                                  <p class="text-xs text-muted-foreground">"Máx. 25 caracteres (Bacen)"</p>
+                              </div>
+                              <div class="space-y-2">
+                                  label(attrs: attributes! { for="pix_merchant_city" }, "Cidade")
+                                  input(attrs: attributes! {
+                                      type="text"
+                                      name="pix_merchant_city"
+                                      id="pix_merchant_city"
+                                      placeholder="Aracaju"
+                                      maxlength="15"
+                                  })
+                                  <p class="text-xs text-muted-foreground">"Máx. 15 caracteres (Bacen)"</p>
+                              </div>
+                          </div>
+                      </fieldset>
+                      <fieldset class="space-y-4 border-0">
+                          <legend class="mb-4 text-base font-semibold">"WhatsApp da loja"</legend>
+                          <div class="space-y-2">
+                              label(attrs: attributes! { for="whatsapp_number" }, "Número (com DDI)")
+                              input(attrs: attributes! {
+                                  type="text"
+                                  name="whatsapp_number"
+                                  id="whatsapp_number"
+                                  placeholder="5579998165115"
+                              })
+                          </div>
+                          <div class="space-y-2">
+                              label(attrs: attributes! { for="whatsapp_message_template" }, "Modelo da mensagem do cliente")
+                              textarea(attrs: attributes! {
+                                  name="whatsapp_message_template"
+                                  id="whatsapp_message_template"
+                                  rows="3"
+                              })
+                              <p class="text-xs text-muted-foreground">"Use {{order_id}} e {{total}} como placeholders."</p>
+                          </div>
+                      </fieldset>
+                      button(
+                          variant: ButtonVariant::Primary,
+                          attrs: attributes! { type="submit" },
+                          "Salvar configurações"
+                      )
+                  </form>
+              )
+          )
+      )
   })
 }

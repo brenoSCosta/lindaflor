@@ -3,32 +3,34 @@ use crate::components::breadcrumb::{
   breadcrumb_page, breadcrumb_separator,
 };
 use crate::components::card::{card, card_content, card_header, card_title};
+use crate::components::container::{ContainerVariant, container};
 use crate::components::separator::separator;
 use topcoat::{
   Result,
-  router::page,
+  router::{href, page},
   view::{View, attributes, view},
 };
 
 #[page]
 pub async fn page() -> Result<impl View> {
   Ok(view! {
-      <div class="mx-auto max-w-3xl px-4 py-8 md:px-8">
+      container(
+          variant: ContainerVariant::Narrow,
           breadcrumb(
               breadcrumb_list(
-                  breadcrumb_item(breadcrumb_link(attrs: attributes! { href="/" }, "Início"))
+                  breadcrumb_item(breadcrumb_link(attrs: attributes! { href=(href!(crate::app::page)) }, "Início"))
                   breadcrumb_separator()
                   breadcrumb_item(breadcrumb_page("Política de Privacidade"))
               )
           )
-          <h1 class="mt-6 text-4xl font-bold tracking-tight">"Política de Privacidade"</h1>
-          <p class="mt-4 text-sm leading-relaxed text-muted-foreground">
+          <h1 class="text-4xl font-bold tracking-tight">"Política de Privacidade"</h1>
+          <p class="text-sm leading-relaxed text-muted-foreground">
               "A Linda Flor Moda Praia respeita sua privacidade. Coletamos apenas os dados necessários para processar pedidos, enviar comunicações sobre compras e melhorar sua experiência na loja."
           </p>
-          <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
+          <p class="text-sm leading-relaxed text-muted-foreground">
               "Informações como nome, e-mail, endereço e telefone são utilizadas exclusivamente para entrega, suporte e cumprimento de obrigações legais. Não vendemos seus dados a terceiros."
           </p>
-          <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
+          <p class="text-sm leading-relaxed text-muted-foreground">
               "Utilizamos cookies essenciais para manter sua sessão e preferências. Você pode solicitar acesso, correção ou exclusão dos seus dados entrando em contato pelo WhatsApp (79) 99816-5115."
           </p>
           separator(attrs: attributes! { class="my-8" })
@@ -40,7 +42,6 @@ pub async fn page() -> Result<impl View> {
                   </p>
               )
           )
-          <div class="mt-4">
               card(
                   card_header(card_title("2. Uso dos Dados"))
                   card_content(
@@ -49,8 +50,6 @@ pub async fn page() -> Result<impl View> {
                       </p>
                   )
               )
-          </div>
-          <div class="mt-4">
               card(
                   card_header(card_title("3. Compartilhamento de Dados"))
                   card_content(
@@ -59,8 +58,6 @@ pub async fn page() -> Result<impl View> {
                       </p>
                   )
               )
-          </div>
-          <div class="mt-4">
               card(
                   card_header(card_title("4. Cookies"))
                   card_content(
@@ -69,8 +66,6 @@ pub async fn page() -> Result<impl View> {
                       </p>
                   )
               )
-          </div>
-          <div class="mt-4">
               card(
                   card_header(card_title("5. Seus Direitos"))
                   card_content(
@@ -79,7 +74,6 @@ pub async fn page() -> Result<impl View> {
                       </p>
                   )
               )
-          </div>
-      </div>
+      )
   })
 }

@@ -1,5 +1,3 @@
-//! Session cookie configuration for local HTTP vs production HTTPS.
-
 use std::borrow::Cow;
 use std::time::Duration;
 
@@ -14,7 +12,7 @@ use topcoat::{
 
 use crate::config::app_env;
 
-/// Prefer daily sliding refresh, matching Better Auth `updateAge` (24h).
+/// Prefer daily sliding refresh (24h).
 pub const SESSION_UPDATE_AGE: Duration = Duration::from_secs(60 * 60 * 24);
 
 fn is_development() -> bool {

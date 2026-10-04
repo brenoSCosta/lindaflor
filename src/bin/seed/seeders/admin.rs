@@ -39,7 +39,7 @@ pub async fn seed(pool: &PgPool) -> Result<(), SeedError> {
     .execute(pool)
     .await?;
 
-  // Better Auth uses provider_id "credential" (singular) for email/password.
+  // Use provider_id "credential" (singular) for email/password.
   sqlx::query!(
         "INSERT INTO accounts (id, account_id, provider_id, user_id, password, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, now(), now())",

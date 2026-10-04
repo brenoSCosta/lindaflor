@@ -1,8 +1,3 @@
-//! Profile photos stored as object keys on `users.image`.
-//!
-//! A value containing `://` is an external URL (for example a Google picture)
-//! and is never deleted from object storage.
-
 use sqlx::PgPool;
 use topcoat::{
   Error, Result,

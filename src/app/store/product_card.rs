@@ -1,5 +1,6 @@
 use topcoat::{
   Result,
+  router::href,
   view::{View, attributes, component, view},
 };
 
@@ -17,7 +18,10 @@ pub async fn product_card(product: ProductSummary) -> Result<impl View> {
   let name = product.name.clone();
   let category = category_label(&product.category).to_string();
   let price = format_price(product.price_in_cents);
-  let url = format!("/produtos/{}", product.slug);
+  let url = href!(
+    crate::app::produtos::slug::page,
+    crate::app::produtos::slug::Slug(product.slug.clone())
+  );
 
   Ok(view! {
       <article class="group">

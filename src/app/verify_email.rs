@@ -6,21 +6,22 @@ use topcoat::{
   router::{
     content::Form,
     error::{SeeOther, see_other},
-    page, query_params, route,
+    href, page, query_params, route,
   },
   view::{View, view},
 };
 
+use crate::auth::service;
+use crate::auth::user::current_user_owned;
 use crate::components::button::{
   ButtonSize, ButtonVariant, button, button_variants,
 };
 use crate::components::card::{
   card, card_content, card_description, card_footer, card_header, card_title,
 };
+use crate::components::container::{ContainerVariant, container};
 use crate::components::input::input;
 use crate::components::label::label;
-use lindaflor::auth::service;
-use lindaflor::auth::user::current_user_owned;
 use topcoat::view::attributes;
 
 #[derive(Deserialize)]
@@ -61,10 +62,11 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     .unwrap_or_default();
 
   Ok(view! {
-      <div class="flex min-h-screen items-center justify-center bg-background px-4 py-8">
-          <div class="w-full max-w-md">
+      container(
+          variant: ContainerVariant::Centered,
+          <div class="w-full">
               <div class="mb-8 text-center">
-                  <a href="/" class="text-2xl font-bold text-primary">"Linda Flor"</a>
+                  <a href=(href!(crate::app::page)) class="text-2xl font-bold text-primary">"Linda Flor"</a>
               </div>
               card(
                   if has_error {
@@ -75,7 +77,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                           )
                       )
                       card_content(
-                          <form method="post" action="/verify-email/resend" class="flex flex-col gap-4">
+                          <form method="post" action=(href!(resend)) class="flex flex-col gap-4">
                               <div class="space-y-2">
                                   label(attrs: attributes! { for="email" }, "E-mail")
                                   input(attrs: attributes! {
@@ -95,7 +97,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                       )
                       card_footer(
                           <a
-                              href="/login"
+                              href=(href!(crate::app::login::page))
                               class=(button_variants(ButtonVariant::Primary, ButtonSize::Md))
                           >
                               "Voltar para o login"
@@ -116,7 +118,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                       )
                       card_footer(
                           <a
-                              href="/dashboard"
+                              href=(href!(crate::app::dashboard::page))
                               class=(button_variants(ButtonVariant::Primary, ButtonSize::Md))
                           >
                               "Ir para o painel"
@@ -130,7 +132,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                           )
                       )
                       card_content(
-                          <form method="post" action="/verify-email/resend" class="flex flex-col gap-4">
+                          <form method="post" action=(href!(resend)) class="flex flex-col gap-4">
                               <div class="space-y-2">
                                   label(attrs: attributes! { for="email" }, "E-mail")
                                   input(attrs: attributes! {
@@ -149,14 +151,14 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                           </form>
                       )
                       card_footer(
-                          <a href="/login" class="text-sm text-primary">
+                          <a href=(href!(crate::app::login::page)) class="text-sm text-primary">
                               "Voltar para o login"
                           </a>
                       )
                   }
               )
           </div>
-      </div>
+      )
   })
 }
 
@@ -173,10 +175,14 @@ pub async fn resend(
   } else if let Some(su) = current_user_owned(cx).await? {
     su.user.email
   } else {
-    return Ok(see_other("/verify-email?error=1"));
+    return Ok(see_other(href!(page).query([("error", "1")]).resolve(cx)));
   };
 
+  let callback = href!(page).resolve(cx);
   let _ =
-    service::send_verification_email(pool, &email, Some("/verify-email")).await;
-  Ok(see_other("/verify-email?error=resent"))
+    service::send_verification_email(pool, &email, Some(callback.as_str()))
+      .await;
+  Ok(see_other(
+    href!(page).query([("error", "resent")]).resolve(cx),
+  ))
 }

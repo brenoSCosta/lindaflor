@@ -1,5 +1,3 @@
-//! POST `/api/auth/sign-up/email`
-
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use http::StatusCode;
@@ -88,7 +86,7 @@ pub async fn sign_up_email(
   let user_id = Uuid::now_v7();
   let account_id = Uuid::now_v7();
 
-  // requireEmailVerification=false (non-prod Better Auth behavior): auto sign-in.
+  // Email verification not required here: auto sign-in.
   sqlx::query!(
         r#"
         INSERT INTO users (id, name, email, email_verified, role, created_at, updated_at)

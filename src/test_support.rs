@@ -1,5 +1,3 @@
-//! Embedded Postgres for binary tests (`cargo test --bin lindaflor`).
-
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;

@@ -36,7 +36,7 @@
     "LD_LIBRARY_PATH": "${workspaceFolder}/.devenv/profile/lib:${env:LD_LIBRARY_PATH}",
     "DATABASE_URL": "postgresql://postgres:postgres@localhost:4201/topcoat"
   },
-  "rust-analyzer.check.command": "clippy",
+  "rust-analyzer.check.command": "check",
   "rust-analyzer.procMacro.enable": true,
   "rust-analyzer.cargo.buildScripts.enable": true,
   "files.associations": {

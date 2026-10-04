@@ -1,5 +1,3 @@
-//! Shared auth integration-test harness: embedded Postgres, API-only router, cookies.
-
 #![allow(dead_code)]
 
 use std::path::PathBuf;

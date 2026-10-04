@@ -3,35 +3,37 @@ use crate::components::breadcrumb::{
   breadcrumb_page, breadcrumb_separator,
 };
 use crate::components::card::{card, card_content, card_header, card_title};
+use crate::components::container::{ContainerVariant, container};
 use crate::components::separator::separator;
 use topcoat::{
   Result,
-  router::page,
+  router::{href, page},
   view::{View, attributes, view},
 };
 
 #[page]
 pub async fn page() -> Result<impl View> {
   Ok(view! {
-      <div class="mx-auto max-w-3xl px-4 py-8 md:px-8">
+      container(
+          variant: ContainerVariant::Narrow,
           breadcrumb(
               breadcrumb_list(
-                  breadcrumb_item(breadcrumb_link(attrs: attributes! { href="/" }, "Início"))
+                  breadcrumb_item(breadcrumb_link(attrs: attributes! { href=(href!(crate::app::page)) }, "Início"))
                   breadcrumb_separator()
                   breadcrumb_item(breadcrumb_page("Trocas e Devoluções"))
               )
           )
-          <h1 class="mt-6 text-4xl font-bold tracking-tight">"Trocas e Devoluções"</h1>
-          <p class="mt-4 text-sm leading-relaxed text-muted-foreground">
+          <h1 class="text-4xl font-bold tracking-tight">"Trocas e Devoluções"</h1>
+          <p class="text-sm leading-relaxed text-muted-foreground">
               "Você pode solicitar troca ou devolução em até 7 dias corridos após o recebimento do pedido, conforme o Código de Defesa do Consumidor."
           </p>
-          <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
+          <p class="text-sm leading-relaxed text-muted-foreground">
               "A peça deve estar sem uso, com etiquetas e na embalagem original. Para iniciar o processo, entre em contato pelo WhatsApp (79) 99816-5115 informando o número do pedido."
           </p>
-          <p class="mt-2 text-sm leading-relaxed text-muted-foreground">
+          <p class="text-sm leading-relaxed text-muted-foreground">
               "O frete de devolução por arrependimento é por conta do cliente, exceto em casos de defeito ou erro no envio. Após análise, o reembolso será feito via PIX em até 10 dias úteis."
           </p>
-          separator(attrs: attributes! { class="my-8" })
+          separator(attrs: attributes! { class="my-4" })
           card(
               card_header(card_title("Como Solicitar uma Troca ou Devolução"))
               card_content(
@@ -43,7 +45,6 @@ pub async fn page() -> Result<impl View> {
                   </ol>
               )
           )
-          <div class="mt-4">
               card(
                   card_header(card_title("Condições para Troca ou Devolução"))
                   card_content(
@@ -55,8 +56,6 @@ pub async fn page() -> Result<impl View> {
                       </ul>
                   )
               )
-          </div>
-          <div class="mt-4">
               card(
                   card_header(card_title("Reembolso"))
                   card_content(
@@ -65,7 +64,6 @@ pub async fn page() -> Result<impl View> {
                       </p>
                   )
               )
-          </div>
-      </div>
+      )
   })
 }

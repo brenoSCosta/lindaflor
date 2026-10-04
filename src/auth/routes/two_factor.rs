@@ -1,5 +1,3 @@
-//! Two-factor endpoints under `/api/auth/two-factor/*`.
-
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -22,8 +20,8 @@ use crate::auth::password::verify_password;
 use crate::auth::routes::dto::{SessionPayload, client_meta, random_token};
 use crate::auth::session_store;
 use crate::auth::totp::{
-  consume_backup_code, encode_backup_codes, generate_backup_codes,
-  generate_secret, verify_code,
+  consume_backup_code, generate_backup_codes, generate_secret,
+  hash_backup_codes, verify_code,
 };
 use crate::auth::user::{SessionUser, User, current_user};
 
@@ -234,7 +232,7 @@ pub struct BackupCodesResponse {
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateBackupCodesBody {
-  /// Optional password re-check (Better Auth clients send this).
+  /// Optional password re-check.
   pub password: Option<String>,
 }
 
@@ -261,7 +259,7 @@ pub async fn enable(cx: &Cx) -> Result<Json<EnableTwoFactorResponse>> {
   let (secret, totp_uri) =
     generate_secret(&su.user.email).map_err(bad_request)?;
   let backup_codes = generate_backup_codes();
-  let backup_stored = encode_backup_codes(&backup_codes);
+  let backup_stored = hash_backup_codes(&backup_codes);
   let id = Uuid::now_v7();
 
   sqlx::query!(r#"DELETE FROM two_factor WHERE user_id = $1"#, su.user.id)
@@ -487,9 +485,8 @@ pub async fn verify_backup_code(
       return Err(unauthorized().into());
     }
 
-    let remaining =
+    let stored =
       consume_backup_code(&tf.backup_codes, &code).ok_or_else(unauthorized)?;
-    let stored = encode_backup_codes(&remaining);
     sqlx::query!(
       r#"UPDATE two_factor SET backup_codes = $2 WHERE id = $1"#,
       tf.id,
@@ -524,9 +521,8 @@ pub async fn verify_backup_code(
     return Err(bad_request("two-factor is not verified").into());
   }
 
-  let remaining =
+  let stored =
     consume_backup_code(&tf.backup_codes, &code).ok_or_else(unauthorized)?;
-  let stored = encode_backup_codes(&remaining);
   sqlx::query!(
     r#"UPDATE two_factor SET backup_codes = $2 WHERE id = $1"#,
     tf.id,
@@ -574,7 +570,7 @@ pub async fn generate_backup_codes_route(
   .ok_or_else(|| bad_request("two-factor is not configured"))?;
 
   let backup_codes = generate_backup_codes();
-  let stored = encode_backup_codes(&backup_codes);
+  let stored = hash_backup_codes(&backup_codes);
   sqlx::query!(
     r#"UPDATE two_factor SET backup_codes = $2 WHERE id = $1"#,
     tf.id,

@@ -1,5 +1,3 @@
-//! Admin user management (Better Auth admin plugin-compatible).
-
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use topcoat::{

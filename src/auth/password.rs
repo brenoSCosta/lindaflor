@@ -1,9 +1,3 @@
-//! Argon2id password hashing (PHC string format).
-//!
-//! Uses the `argon2` crate defaults: **Argon2id** v19 with the library's
-//! default memory/time/parallelism parameters. Hashes are stored as PHC
-//! strings (`$argon2id$v=19$...`) on `accounts.password`.
-
 use argon2::{
   Argon2,
   password_hash::{PasswordHasher, PasswordVerifier, phc::PasswordHash},

@@ -3,7 +3,7 @@ use topcoat::{
   Result,
   context::Cx,
   context::app_context,
-  router::{page, path_param},
+  router::{href, page, path_param},
   view::{View, ViewExt, attributes, class, view},
 };
 
@@ -18,8 +18,9 @@ use crate::components::breadcrumb::{
 };
 use crate::components::button::{ButtonSize, ButtonVariant, button_variants};
 use crate::components::card::{card, card_footer, card_header, card_title};
+use crate::components::container::container;
 
-path_param!(slug);
+path_param!(pub(crate) slug);
 
 #[page]
 pub async fn page(cx: &Cx) -> Result<impl View> {
@@ -30,15 +31,15 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
         Some(c) => c,
         None => {
             return Ok(view! {
-                <div class="mx-auto max-w-7xl px-4 py-24 text-center md:px-8">
+                container(
                     <h1 class="text-2xl font-bold">"Coleção não encontrada"</h1>
                     <a
-                        href="/colecoes"
+                        href=(href!(crate::app::colecoes::page))
                         class=(class!(button_variants(ButtonVariant::Primary, ButtonSize::Md), "mx-auto mt-6 w-fit"))
                     >
                         "Ver coleções"
                     </a>
-                </div>
+                )
             }.boxed())
         }
     };
@@ -51,24 +52,24 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let collection_description = collection.description.clone();
 
   Ok(view! {
-        <main class="mx-auto max-w-7xl px-4 py-16 md:px-8">
+        container(
             breadcrumb(
                 breadcrumb_list(
-                    breadcrumb_item(breadcrumb_link(attrs: attributes! { href="/" }, "Início"))
+                    breadcrumb_item(breadcrumb_link(attrs: attributes! { href=(href!(crate::app::page)) }, "Início"))
                     breadcrumb_separator()
-                    breadcrumb_item(breadcrumb_link(attrs: attributes! { href="/colecoes" }, "Coleções"))
+                    breadcrumb_item(breadcrumb_link(attrs: attributes! { href=(href!(crate::app::colecoes::page)) }, "Coleções"))
                     breadcrumb_separator()
                     breadcrumb_item(breadcrumb_page((collection_name.clone())))
                 )
             )
 
-            <h1 class="mt-4 text-4xl font-bold tracking-tight">(collection_name.clone())</h1>
+            <h1 class="text-4xl font-bold tracking-tight">(collection_name.clone())</h1>
             if let Some(description) = collection_description {
-                <p class="mt-3 max-w-2xl text-muted-foreground">(description)</p>
+                <p class="max-w-2xl text-muted-foreground">(description)</p>
             }
-            <p class="mt-4 text-sm text-muted-foreground">(product_count) " peças nesta coleção"</p>
+            <p class="text-sm text-muted-foreground">(product_count) " peças nesta coleção"</p>
 
-            <div class="mt-12 grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
+            <div class="grid gap-4 @sm/page:grid-cols-2 @2xl/page:grid-cols-3">
                 #[key(product.id.to_string())]
                 for product in products {
                     let image_url = product
@@ -76,7 +77,10 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                         .clone()
                         .unwrap_or_else(|| "/static/product-fallback.svg".to_string());
                     let name = product.name.clone();
-                    let product_url = format!("/produtos/{}", product.slug);
+                    let product_url = href!(
+                      crate::app::produtos::slug::page,
+                      crate::app::produtos::slug::Slug(product.slug.clone())
+                    );
                     let category_text = category_label(&product.category).to_string();
                     let price_text = format_price(product.price_in_cents);
                     let sold_out = product.available_total == 0;
@@ -105,6 +109,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                     )
                 }
             </div>
-        </main>
+        )
     }.boxed())
 }

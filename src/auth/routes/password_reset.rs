@@ -1,5 +1,3 @@
-//! Password reset: request + reset.
-
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use topcoat::{
@@ -179,7 +177,7 @@ pub async fn reset_password(
     .execute(pool)
     .await?;
 
-  // revokeSessionsOnPasswordReset: true (Better Auth config)
+  // Revoke all sessions on password reset.
   session_store::delete_all_for_user(pool, user.id).await?;
 
   Ok(Json(OkStatus { status: true }))

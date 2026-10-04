@@ -1,5 +1,3 @@
-//! Small HTTP API routes that live in the library (discoverable from tests).
-
 use serde::Serialize;
 use topcoat::{
   Result,

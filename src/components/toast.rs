@@ -260,22 +260,27 @@ fn sanitize(mut toast: Toast) -> Option<Toast> {
   Some(toast)
 }
 
-fn percent_encode(input: &str) -> String {
-  let mut out = String::with_capacity(input.len());
-  for byte in input.bytes() {
-    match byte {
-      b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-        out.push(byte as char);
-      }
-      _ => {
-        const HEX: &[u8; 16] = b"0123456789ABCDEF";
-        out.push('%');
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0xf) as usize] as char);
-      }
-    }
-  }
-  out
+fn toast_cookie(json: String) -> Cookie<'static> {
+  Cookie::build((TOAST_COOKIE, json))
+    .path("/")
+    .max_age(Duration::seconds(60))
+    .http_only(true)
+    .same_site(SameSite::Lax)
+    .build()
+}
+
+/// Value the jar will put in `Set-Cookie`, using the cookie crate's encoder.
+fn encoded_set_cookie(json: &str) -> String {
+  toast_cookie(json.to_owned()).encoded().to_string()
+}
+
+/// Percent-encoded JSON, the form `X-Toast` and leftover cookies use.
+fn encoded_toast_json(json: &str) -> String {
+  let encoded = Cookie::new(TOAST_COOKIE, json)
+    .stripped()
+    .encoded()
+    .to_string();
+  encoded[TOAST_COOKIE.len() + 1..].to_owned()
 }
 
 fn percent_decode(input: &str) -> String {
@@ -330,7 +335,7 @@ fn enqueue(mut queue: Vec<Toast>, toast: Toast) -> Vec<Toast> {
   }
   while queue.len() > 1 {
     let json = serde_json::to_string(&queue).unwrap_or_default();
-    if percent_encode(&json).len() <= COOKIE_BUDGET {
+    if encoded_set_cookie(&json).len() <= COOKIE_BUDGET {
       break;
     }
     queue.remove(0);
@@ -347,7 +352,7 @@ fn is_toast_promise(cx: &Cx) -> bool {
 
 fn toast_header_value(toast: &Toast) -> Option<HeaderValue> {
   let json = serde_json::to_string(toast).ok()?;
-  HeaderValue::from_str(&percent_encode(&json)).ok()
+  HeaderValue::from_str(&encoded_toast_json(&json)).ok()
 }
 
 fn location_header(uri: &str) -> HeaderValue {
@@ -378,14 +383,7 @@ fn current_queue(cx: &Cx) -> Vec<Toast> {
 
 fn write_queue(cx: &Cx, queue: &[Toast]) {
   let json = serde_json::to_string(queue).unwrap_or_else(|_| "[]".to_owned());
-  cookies(cx).add(
-    Cookie::build((TOAST_COOKIE, json))
-      .path("/")
-      .max_age(Duration::seconds(60))
-      .http_only(true)
-      .same_site(SameSite::Lax)
-      .build(),
-  );
+  cookies(cx).add(toast_cookie(json));
 }
 
 /// Toasts from a promise submit, held until [`toast_redirect`] knows whether
@@ -862,7 +860,8 @@ mod tests {
     let toast = Toast::success("Olá")
       .description("Tudo bem")
       .action("Ver", "/conta");
-    let encoded = percent_encode(&serde_json::to_string(&vec![toast]).unwrap());
+    let encoded =
+      encoded_toast_json(&serde_json::to_string(&vec![toast]).unwrap());
     let decoded = decode_queue(&encoded);
     assert_eq!(decoded[0].title, "Olá");
     assert_eq!(decoded[0].description.as_deref(), Some("Tudo bem"));

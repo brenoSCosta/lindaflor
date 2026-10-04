@@ -1,12 +1,10 @@
-//! Shared camelCase JSON shapes matching Better Auth client expectations.
-
 use serde::{Deserialize, Serialize};
 use time::PrimitiveDateTime;
 use uuid::Uuid;
 
 use crate::auth::user::{SessionUser, User};
 
-/// Better Auth-style user object.
+/// User object.
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthUserJson {
@@ -22,7 +20,7 @@ pub struct AuthUserJson {
   pub ban_expires: Option<String>,
 }
 
-/// Better Auth-style session object (no raw token).
+/// Session object (no raw token).
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthSessionJson {

@@ -1,5 +1,3 @@
-//! POST `/api/auth/update-user` (authenticated).
-
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use topcoat::{

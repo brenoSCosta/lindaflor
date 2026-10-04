@@ -1,5 +1,3 @@
-//! GET `/api/auth/get-session`
-
 use topcoat::{
   Result,
   context::Cx,

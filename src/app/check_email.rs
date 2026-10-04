@@ -6,18 +6,19 @@ use topcoat::{
   router::{
     content::Form,
     error::{SeeOther, see_other},
-    page, query_params, route,
+    href, page, query_params, route,
   },
   view::{View, view},
 };
 
+use crate::auth::service;
 use crate::components::button::{
   ButtonSize, ButtonVariant, button, button_variants,
 };
 use crate::components::card::{
   card, card_content, card_description, card_footer, card_header, card_title,
 };
-use lindaflor::auth::service;
+use crate::components::container::{ContainerVariant, container};
 use topcoat::view::attributes;
 
 #[derive(Deserialize)]
@@ -38,10 +39,11 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let email = query.email.clone().unwrap_or_default();
 
   Ok(view! {
-      <div class="flex min-h-screen items-center justify-center bg-background px-4 py-8">
-          <div class="w-full max-w-md">
+      container(
+          variant: ContainerVariant::Centered,
+          <div class="w-full">
               <div class="mb-8 text-center">
-                  <a href="/" class="text-2xl font-bold text-primary">"Linda Flor"</a>
+                  <a href=(href!(crate::app::page)) class="text-2xl font-bold text-primary">"Linda Flor"</a>
               </div>
               card(
                   if resent {
@@ -53,7 +55,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                       )
                       card_footer(
                           <a
-                              href="/login"
+                              href=(href!(crate::app::login::page))
                               class=(button_variants(ButtonVariant::Primary, ButtonSize::Md))
                           >
                               "Voltar para o login"
@@ -75,7 +77,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                           )
                       )
                       card_content(
-                          <form method="post" action="/check-email/resend">
+                          <form method="post" action=(href!(resend))>
                               <input type="hidden" name="email" value=(email.clone())>
                               button(
                                   variant: ButtonVariant::Primary,
@@ -85,14 +87,14 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                           </form>
                       )
                       card_footer(
-                          <a href="/login" class="text-sm text-primary">
+                          <a href=(href!(crate::app::login::page)) class="text-sm text-primary">
                               "Voltar para o login"
                           </a>
                       )
                   }
               )
           </div>
-      </div>
+      )
   })
 }
 
@@ -118,31 +120,16 @@ pub async fn resend(
   {
     email.to_owned()
   } else {
-    return Ok(see_other("/check-email"));
+    return Ok(see_other(href!(page).resolve(cx)));
   };
 
+  let callback = href!(crate::app::verify_email::page).resolve(cx);
   let _ =
-    service::send_verification_email(pool, &email, Some("/verify-email")).await;
-  Ok(see_other(format!(
-    "/check-email?email={}&resent=1",
-    percent_encode(&email)
-  )))
-}
-
-fn percent_encode(input: &str) -> String {
-  let mut out = String::with_capacity(input.len());
-  for byte in input.bytes() {
-    match byte {
-      b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-        out.push(byte as char);
-      }
-      _ => {
-        const HEX: &[u8; 16] = b"0123456789ABCDEF";
-        out.push('%');
-        out.push(HEX[(byte >> 4) as usize] as char);
-        out.push(HEX[(byte & 0xf) as usize] as char);
-      }
-    }
-  }
-  out
+    service::send_verification_email(pool, &email, Some(callback.as_str()))
+      .await;
+  Ok(see_other(
+    href!(page)
+      .query([("email", email.as_str()), ("resent", "1")])
+      .resolve(cx),
+  ))
 }

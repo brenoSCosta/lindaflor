@@ -1,5 +1,3 @@
-//! POST `/api/auth/sign-in/email`
-
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use http::StatusCode;
@@ -197,7 +195,7 @@ pub struct SocialNotImplementedBody {
   pub message: String,
 }
 
-/// Start Google OAuth (Better Auth-compatible). Returns `{ url }` for the client to redirect.
+/// Start Google OAuth. Returns `{ url }` for the client to redirect.
 #[utoipa::path(
     post,
     path = "/api/auth/sign-in/social",

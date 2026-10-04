@@ -5,7 +5,7 @@ use topcoat::{
   Result,
   context::Cx,
   context::app_context,
-  router::{page, query_params},
+  router::{href, page, query_params},
   runtime::{Event, shard, signal},
   view::{View, attributes, view},
 };
@@ -18,6 +18,7 @@ use crate::components::breadcrumb::{
 };
 use crate::components::button::{ButtonSize, ButtonVariant, button_variants};
 use crate::components::card::{card, card_footer, card_header, card_title};
+use crate::components::container::container;
 use crate::components::input::input;
 
 #[query_params(error = bad_request)]
@@ -122,11 +123,11 @@ async fn catalog_results(
   let is_empty = products.is_empty();
 
   Ok(view! {
-      <section class="border-b border-border px-4 py-16 md:px-8">
-          <div class="mx-auto max-w-7xl">
+      <section class="border-b border-border">
+          container(
               breadcrumb(
                   breadcrumb_list(
-                      breadcrumb_item(breadcrumb_link(attrs: attributes! { href="/" }, "Início"))
+                      breadcrumb_item(breadcrumb_link(attrs: attributes! { href=(href!(crate::app::page)) }, "Início"))
                       breadcrumb_separator()
                       breadcrumb_item(breadcrumb_page("Catálogo"))
                   )
@@ -135,11 +136,11 @@ async fn catalog_results(
               <p class="mt-3 max-w-2xl text-muted-foreground">
                   "Biquínis, maiôs e saídas de praia, peças selecionadas para o seu verão."
               </p>
-          </div>
+          )
       </section>
 
-      <section class="mx-auto max-w-7xl px-4 py-12 md:px-8">
-          <div class="mb-10 flex flex-wrap items-center gap-2">
+      container(
+          <div class="flex flex-wrap items-center gap-2">
               for (key, label) in CATEGORIES {
                   let key_owned = key.to_string();
                   let selected = active == key;
@@ -181,7 +182,6 @@ async fn catalog_results(
               }
           </div>
 
-          <div class="mb-10 max-w-xl">
               input(attrs: attributes! {
                   id="catalog-search"
                   type="search"
@@ -210,7 +210,6 @@ async fn catalog_results(
                       );
                   })
               })
-          </div>
 
           if is_empty {
               <p class="text-muted-foreground">
@@ -239,8 +238,8 @@ async fn catalog_results(
                   </button>
               </p>
           } else {
-              <p class="mb-8 text-sm text-muted-foreground">(count) " peças"</p>
-              <div class="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
+              <p class="text-sm text-muted-foreground">(count) " peças"</p>
+              <div class="grid gap-4 @sm/page:grid-cols-2 @2xl/page:grid-cols-3">
                   #[key(product.id.to_string())]
                   for product in products {
                       let image_url = product
@@ -248,7 +247,10 @@ async fn catalog_results(
                           .clone()
                           .unwrap_or_else(|| "/static/product-fallback.svg".to_string());
                       let name = product.name.clone();
-                      let product_url = format!("/produtos/{}", product.slug);
+                      let product_url = href!(
+                        slug::page,
+                        slug::Slug(product.slug.clone())
+                      );
                       let category_text = category_label(&product.category).to_string();
                       let price_text = format_price(product.price_in_cents);
                       let sold_out = product.available_total == 0;
@@ -278,6 +280,6 @@ async fn catalog_results(
                   }
               </div>
           }
-      </section>
+      )
   })
 }

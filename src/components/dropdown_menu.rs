@@ -1,16 +1,32 @@
 use topcoat::{
   Result,
+  asset::{Asset, asset},
   icon::{icon, iconify::iconify_icon},
   view::{
     Attributes, Child, StaticClass, View, attributes, class, component, view,
   },
 };
 
+/// Shared keyboard helpers (`window.__tcHotkey`): platform detection and
+/// `Escape` / macOS `Cmd+.` dismissal matching used by the menu script below.
+const HOTKEY_SCRIPT: Asset = asset!("assets/hotkey.js");
+
+/// Content-hashed URL for the dropdown-menu dismissal script.
+///
+/// A native `<details>` element does not close itself when clicking elsewhere,
+/// so the primitive ships this scripting. It is guarded so re-rendered menus
+/// bind it only once. Open menus dismiss on outside click and `Escape`
+/// (`Cmd+.` too on macOS); activating a link or button inside a menu closes
+/// that menu.
+const DROPDOWN_MENU_SCRIPT: Asset = asset!("assets/dropdown-menu.js");
+
 /// A floating action menu controlled by a trigger.
 ///
 /// Uses a native `<details>` element, so the trigger opens and closes it without
-/// JavaScript. Closing it on an outside click requires application scripting. `attrs`
-/// are forwarded to the `<details>`, with extra classes added to its classes.
+/// JavaScript. Open menus dismiss on outside click and `Escape` (`Cmd+.` too
+/// on macOS) via the primitive's own scripting; activating a link or button
+/// inside also closes its menu. `attrs` are forwarded to the `<details>`,
+/// with extra classes added to its classes.
 /// Items use normal Tab navigation. The component does not implement the ARIA menu
 /// pattern's arrow-key navigation.
 ///
@@ -37,10 +53,13 @@ pub async fn dropdown_menu(
 ) -> Result<impl View> {
   Ok(view! {
       <details
+          data-dropdown-menu=""
           class=(class!("group relative inline-block", attrs.remove("class")))
           (attrs)
       >
           (child)
+          <script src=(HOTKEY_SCRIPT)></script>
+          <script src=(DROPDOWN_MENU_SCRIPT)></script>
       </details>
   })
 }
@@ -88,17 +107,116 @@ const PANEL: StaticClass = class!(
      text-popover-foreground shadow-sm",
 );
 
+/// Which side of the trigger the menu panel opens on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DropdownMenuSide {
+  /// Panel opens above the trigger.
+  Top,
+  /// Panel opens to the right of the trigger.
+  Right,
+  /// Panel opens below the trigger.
+  #[default]
+  Bottom,
+  /// Panel opens to the left of the trigger.
+  Left,
+}
+
+/// How the menu panel lines up with the trigger along the [`DropdownMenuSide`]
+/// axis.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DropdownMenuAlign {
+  /// Panel's start edge (left for top/bottom sides, top for left/right
+  /// sides) meets the trigger's start edge.
+  #[default]
+  Start,
+  /// Panel is centered on the trigger.
+  Center,
+  /// Panel's end edge (right for top/bottom sides, bottom for left/right
+  /// sides) meets the trigger's end edge. Useful for triggers at the right
+  /// edge of a table or viewport.
+  End,
+}
+
 /// The floating panel of a [`dropdown_menu`], holding the menu's items.
 ///
-/// The panel drops directly below the trigger, aligned to its left edge.
+/// The panel floats above surrounding content: the primitive's scripting pins
+/// it with `fixed` positioning measured from the trigger when the menu opens,
+/// so it escapes `overflow` ancestors such as table scrollers instead of
+/// being clipped inside them, and keeps it glued to the trigger across
+/// scrolling and resizing (flipping to the opposite side when there is no
+/// room).
+///
+/// Placement follows `side` (defaults to [`DropdownMenuSide::Bottom`]) with a
+/// `side_offset` gap in pixels, and `align` (defaults to
+/// [`DropdownMenuAlign::Start`]) with an `align_offset` nudge in pixels along
+/// the alignment axis (positive shifts rightward for top/bottom sides and
+/// downward for left/right sides).
 #[component]
 pub async fn dropdown_menu_content(
   #[default] mut attrs: Attributes,
+  #[default] side: DropdownMenuSide,
+  #[default(4)] side_offset: i32,
+  #[default] align: DropdownMenuAlign,
+  #[default] align_offset: i32,
   #[default] child: Child<'_>,
 ) -> Result<impl View> {
+  let side_name = match side {
+    DropdownMenuSide::Top => "top",
+    DropdownMenuSide::Right => "right",
+    DropdownMenuSide::Bottom => "bottom",
+    DropdownMenuSide::Left => "left",
+  };
+  let align_name = match align {
+    DropdownMenuAlign::Start => "start",
+    DropdownMenuAlign::Center => "center",
+    DropdownMenuAlign::End => "end",
+  };
+  let side_offset_name = side_offset.to_string();
+  let align_offset_name = align_offset.to_string();
+  // No-JavaScript fallback positioning; the scripting overrides these with
+  // exact `fixed` coordinates whenever it runs.
+  let (side_class, align_class) = match side {
+    DropdownMenuSide::Top => (
+      "bottom-full mb-1",
+      match align {
+        DropdownMenuAlign::Start => "left-0",
+        DropdownMenuAlign::Center => "left-1/2 -translate-x-1/2",
+        DropdownMenuAlign::End => "right-0",
+      },
+    ),
+    DropdownMenuSide::Right => (
+      "left-full ml-1",
+      match align {
+        DropdownMenuAlign::Start => "top-0",
+        DropdownMenuAlign::Center => "top-1/2 -translate-y-1/2",
+        DropdownMenuAlign::End => "bottom-0",
+      },
+    ),
+    DropdownMenuSide::Bottom => (
+      "top-full mt-1",
+      match align {
+        DropdownMenuAlign::Start => "left-0",
+        DropdownMenuAlign::Center => "left-1/2 -translate-x-1/2",
+        DropdownMenuAlign::End => "right-0",
+      },
+    ),
+    DropdownMenuSide::Left => (
+      "right-full mr-1",
+      match align {
+        DropdownMenuAlign::Start => "top-0",
+        DropdownMenuAlign::Center => "top-1/2 -translate-y-1/2",
+        DropdownMenuAlign::End => "bottom-0",
+      },
+    ),
+  };
   Ok(view! {
       <div
-          class=(class!(PANEL, "top-full left-0 mt-1", attrs.remove("class")))
+          data-dropdown-menu-content=""
+          data-side=(side_name)
+          data-side-offset=(side_offset_name)
+          data-align=(align_name)
+          data-align-offset=(align_offset_name)
+          class=(class!(PANEL, side_class, align_class, attrs.remove("class"),))
           (attrs)
       >
           (child)

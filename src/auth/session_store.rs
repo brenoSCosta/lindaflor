@@ -1,8 +1,3 @@
-//! Persist / look up / delete sessions in Postgres.
-//!
-//! `sessions.token` stores the **hex-encoded** SHA-256 [`TokenHash`] bytes
-//! (64 lowercase hex chars), never the raw client token.
-
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use sqlx::PgPool;

@@ -1,4 +1,5 @@
 pub mod configuracoes;
+pub mod cupons;
 pub mod estoque;
 pub mod pedidos;
 pub mod produtos;
@@ -9,11 +10,12 @@ use topcoat::{
   Result,
   context::Cx,
   context::app_context,
-  router::page,
+  router::{href, page},
   view::{View, view},
 };
 
 use crate::components::card::{card, card_content, card_header, card_title};
+use crate::components::container::container;
 use crate::components::table::{
   table, table_body, table_cell, table_head, table_header, table_row,
 };
@@ -53,23 +55,11 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     .await?;
 
   Ok(view! {
-      <div class="flex min-h-screen">
-          <aside class="w-60 shrink-0 border-r border-border bg-card p-6">
-              <h2 class="mb-6 text-lg font-semibold">"Admin"</h2>
-              <nav class="flex flex-col gap-1">
-                  <a href="/admin" class="rounded-md bg-primary/10 px-3 py-2 text-sm font-medium text-primary">"Dashboard"</a>
-                  <a href="/admin/usuarios" class="rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-foreground/5">"Usuários"</a>
-                  <a href="/admin/produtos" class="rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-foreground/5">"Produtos"</a>
-                  <a href="/admin/pedidos" class="rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-foreground/5">"Pedidos"</a>
-                  <a href="/admin/estoque" class="rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-foreground/5">"Estoque"</a>
-                  <a href="/admin/configuracoes" class="rounded-md px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-foreground/5">"Configurações"</a>
-              </nav>
-          </aside>
-          <main class="flex-1 p-8">
-              <h1 class="mb-2 text-2xl font-semibold tracking-tight">"Bem-vinda ao painel"</h1>
-              <p class="mb-8 text-muted-foreground">"Gerencie produtos, estoque e pedidos da Linda Flor."</p>
+      container(
+              <h1 class="text-2xl font-semibold tracking-tight">"Bem-vinda ao painel"</h1>
+              <p class="text-muted-foreground">"Gerencie produtos, estoque e pedidos da Linda Flor."</p>
 
-              <div class="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div class="grid gap-4 @sm/page:grid-cols-2 @lg/page:grid-cols-4">
                   card(
                       card_content(
                           <p class="text-sm text-muted-foreground">"Total de Produtos"</p>
@@ -115,7 +105,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                               for order in recent_orders {
                                   table_row(
                                       table_cell(
-                                          <a href="/admin/pedidos" class="font-mono text-primary">(order.id)</a>
+                                          <a href=(href!(crate::app::admin::pedidos::id::page, crate::app::admin::pedidos::id::Id(order.id.clone()))) class="font-mono text-primary">(order.id)</a>
                                       )
                                       table_cell((order.guest_email))
                                       table_cell((order.status))
@@ -129,7 +119,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                       )
                   )
               )
-          </main>
-      </div>
+      )
   })
 }

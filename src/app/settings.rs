@@ -7,14 +7,21 @@ use topcoat::{
   icon::{icon, iconify::iconify_icon},
   router::{
     content::{Form, multipart::Multipart},
-    error::{SeeOther, see_other},
-    page, query_params, route,
+    error::{SeeOther, bad_request, see_other},
+    href, page, query_params, route,
   },
+  runtime::{Event, procedure, signal},
   view::{View, component, view},
 };
 use uuid::Uuid;
 
-use crate::app::auth_helpers::{encode_query, require_user};
+use crate::app::auth_helpers::require_user;
+use crate::auth::CREDENTIAL_PROVIDER_ID;
+use crate::auth::avatar::{self as auth_avatar, object_store};
+use crate::auth::google::GOOGLE_PROVIDER_ID;
+use crate::auth::service::{
+  self, LinkedAccount, ListedSession, portuguese_error_message,
+};
 use crate::components::avatar::{
   AvatarSize, avatar, avatar_fallback, avatar_image,
 };
@@ -23,6 +30,7 @@ use crate::components::button::{ButtonSize, ButtonVariant, button};
 use crate::components::card::{
   card, card_content, card_description, card_header, card_title,
 };
+use crate::components::container::container;
 use crate::components::dialog::{
   dialog, dialog_content, dialog_description, dialog_footer, dialog_header,
   dialog_title,
@@ -30,12 +38,6 @@ use crate::components::dialog::{
 use crate::components::input::input;
 use crate::components::separator::separator;
 use crate::components::tabs::{tabs, tabs_content, tabs_list, tabs_trigger};
-use lindaflor::auth::CREDENTIAL_PROVIDER_ID;
-use lindaflor::auth::avatar::{self as auth_avatar, object_store};
-use lindaflor::auth::google::GOOGLE_PROVIDER_ID;
-use lindaflor::auth::service::{
-  self, LinkedAccount, ListedSession, portuguese_error_message,
-};
 use topcoat::view::attributes;
 
 /// Content-hashed URL for the profile-tab cropper. Only the settings page renders it.
@@ -82,6 +84,15 @@ fn provider_label(provider_id: &str) -> &'static str {
   }
 }
 
+fn normalize_tab(raw: &str) -> String {
+  match raw.trim() {
+    "account" | "sessions" | "security" | "linked-accounts" | "danger" => {
+      raw.trim().to_string()
+    }
+    _ => "profile".to_string(),
+  }
+}
+
 #[page(GET "/settings")]
 pub async fn page(cx: &Cx) -> Result<impl View> {
   let su = require_user(cx).await?;
@@ -118,43 +129,66 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     .find(|a| a.provider_id == CREDENTIAL_PROVIDER_ID)
     .map(|_| user_email.clone());
 
+  // Tab selection as a signal: switching updates `active`/`hidden` bindings
+  // in the browser without a document reload. `href` remains as a no-JS
+  // fallback (`?tab=` is still honored on first render).
+  let active = signal(cx, || normalize_tab(&tab));
+
   Ok(view! {
-      <div class="mx-auto max-w-7xl px-4 py-8 md:px-8">
+      container(
           <h1 class="text-2xl font-bold">"Configurações"</h1>
-          <p class="mt-1 mb-8 text-sm text-muted-foreground">
+          <p class="text-sm text-muted-foreground">
               "Gerencie seu perfil, conta, sessões, segurança, contas vinculadas e exclusão de conta."
           </p>
 
           tabs(
-              tabs_list(
+            tabs_list(
                   tabs_trigger(
-                      active: tab == "profile",
-                      attrs: attributes! { href="/settings?tab=profile" },
+                      active: $(active.get() == "profile"),
+                      attrs: attributes! {
+                          href=(href!(page).query([("tab", "profile")]))
+                          @click=$(|e: Event| { e.prevent_default(); active.set("profile".to_owned()); })
+                      },
                       "Perfil"
                   )
                   tabs_trigger(
-                      active: tab == "account",
-                      attrs: attributes! { href="/settings?tab=account" },
+                      active: $(active.get() == "account"),
+                      attrs: attributes! {
+                          href=(href!(page).query([("tab", "account")]))
+                          @click=$(|e: Event| { e.prevent_default(); active.set("account".to_owned()); })
+                      },
                       "Conta"
                   )
                   tabs_trigger(
-                      active: tab == "sessions",
-                      attrs: attributes! { href="/settings?tab=sessions" },
+                      active: $(active.get() == "sessions"),
+                      attrs: attributes! {
+                          href=(href!(page).query([("tab", "sessions")]))
+                          @click=$(|e: Event| { e.prevent_default(); active.set("sessions".to_owned()); })
+                      },
                       "Sessões"
                   )
                   tabs_trigger(
-                      active: tab == "security",
-                      attrs: attributes! { href="/settings?tab=security" },
+                      active: $(active.get() == "security"),
+                      attrs: attributes! {
+                          href=(href!(page).query([("tab", "security")]))
+                          @click=$(|e: Event| { e.prevent_default(); active.set("security".to_owned()); })
+                      },
                       "Segurança"
                   )
                   tabs_trigger(
-                      active: tab == "linked-accounts",
-                      attrs: attributes! { href="/settings?tab=linked-accounts" },
+                      active: $(active.get() == "linked-accounts"),
+                      attrs: attributes! {
+                          href=(href!(page).query([("tab", "linked-accounts")]))
+                          @click=$(|e: Event| { e.prevent_default(); active.set("linked-accounts".to_owned()); })
+                      },
                       "Contas vinculadas"
                   )
                   tabs_trigger(
-                      active: tab == "danger",
-                      attrs: attributes! { href="/settings?tab=danger" },
+                      active: $(active.get() == "danger"),
+                      attrs: attributes! {
+                          href=(href!(page).query([("tab", "danger")]))
+                          @click=$(|e: Event| { e.prevent_default(); active.set("danger".to_owned()); })
+                      },
                       "Zona de perigo"
                   )
               )
@@ -170,7 +204,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                       </div>
                   }
 
-                  if tab == "profile" {
+                  <div :hidden=$(active.get() != "profile")>
                       profile_tab(
                           name: user_name.clone(),
                           email: user_email.clone(),
@@ -178,28 +212,33 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                           avatar_url: avatar_url,
                           has_avatar: has_avatar
                       )
-                  } else if tab == "account" {
+                  </div>
+                  <div :hidden=$(active.get() != "account")>
                       account_tab(email: user_email.clone())
-                  } else if tab == "sessions" {
+                  </div>
+                  <div :hidden=$(active.get() != "sessions")>
                       sessions_tab(sessions: sessions.clone())
-                  } else if tab == "security" {
+                  </div>
+                  <div :hidden=$(active.get() != "security")>
                       security_tab(
                           two_factor_enabled: two_factor_enabled,
                           pending: pending_setup.clone()
                       )
-                  } else if tab == "linked-accounts" {
+                  </div>
+                  <div :hidden=$(active.get() != "linked-accounts")>
                       linked_accounts_tab(
                           accounts: accounts.clone(),
                           credential_email: credential_email.clone(),
                           has_google: has_google
                       )
-                  } else {
+                  </div>
+                  <div :hidden=$(active.get() != "danger")>
                       danger_tab()
-                  }
+                  </div>
               )
           )
           <script src=(AVATAR_CROPPER_SCRIPT) defer=""></script>
-      </div>
+      )
   })
 }
 
@@ -214,7 +253,6 @@ async fn profile_tab(
   let name_value = name.clone();
   Ok(view! {
       card(
-          attrs: attributes! { class="mt-6" },
           card_header(
               card_title("Perfil")
               card_description("Seu nome e avatar.")
@@ -239,7 +277,7 @@ async fn profile_tab(
                           "Alterar foto"
                       )
                       if has_avatar {
-                          <form method="post" action="/settings?tab=profile">
+                          <form method="post" action=(href!(settings_post).query([("tab", "profile")]))>
                               <input type="hidden" name="action" value="remove_avatar">
                               button(
                                   variant: ButtonVariant::Outline,
@@ -252,7 +290,7 @@ async fn profile_tab(
                       </div>
                   </div>
               </div>
-              <form method="post" action="/settings?tab=profile" class="mt-6 flex flex-col gap-4">
+              <form method="post" action=(href!(settings_post).query([("tab", "profile")])) class="mt-6 flex flex-col gap-4">
                   <input type="hidden" name="action" value="update_profile">
                   <div class="space-y-2">
                       <label for="name">"Nome de exibição"</label>
@@ -375,7 +413,6 @@ async fn profile_tab(
 async fn account_tab(email: String) -> Result<impl View> {
   Ok(view! {
       card(
-          attrs: attributes! { class="mt-6" },
           card_header(
               card_title("Conta")
               card_description(
@@ -386,7 +423,7 @@ async fn account_tab(email: String) -> Result<impl View> {
               )
           )
           card_content(
-              <form method="post" action="/settings?tab=account" class="flex flex-col gap-4">
+              <form method="post" action=(href!(settings_post).query([("tab", "account")])) class="flex flex-col gap-4">
                   <input type="hidden" name="action" value="change_email">
                   <h3 class="text-sm font-medium">"Alterar e-mail"</h3>
                   <div class="space-y-2">
@@ -400,7 +437,7 @@ async fn account_tab(email: String) -> Result<impl View> {
                   )
               </form>
               separator(attrs: attributes! { class="my-5" })
-              <form method="post" action="/settings?tab=account" class="flex flex-col gap-4">
+              <form method="post" action=(href!(settings_post).query([("tab", "account")])) class="flex flex-col gap-4">
                   <input type="hidden" name="action" value="change_password">
                   <h3 class="text-sm font-medium">"Alterar senha"</h3>
                   <div class="space-y-2">
@@ -430,7 +467,6 @@ async fn account_tab(email: String) -> Result<impl View> {
 async fn sessions_tab(sessions: Vec<ListedSession>) -> Result<impl View> {
   Ok(view! {
       card(
-          attrs: attributes! { class="mt-6" },
           card_header(
               card_title("Sessões ativas")
               card_description("Dispositivos atualmente conectados à sua conta.")
@@ -455,15 +491,25 @@ async fn sessions_tab(sessions: Vec<ListedSession>) -> Result<impl View> {
                               </p>
                           </div>
                           if !session.current {
-                              <form method="post" action="/settings?tab=sessions">
+                              <form method="post" action=(href!(settings_post).query([("tab", "sessions")]))>
                                   <input type="hidden" name="action" value="revoke_session">
                                   <input type="hidden" name="session_id" value=(session.id.to_string())>
-                                  button(
-                                      variant: ButtonVariant::Outline,
-                                      size: ButtonSize::Sm,
-                                      attrs: attributes! { type="submit" },
-                                      "Revogar"
-                                  )
+                                  {
+                                      let sid = session.id.to_string();
+                                      button(
+                                          variant: ButtonVariant::Outline,
+                                          size: ButtonSize::Sm,
+                                          attrs: attributes! {
+                                              type="submit"
+                                              @click=$(async |e: Event| {
+                                                  e.prevent_default();
+                                                  revoke_session_proc(sid.to_owned()).await;
+                                                  raw!("location.reload()");
+                                              })
+                                          },
+                                          "Revogar"
+                                      )
+                                  }
                               </form>
                           }
                       </div>
@@ -474,6 +520,7 @@ async fn sessions_tab(sessions: Vec<ListedSession>) -> Result<impl View> {
   })
 }
 
+// TODO: QR Code scanner
 #[component]
 async fn security_tab(
   two_factor_enabled: bool,
@@ -481,7 +528,6 @@ async fn security_tab(
 ) -> Result<impl View> {
   Ok(view! {
       card(
-          attrs: attributes! { class="mt-6" },
           card_header(
               card_title("Segurança")
               card_description(
@@ -496,7 +542,7 @@ async fn security_tab(
                       </p>
                       <p class="break-all font-mono text-xs">(secret.as_str())</p>
                       <p class="break-all text-xs text-muted-foreground">(totp_uri.as_str())</p>
-                      <form method="post" action="/settings?tab=security" class="flex flex-col gap-4">
+                      <form method="post" action=(href!(settings_post).query([("tab", "security")])) class="flex flex-col gap-4">
                           <input type="hidden" name="action" value="confirm_2fa">
                           <div class="space-y-2">
                               <label for="code">"Código de 6 dígitos"</label>
@@ -522,7 +568,7 @@ async fn security_tab(
                           </p>
                       </div>
                       if two_factor_enabled {
-                          <form method="post" action="/settings?tab=security" class="flex items-end gap-2">
+                          <form method="post" action=(href!(settings_post).query([("tab", "security")])) class="flex items-end gap-2">
                               <input type="hidden" name="action" value="disable_2fa">
                               <div class="space-y-1">
                                   <label for="password" class="text-xs">"Senha"</label>
@@ -536,7 +582,7 @@ async fn security_tab(
                               )
                           </form>
                       } else {
-                          <form method="post" action="/settings?tab=security">
+                          <form method="post" action=(href!(settings_post).query([("tab", "security")]))>
                               <input type="hidden" name="action" value="enable_2fa">
                               button(
                                   variant: ButtonVariant::Primary,
@@ -561,7 +607,6 @@ async fn linked_accounts_tab(
 ) -> Result<impl View> {
   Ok(view! {
       card(
-          attrs: attributes! { class="mt-6" },
           card_header(
               card_title("Contas vinculadas")
               card_description("Métodos de login vinculados à sua conta.")
@@ -581,16 +626,27 @@ async fn linked_accounts_tab(
                               </p>
                           </div>
                           if account.provider_id != CREDENTIAL_PROVIDER_ID {
-                              <form method="post" action="/settings?tab=linked-accounts">
+                              <form method="post" action=(href!(settings_post).query([("tab", "linked-accounts")]))>
                                   <input type="hidden" name="action" value="unlink">
                                   <input type="hidden" name="provider_id" value=(account.provider_id.clone())>
                                   <input type="hidden" name="account_id" value=(account.account_id.clone())>
-                                  button(
-                                      variant: ButtonVariant::Outline,
-                                      size: ButtonSize::Sm,
-                                      attrs: attributes! { type="submit" },
-                                      "Desconectar"
-                                  )
+                                  {
+                                      let pid = account.provider_id.clone();
+                                      let aid = account.account_id.clone();
+                                      button(
+                                          variant: ButtonVariant::Outline,
+                                          size: ButtonSize::Sm,
+                                          attrs: attributes! {
+                                              type="submit"
+                                              @click=$(async |e: Event| {
+                                                  e.prevent_default();
+                                                  unlink_account_proc(pid.to_owned(), aid.to_owned()).await;
+                                                  raw!("location.reload()");
+                                              })
+                                          },
+                                          "Desconectar"
+                                      )
+                                  }
                               </form>
                           }
                       </div>
@@ -603,7 +659,7 @@ async fn linked_accounts_tab(
                                   "Não conectado"
                               </p>
                           </div>
-                          <form method="post" action="/settings?tab=linked-accounts">
+                          <form method="post" action=(href!(settings_post).query([("tab", "linked-accounts")]))>
                               <input type="hidden" name="action" value="link_google">
                               button(
                                   variant: ButtonVariant::Outline,
@@ -624,7 +680,6 @@ async fn linked_accounts_tab(
 async fn danger_tab() -> Result<impl View> {
   Ok(view! {
       card(
-          attrs: attributes! { class="mt-6" },
           card_header(
               card_title("Zona de perigo")
               card_description(
@@ -632,7 +687,7 @@ async fn danger_tab() -> Result<impl View> {
               )
           )
           card_content(
-              <form method="post" action="/settings?tab=danger" class="flex flex-col gap-4">
+              <form method="post" action=(href!(settings_post).query([("tab", "danger")])) class="flex flex-col gap-4">
                   <input type="hidden" name="action" value="delete_user">
                   <div class="space-y-2">
                       <label for="confirm_email">"Seu e-mail"</label>
@@ -678,12 +733,45 @@ pub async fn upload_avatar(
   )
   .await
   {
-    Ok(_) => Ok(see_other("/settings?tab=profile&saved=1")),
-    Err(err) => Ok(see_other(format!(
-      "/settings?tab=profile&error={}",
-      encode_query(&err.to_string())
-    ))),
+    Ok(_) => Ok(see_other(
+      href!(page)
+        .query([("tab", "profile"), ("saved", "1")])
+        .resolve(cx),
+    )),
+    Err(err) => Ok(see_other(
+      href!(page)
+        .query([("tab", "profile"), ("error", err.to_string().as_str())])
+        .resolve(cx),
+    )),
   }
+}
+
+/// JS fast-path for the `revoke_session` form above. The hidden
+/// `action`/`session_id` inputs stay as the no-JS fallback; the browser calls
+/// this with the session id directly instead of posting the form.
+#[procedure("/settings/revoke-session")]
+async fn revoke_session_proc(cx: &Cx, session_id: String) -> Result<bool> {
+  let su = require_user(cx).await?;
+  let pool = app_context::<PgPool>(cx);
+  let id = Uuid::parse_str(session_id.trim())
+    .map_err(|_| bad_request("Sessão inválida"))?;
+  service::revoke_user_session(cx, pool, su.user.id, su.session_id, id).await?;
+  Ok(true)
+}
+
+/// JS fast-path for the `unlink` form above. Hidden `provider_id`/`account_id`
+/// inputs stay as the no-JS fallback.
+#[procedure("/settings/unlink-account")]
+async fn unlink_account_proc(
+  cx: &Cx,
+  provider_id: String,
+  account_id: String,
+) -> Result<bool> {
+  let su = require_user(cx).await?;
+  let pool = app_context::<PgPool>(cx);
+  service::unlink_linked_account(pool, su.user.id, &provider_id, &account_id)
+    .await?;
+  Ok(true)
 }
 
 #[route(POST "/settings")]
@@ -703,14 +791,19 @@ pub async fn settings_post(
 
   let action = body.action.as_deref().unwrap_or("");
   let err_redirect = |msg: &str| {
-    see_other(format!(
-      "/settings?tab={}&error={}",
-      encode_query(&tab),
-      encode_query(msg)
-    ))
+    see_other(
+      href!(page)
+        .query([("tab", tab.as_str()), ("error", msg)])
+        .resolve(cx),
+    )
   };
-  let ok_redirect =
-    || see_other(format!("/settings?tab={}&saved=1", encode_query(&tab)));
+  let ok_redirect = || {
+    see_other(
+      href!(page)
+        .query([("tab", tab.as_str()), ("saved", "1")])
+        .resolve(cx),
+    )
+  };
 
   match action {
     "remove_avatar" => {
@@ -729,12 +822,13 @@ pub async fn settings_post(
     }
     "change_email" => {
       let new_email = body.new_email.as_deref().unwrap_or("");
+      let callback = href!(page).query([("tab", "account")]).resolve(cx);
       match service::request_change_email(
         pool,
         su.user.id,
         &su.user.email,
         new_email,
-        Some("/settings?tab=account"),
+        Some(callback.as_str()),
       )
       .await
       {
@@ -785,17 +879,26 @@ pub async fn settings_post(
       }
     }
     "enable_2fa" => match service::enable_two_factor(pool, &su.user).await {
-      Ok(_) => Ok(see_other("/settings?tab=security&setup=1")),
+      Ok(_) => Ok(see_other(
+        href!(page)
+          .query([("tab", "security"), ("setup", "1")])
+          .resolve(cx),
+      )),
       Err(err) => Ok(err_redirect(&portuguese_error_message(&err))),
     },
     "confirm_2fa" => {
       let code = body.code.as_deref().unwrap_or("");
       match service::confirm_enable_two_factor(pool, &su.user, code).await {
         Ok(()) => Ok(ok_redirect()),
-        Err(err) => Ok(see_other(format!(
-          "/settings?tab=security&setup=1&error={}",
-          encode_query(&portuguese_error_message(&err))
-        ))),
+        Err(err) => Ok(see_other(
+          href!(page)
+            .query([
+              ("tab", "security"),
+              ("setup", "1"),
+              ("error", portuguese_error_message(&err).as_str()),
+            ])
+            .resolve(cx),
+        )),
       }
     }
     "disable_2fa" => {
@@ -806,10 +909,12 @@ pub async fn settings_post(
       }
     }
     "link_google" => {
+      let callback =
+        href!(page).query([("tab", "linked-accounts")]).resolve(cx);
       match service::start_link_google(
         pool,
         su.user.id,
-        Some("/settings?tab=linked-accounts"),
+        Some(callback.as_str()),
       )
       .await
       {
@@ -835,10 +940,12 @@ pub async fn settings_post(
     "delete_user" => {
       let confirm = body.confirm_email.as_deref().unwrap_or("");
       match service::delete_user_confirmed(cx, pool, &su.user, confirm).await {
-        Ok(()) => Ok(see_other("/")),
+        Ok(()) => Ok(see_other(href!(crate::app::page).resolve(cx))),
         Err(err) => Ok(err_redirect(&portuguese_error_message(&err))),
       }
     }
-    _ => Ok(see_other(format!("/settings?tab={}", encode_query(&tab)))),
+    _ => Ok(see_other(
+      href!(page).query([("tab", tab.as_str())]).resolve(cx),
+    )),
   }
 }

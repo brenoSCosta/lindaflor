@@ -37,22 +37,21 @@ impl GoogleOAuthConfig {
 
   /// Build the Google authorize URL the client should navigate to.
   pub fn authorize_url(&self, state: &str) -> String {
-    let mut url = String::from(GOOGLE_AUTH_URL);
-    url.push('?');
-    append_query(&mut url, "client_id", &self.client_id);
-    url.push('&');
-    append_query(&mut url, "redirect_uri", &self.redirect_uri());
-    url.push('&');
-    append_query(&mut url, "response_type", "code");
-    url.push('&');
-    append_query(&mut url, "scope", OAUTH_SCOPES);
-    url.push('&');
-    append_query(&mut url, "state", state);
-    url.push('&');
-    append_query(&mut url, "access_type", "online");
-    url.push('&');
-    append_query(&mut url, "prompt", "select_account");
-    url
+    let redirect_uri = self.redirect_uri();
+    reqwest::Url::parse_with_params(
+      GOOGLE_AUTH_URL,
+      [
+        ("client_id", self.client_id.as_str()),
+        ("redirect_uri", redirect_uri.as_str()),
+        ("response_type", "code"),
+        ("scope", OAUTH_SCOPES),
+        ("state", state),
+        ("access_type", "online"),
+        ("prompt", "select_account"),
+      ],
+    )
+    .expect("Google auth URL is valid")
+    .to_string()
   }
 }
 
@@ -67,26 +66,6 @@ fn env_nonempty(key: &str) -> Option<String> {
 pub fn app_origin() -> Option<String> {
   env_nonempty("APP_ORIGIN").map(|s| s.trim_end_matches('/').to_string())
 }
-
-fn append_query(buf: &mut String, key: &str, value: &str) {
-  buf.push_str(key);
-  buf.push('=');
-  for b in value.bytes() {
-    match b {
-      b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-        buf.push(b as char);
-      }
-      b' ' => buf.push_str("%20"),
-      _ => {
-        buf.push('%');
-        buf.push(HEX[(b >> 4) as usize] as char);
-        buf.push(HEX[(b & 0xf) as usize] as char);
-      }
-    }
-  }
-}
-
-const HEX: &[u8; 16] = b"0123456789ABCDEF";
 
 #[derive(Debug, Error)]
 pub enum GoogleOAuthError {
@@ -199,7 +178,7 @@ mod tests {
     assert!(url.contains(
             "redirect_uri=http%3A%2F%2Flocalhost%3A4200%2Fapi%2Fauth%2Fcallback%2Fgoogle"
         ));
-    assert!(url.contains("scope=openid%20email%20profile"));
+    assert!(url.contains("scope=openid+email+profile"));
   }
 
   #[test]

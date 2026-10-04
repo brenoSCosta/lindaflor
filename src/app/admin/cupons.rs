@@ -8,14 +8,16 @@ use topcoat::{
   router::{
     content::Form,
     error::{SeeOther, see_other},
-    page, query_params, route,
+    href, page, query_params, route,
   },
-  runtime::{Event, shard, signal},
+  runtime::{Event, procedure, shard, signal},
   view::{View, attributes, view},
 };
 use uuid::Uuid;
 
-use crate::app::auth_helpers::{encode_query, require_user};
+use crate::app::auth_helpers::require_user;
+use crate::auth::service;
+use crate::auth::user::SessionUser;
 use crate::components::alert::{AlertVariant, alert, alert_title};
 use crate::components::badge::{BadgeVariant, badge};
 use crate::components::button::{
@@ -23,14 +25,13 @@ use crate::components::button::{
 };
 use crate::components::card::{card, card_content, card_header, card_title};
 use crate::components::checkbox::checkbox;
+use crate::components::container::container;
 use crate::components::input::input;
 use crate::components::label::label;
 use crate::components::select::select;
 use crate::components::table::{
   table, table_body, table_cell, table_head, table_header, table_row,
 };
-use lindaflor::auth::service;
-use lindaflor::auth::user::SessionUser;
 
 #[derive(Deserialize)]
 struct CreateCouponForm {
@@ -115,30 +116,34 @@ struct AssignableUser {
 async fn require_admin(cx: &Cx) -> Result<SessionUser> {
   let su = require_user(cx).await?;
   if !service::is_admin(su.user.role.as_deref()) {
-    return Err(see_other("/dashboard").into());
+    return Err(
+      see_other(href!(crate::app::dashboard::page).resolve(cx)).into(),
+    );
   }
   Ok(su)
 }
 
-fn coupons_url(q: &str, cupom: &str, uq: &str, erro: Option<&str>) -> String {
-  let mut parts = Vec::new();
+fn coupons_url(
+  cx: &Cx,
+  q: &str,
+  cupom: &str,
+  uq: &str,
+  erro: Option<&str>,
+) -> String {
+  let mut pairs = Vec::new();
   if !q.is_empty() {
-    parts.push(format!("q={}", encode_query(q)));
+    pairs.push(("q", q));
   }
   if !cupom.is_empty() {
-    parts.push(format!("cupom={}", encode_query(cupom)));
+    pairs.push(("cupom", cupom));
   }
   if !cupom.is_empty() && !uq.is_empty() {
-    parts.push(format!("uq={}", encode_query(uq)));
+    pairs.push(("uq", uq));
   }
   if let Some(erro) = erro.map(str::trim).filter(|s| !s.is_empty()) {
-    parts.push(format!("erro={}", encode_query(erro)));
+    pairs.push(("erro", erro));
   }
-  if parts.is_empty() {
-    "/admin/cupons".to_string()
-  } else {
-    format!("/admin/cupons?{}", parts.join("&"))
-  }
+  href!(page).query(pairs).resolve(cx)
 }
 
 fn form_q(raw: &Option<String>) -> String {
@@ -149,12 +154,12 @@ fn form_text(raw: &Option<String>) -> String {
   raw.as_deref().unwrap_or("").trim().to_string()
 }
 
-fn back(q: &str, cupom: &str, uq: &str) -> SeeOther {
-  see_other(coupons_url(q, cupom, uq, None))
+fn back(cx: &Cx, q: &str, cupom: &str, uq: &str) -> SeeOther {
+  see_other(coupons_url(cx, q, cupom, uq, None))
 }
 
-fn fail(q: &str, cupom: &str, uq: &str, message: &str) -> SeeOther {
-  see_other(coupons_url(q, cupom, uq, Some(message)))
+fn fail(cx: &Cx, q: &str, cupom: &str, uq: &str, message: &str) -> SeeOther {
+  see_other(coupons_url(cx, q, cupom, uq, Some(message)))
 }
 
 fn db_error_message(err: &sqlx::Error) -> String {
@@ -216,6 +221,7 @@ fn col_count(row: &sqlx::postgres::PgRow, name: &str) -> i64 {
 }
 
 async fn load_coupons(
+  cx: &Cx,
   pool: &PgPool,
   q: &str,
 ) -> Result<Vec<CouponListItem>, sqlx::Error> {
@@ -274,7 +280,7 @@ async fn load_coupons(
           "Ilimitado".to_string()
         };
         CouponListItem {
-          manage_href: coupons_url("", &id, "", None),
+          manage_href: coupons_url(cx, "", &id, "", None),
           id,
           code,
           discount_label,
@@ -384,7 +390,7 @@ async fn coupon_user_directory(
   let total = list.total;
 
   Ok(view! {
-      <div class="mb-4 max-w-xl">
+      <div class="mb-4">
           input(attrs: attributes! {
               id="coupon-user-search"
               type="search"
@@ -446,6 +452,137 @@ async fn coupon_user_directory(
   })
 }
 
+/// Coupon search + table. Re-renders on the server when the query changes
+/// or after a toggle, without reloading the page. Toggle uses the
+/// `toggle_coupon_proc` procedure and bumps a version signal to refresh the
+/// shard in place (no `location.reload()`).
+///
+/// The shard endpoint does not run the page guard, so this checks the admin
+/// role itself. Restored signal values are treated as user input.
+#[shard("/admin/cupons/lista")]
+async fn coupon_directory(cx: &Cx, q: String) -> Result<impl View> {
+  let _actor = require_admin(cx).await?;
+  let pool = app_context::<PgPool>(cx);
+  let q = signal(cx, || clamp_coupon_query(&q));
+  let version = signal(cx, || 0u64);
+  let _tick = version.get();
+
+  let query = clamp_coupon_query(&q.get());
+  let (coupons, load_error) = match load_coupons(cx, pool, &query).await {
+    Ok(coupons) => (coupons, None),
+    Err(err) => (Vec::new(), Some(db_error_message(&err))),
+  };
+  let is_empty = coupons.is_empty();
+
+  Ok(view! {
+      <div class="mb-4 max-w-xl">
+          input(attrs: attributes! {
+              id="coupon-search"
+              type="search"
+              placeholder="Buscar por código"
+              aria-label="Buscar cupons"
+              :value=$(q.get())
+              @input=$(|e: Event| { q.set(e.target.value); })
+          })
+      </div>
+
+      if let Some(message) = load_error {
+          <div class="mb-6">
+              alert(
+                  variant: AlertVariant::Destructive,
+                  alert_title((message))
+              )
+          </div>
+      }
+
+      if is_empty {
+          <p class="text-sm text-muted-foreground">"Nenhum cupom cadastrado."</p>
+      } else {
+          table(
+              table_header(
+                  table_row(
+                      table_head("Código")
+                      table_head("Desconto")
+                      table_head("Mínimo")
+                      table_head("Máx.")
+                      table_head("Uso")
+                      table_head("Usos")
+                      table_head("Atribuídos")
+                      table_head("Validade")
+                      table_head("Status")
+                      table_head("Ações")
+                  )
+              )
+              table_body(
+                  #[key(row.id.clone())]
+                  for row in coupons {
+                      table_row(
+                          table_cell(<span class="font-mono font-medium">(row.code)</span>)
+                          table_cell(badge(variant: row.discount_variant, (row.discount_label)))
+                          table_cell((row.min_label))
+                          table_cell((row.max_label))
+                          table_cell((row.usage_label))
+                          table_cell((row.uses_count))
+                          table_cell((row.assignee_count))
+                          table_cell(<span class="text-muted-foreground">(row.validity)</span>)
+                          table_cell(badge(variant: row.status_variant, (row.status_label)))
+                          table_cell(
+                              <div class="flex items-center gap-2">
+                                  <a href=(row.manage_href) class=(button_variants(ButtonVariant::Outline, ButtonSize::Sm))>"Atribuir"</a>
+                                  <form method="post" action=(href!(toggle_coupon)) class="inline">
+                                      <input type="hidden" name="coupon_id" value=(row.id.clone())>
+                                      {
+                                          let cid = row.id.clone();
+                                          if row.active {
+                                              button(
+                                                  variant: ButtonVariant::Ghost,
+                                                  size: ButtonSize::Sm,
+                                                  attrs: attributes! {
+                                                      type="submit"
+                                                      @click=$(async |e: Event| {
+                                                          e.prevent_default();
+                                                          toggle_coupon_proc(cid.to_owned()).await;
+                                                          version.set(version.get() + 1u64);
+                                                      })
+                                                  },
+                                                  "Desativar"
+                                              )
+                                          } else {
+                                              button(
+                                                  variant: ButtonVariant::Ghost,
+                                                  size: ButtonSize::Sm,
+                                                  attrs: attributes! {
+                                                      type="submit"
+                                                      @click=$(async |e: Event| {
+                                                          e.prevent_default();
+                                                          toggle_coupon_proc(cid.to_owned()).await;
+                                                          version.set(version.get() + 1u64);
+                                                      })
+                                                  },
+                                                  "Ativar"
+                                              )
+                                          }
+                                      }
+                                  </form>
+                                  <form method="post" action=(href!(delete_coupon)) class="inline">
+                                      <input type="hidden" name="coupon_id" value=(row.id.clone())>
+                                      button(
+                                          variant: ButtonVariant::Destructive,
+                                          size: ButtonSize::Sm,
+                                          attrs: attributes! { type="submit" },
+                                          "Excluir"
+                                      )
+                                  </form>
+                              </div>
+                          )
+                      )
+                  }
+              )
+          )
+      }
+  })
+}
+
 #[page(GET "/admin/cupons")]
 pub async fn page(cx: &Cx) -> Result<impl View> {
   let _actor = require_admin(cx).await?;
@@ -463,11 +600,10 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let uq = clamp_coupon_query(query.uq.as_deref().unwrap_or(""));
   let error_message = query.erro.clone().filter(|value| !value.is_empty());
 
-  let (coupons, load_error) = match load_coupons(pool, &q).await {
+  let (coupons, load_error) = match load_coupons(cx, pool, &q).await {
     Ok(coupons) => (coupons, None),
     Err(err) => (Vec::new(), Some(db_error_message(&err))),
   };
-  let is_empty = coupons.is_empty();
   let selected_coupon = coupons.iter().find(|row| row.id == selected);
   let selected_code = selected_coupon
     .map(|row| row.code.clone())
@@ -487,9 +623,9 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let dir_cupom = selected.clone();
 
   Ok(view! {
-      <div class="p-8">
-          <h1 class="mb-2 text-2xl font-semibold tracking-tight">"Cupons"</h1>
-          <p class="mb-8 text-muted-foreground">"Crie cupons, acompanhe usos e atribua a usuários específicos."</p>
+      container(
+          <h1 class="text-2xl font-semibold tracking-tight">"Cupons"</h1>
+          <p class="text-muted-foreground">"Crie cupons, acompanhe usos e atribua a usuários específicos."</p>
 
           if let Some(message) = error_message {
               <div class="mb-6">
@@ -513,7 +649,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
               card(
                   card_header(card_title("Novo cupom"))
                   card_content(
-                      <form method="post" action="/admin/cupons/create" class="grid gap-4 md:grid-cols-3">
+                      <form method="post" action=(href!(create_coupon)) class="grid gap-4 @xl/page:grid-cols-2 ">
                           <input type="hidden" name="q" value=(hidden_q)>
                           <div class="space-y-2">
                               label(attrs: attributes! { for="code" }, "Código")
@@ -530,7 +666,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                               label(attrs: attributes! { for="discount_type" }, "Tipo de desconto")
                               select(
                                   attrs: attributes! { name="discount_type" id="discount_type" },
-                                  <option value="percent">"Percentual (1–50%)"</option>
+                                  <option value="percent">"Percentual (1-50%)"</option>
                                   <option value="fixed">"Valor fixo (centavos)"</option>
                               )
                           </div>
@@ -602,7 +738,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                   id="starts_at"
                               })
                           </div>
-                          <div class="space-y-2 md:col-span-2">
+                          <div class="space-y-2">
                               label(attrs: attributes! { for="expires_at" }, "Expira em (opcional)")
                               input(attrs: attributes! {
                                   type="datetime-local"
@@ -610,7 +746,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                   id="expires_at"
                               })
                           </div>
-                          <div class="md:col-span-3">
+                          <div class="space-y-2">
                               button(
                                   variant: ButtonVariant::Primary,
                                   attrs: attributes! { type="submit" },
@@ -622,80 +758,23 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
               )
           </div>
 
-          if is_empty {
-              <p class="text-sm text-muted-foreground">"Nenhum cupom cadastrado."</p>
-          } else {
-              table(
-                  table_header(
-                      table_row(
-                          table_head("Código")
-                          table_head("Desconto")
-                          table_head("Mínimo")
-                          table_head("Máx.")
-                          table_head("Uso")
-                          table_head("Usos")
-                          table_head("Atribuídos")
-                          table_head("Validade")
-                          table_head("Status")
-                          table_head("Ações")
-                      )
-                  )
-                  table_body(
-                      #[key(row.id.clone())]
-                      for row in coupons {
-                          table_row(
-                              table_cell(<span class="font-mono font-medium">(row.code)</span>)
-                              table_cell(badge(variant: row.discount_variant, (row.discount_label)))
-                              table_cell((row.min_label))
-                              table_cell((row.max_label))
-                              table_cell((row.usage_label))
-                              table_cell((row.uses_count))
-                              table_cell((row.assignee_count))
-                              table_cell(<span class="text-muted-foreground">(row.validity)</span>)
-                              table_cell(badge(variant: row.status_variant, (row.status_label)))
-                              table_cell(
-                                  <div class="flex items-center gap-2">
-                                      <a href=(row.manage_href) class=(button_variants(ButtonVariant::Outline, ButtonSize::Sm))>"Atribuir"</a>
-                                      <form method="post" action="/admin/cupons/toggle" class="inline">
-                                          <input type="hidden" name="coupon_id" value=(row.id.clone())>
-                                          if row.active {
-                                              <button type="submit" class=(button_variants(ButtonVariant::Ghost, ButtonSize::Sm))>"Desativar"</button>
-                                          } else {
-                                              <button type="submit" class=(button_variants(ButtonVariant::Ghost, ButtonSize::Sm))>"Ativar"</button>
-                                          }
-                                      </form>
-                                      <form method="post" action="/admin/cupons/delete" class="inline">
-                                          <input type="hidden" name="coupon_id" value=(row.id.clone())>
-                                          button(
-                                              variant: ButtonVariant::Destructive,
-                                              size: ButtonSize::Sm,
-                                              attrs: attributes! { type="submit" },
-                                              "Excluir"
-                                          )
-                                      </form>
-                                  </div>
-                              )
-                          )
-                      }
-                  )
-              )
-          }
+          coupon_directory(q: q.clone())
 
           if show_assign {
-              <div class="mt-8">
+              
                   card(
                       card_header(card_title((format!("Atribuir {selected_code}"))))
                       card_content(
-                          <p class="mb-4 text-sm text-muted-foreground">"Somente usuários logados atribuídos aqui podem usar este cupom no checkout."</p>
+                          <p class="text-sm text-muted-foreground">"Somente usuários logados atribuídos aqui podem usar este cupom no checkout."</p>
                           if has_assigned {
-                              <ul class="mb-6 flex flex-col gap-2">
+                              <ul class="flex flex-col gap-2">
                                   for user in assigned {
                                       <li class="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm">
                                           <div class="min-w-0">
                                               <p class="font-medium">(user.name)</p>
                                               <p class="truncate text-xs text-muted-foreground">(user.email)</p>
                                           </div>
-                                          <form method="post" action="/admin/cupons/unassign">
+                                          <form method="post" action=(href!(unassign_coupon))>
                                               <input type="hidden" name="coupon_id" value=(assign_cupom.clone())>
                                               <input type="hidden" name="user_id" value=(user.id)>
                                               <input type="hidden" name="q" value=(assign_q.clone())>
@@ -714,7 +793,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                           } else {
                               <p class="mb-6 text-sm text-muted-foreground">"Nenhum usuário atribuído ainda."</p>
                           }
-                          <form method="post" action="/admin/cupons/assign">
+                          <form method="post" action=(href!(assign_coupon))>
                               <input type="hidden" name="coupon_id" value=(assign_cupom.clone())>
                               <input type="hidden" name="q" value=(assign_q.clone())>
                               <input type="hidden" name="cupom" value=(assign_cupom.clone())>
@@ -730,9 +809,9 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                           </form>
                       )
                   )
-              </div>
+              
           }
-      </div>
+      )
   })
 }
 
@@ -877,7 +956,7 @@ async fn create_coupon(
   let q = form_q(&body.q);
   let coupon = match validate_create(&body) {
     Ok(coupon) => coupon,
-    Err(message) => return Ok(fail(&q, "", "", &message)),
+    Err(message) => return Ok(fail(cx, &q, "", "", &message)),
   };
   let pool = app_context::<PgPool>(cx);
   let inserted = sqlx::query(
@@ -903,9 +982,28 @@ async fn create_coupon(
   .await;
 
   match inserted {
-    Ok(done) if done.rows_affected() == 1 => Ok(back(&q, "", "")),
-    Ok(_) => Ok(fail(&q, "", "", "Este código já está em uso.")),
-    Err(err) => Ok(fail(&q, "", "", &db_error_message(&err))),
+    Ok(done) if done.rows_affected() == 1 => Ok(back(cx, &q, "", "")),
+    Ok(_) => Ok(fail(cx, &q, "", "", "Este código já está em uso.")),
+    Err(err) => Ok(fail(cx, &q, "", "", &db_error_message(&err))),
+  }
+}
+
+/// JS fast-path for the per-row toggle form above. The hidden `coupon_id`
+/// input stays as the no-JS fallback; the browser passes the id directly.
+#[procedure("/admin/cupons/toggle-proc")]
+async fn toggle_coupon_proc(cx: &Cx, coupon_id: String) -> Result<bool> {
+  let _actor = require_admin(cx).await?;
+  let Some(coupon_id) = parse_uuid(&coupon_id) else {
+    return Ok(false);
+  };
+  let pool = app_context::<PgPool>(cx);
+  match sqlx::query("UPDATE coupons SET active = NOT active WHERE id = $1")
+    .bind(coupon_id)
+    .execute(pool)
+    .await
+  {
+    Ok(done) if done.rows_affected() == 1 => Ok(true),
+    _ => Ok(false),
   }
 }
 
@@ -916,7 +1014,7 @@ async fn toggle_coupon(cx: &Cx, Form(body): Form<IdForm>) -> Result<SeeOther> {
   let cupom = form_text(&body.cupom);
   let uq = form_text(&body.uq);
   let Some(coupon_id) = parse_uuid(&body.coupon_id) else {
-    return Ok(fail(&q, &cupom, &uq, "Cupom inválido."));
+    return Ok(fail(cx, &q, &cupom, &uq, "Cupom inválido."));
   };
   let pool = app_context::<PgPool>(cx);
   match sqlx::query("UPDATE coupons SET active = NOT active WHERE id = $1")
@@ -924,9 +1022,9 @@ async fn toggle_coupon(cx: &Cx, Form(body): Form<IdForm>) -> Result<SeeOther> {
     .execute(pool)
     .await
   {
-    Ok(done) if done.rows_affected() == 1 => Ok(back(&q, &cupom, &uq)),
-    Ok(_) => Ok(fail(&q, &cupom, &uq, "Cupom não encontrado.")),
-    Err(err) => Ok(fail(&q, &cupom, &uq, &db_error_message(&err))),
+    Ok(done) if done.rows_affected() == 1 => Ok(back(cx, &q, &cupom, &uq)),
+    Ok(_) => Ok(fail(cx, &q, &cupom, &uq, "Cupom não encontrado.")),
+    Err(err) => Ok(fail(cx, &q, &cupom, &uq, &db_error_message(&err))),
   }
 }
 
@@ -937,7 +1035,7 @@ async fn delete_coupon(cx: &Cx, Form(body): Form<IdForm>) -> Result<SeeOther> {
   let cupom = form_text(&body.cupom);
   let uq = form_text(&body.uq);
   let Some(coupon_id) = parse_uuid(&body.coupon_id) else {
-    return Ok(fail(&q, &cupom, &uq, "Cupom inválido."));
+    return Ok(fail(cx, &q, &cupom, &uq, "Cupom inválido."));
   };
   let pool = app_context::<PgPool>(cx);
   match sqlx::query("DELETE FROM coupons WHERE id = $1")
@@ -951,10 +1049,10 @@ async fn delete_coupon(cx: &Cx, Form(body): Form<IdForm>) -> Result<SeeOther> {
       } else {
         &cupom
       };
-      Ok(back(&q, keep, &uq))
+      Ok(back(cx, &q, keep, &uq))
     }
-    Ok(_) => Ok(fail(&q, &cupom, &uq, "Cupom não encontrado.")),
-    Err(err) => Ok(fail(&q, &cupom, &uq, &db_error_message(&err))),
+    Ok(_) => Ok(fail(cx, &q, &cupom, &uq, "Cupom não encontrado.")),
+    Err(err) => Ok(fail(cx, &q, &cupom, &uq, &db_error_message(&err))),
   }
 }
 
@@ -968,7 +1066,7 @@ async fn assign_coupon(
   let cupom = form_text(&body.cupom);
   let uq = form_text(&body.uq);
   let Some(coupon_id) = parse_uuid(&body.coupon_id) else {
-    return Ok(fail(&q, &cupom, &uq, "Cupom inválido."));
+    return Ok(fail(cx, &q, &cupom, &uq, "Cupom inválido."));
   };
   let user_ids: Vec<Uuid> = body
     .user_ids
@@ -976,7 +1074,7 @@ async fn assign_coupon(
     .filter_map(|raw| parse_uuid(raw))
     .collect();
   if user_ids.is_empty() {
-    return Ok(fail(&q, &cupom, &uq, "Selecione ao menos um usuário."));
+    return Ok(fail(cx, &q, &cupom, &uq, "Selecione ao menos um usuário."));
   }
   let pool = app_context::<PgPool>(cx);
   match sqlx::query(
@@ -989,8 +1087,8 @@ async fn assign_coupon(
   .execute(pool)
   .await
   {
-    Ok(_) => Ok(back(&q, &cupom, &uq)),
-    Err(err) => Ok(fail(&q, &cupom, &uq, &db_error_message(&err))),
+    Ok(_) => Ok(back(cx, &q, &cupom, &uq)),
+    Err(err) => Ok(fail(cx, &q, &cupom, &uq, &db_error_message(&err))),
   }
 }
 
@@ -1006,7 +1104,7 @@ async fn unassign_coupon(
   let (Some(coupon_id), Some(user_id)) =
     (parse_uuid(&body.coupon_id), parse_uuid(&body.user_id))
   else {
-    return Ok(fail(&q, &cupom, &uq, "Identificador inválido."));
+    return Ok(fail(cx, &q, &cupom, &uq, "Identificador inválido."));
   };
   let pool = app_context::<PgPool>(cx);
   match sqlx::query(
@@ -1017,7 +1115,7 @@ async fn unassign_coupon(
   .execute(pool)
   .await
   {
-    Ok(_) => Ok(back(&q, &cupom, &uq)),
-    Err(err) => Ok(fail(&q, &cupom, &uq, &db_error_message(&err))),
+    Ok(_) => Ok(back(cx, &q, &cupom, &uq)),
+    Err(err) => Ok(fail(cx, &q, &cupom, &uq, &db_error_message(&err))),
   }
 }

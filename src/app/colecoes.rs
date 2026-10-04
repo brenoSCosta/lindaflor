@@ -5,7 +5,7 @@ use topcoat::{
   Result,
   context::Cx,
   context::app_context,
-  router::page,
+  router::{href, page},
   view::{View, attributes, view},
 };
 
@@ -14,6 +14,7 @@ use crate::components::badge::{BadgeVariant, badge};
 use crate::components::card::{
   card, card_description, card_footer, card_header, card_title,
 };
+use crate::components::container::container;
 
 #[page]
 pub async fn page(cx: &Cx) -> Result<impl View> {
@@ -21,16 +22,16 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let collections = list_collections(pool).await?;
 
   Ok(view! {
-      <main class="mx-auto max-w-7xl px-4 py-16 md:px-8">
+      container(
           <h1 class="text-4xl font-bold tracking-tight">"Coleções"</h1>
-          <p class="mt-3 max-w-xl text-muted-foreground">
+          <p class="max-w-xl text-muted-foreground">
               "Descubra as linhas da Linda Flor, pensadas para cada momento do seu verão."
           </p>
-          <div class="mt-12 grid gap-6 md:grid-cols-2">
+          <div class="grid gap-4 @md/page:grid-cols-2">
               #[key(collection.id.to_string())]
               for collection in collections {
                   <a
-                      href=(format!("/colecoes/{}", collection.slug))
+                      href=(href!(slug::page, slug::Slug(collection.slug.clone())))
                       class="block transition-colors"
                   >
                       card(
@@ -48,6 +49,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                   </a>
               }
           </div>
-      </main>
+      )
   })
 }

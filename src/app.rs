@@ -7,7 +7,6 @@ pub mod checkout;
 pub mod colecoes;
 pub mod conta;
 pub mod dashboard;
-pub mod exemplos;
 pub mod forgot_password;
 pub mod login;
 pub mod pedido;
@@ -34,23 +33,23 @@ use topcoat::{
     BodyLimit, Router, RouterBuilderDiscoverExt, Slot, StatusCode,
     content::Form,
     error::{NotFoundError, SeeOther, see_other},
-    layout, module_router, not_found, page,
+    href, layout, module_router, not_found, page,
     request::uri,
     route,
   },
   runtime::RouterBuilderRuntimeExt,
   session::RouterBuilderSessionExt,
   tailwind,
-  view::{View, ViewExt, ViewHandle, class, error_boundary, view},
+  view::{View, ViewExt, class, error_boundary, view},
 };
 
 use crate::app::app_sidebar::{app_shell, is_app_shell_path, storefront_shell};
 use crate::app::auth_helpers::optional_user;
+use crate::auth::service;
+use crate::auth::session_config;
 use crate::components::button::{ButtonSize, ButtonVariant, button_variants};
 use crate::components::toast::{ToasterOptions, take_toasts, toaster};
-use crate::theme::{THEME_INIT_SCRIPT, read_theme};
-use lindaflor::auth::service;
-use lindaflor::auth::session_config;
+use crate::theme::{THEME_INIT_SCRIPT, THEME_TOGGLE_SCRIPT, read_theme};
 
 use self::store::product_card::product_card;
 use self::store::queries::list_products;
@@ -58,7 +57,7 @@ use self::store::queries::list_products;
 pub fn router(
   pool: PgPool,
   valkey: MultiplexedConnection,
-  storage: lindaflor::storage::ObjectStore,
+  storage: crate::storage::ObjectStore,
 ) -> Router {
   let mut builder = module_router!()
     .discover()
@@ -113,10 +112,10 @@ async fn root(cx: &Cx, slot: Slot<'_>) -> Result<impl View> {
                               "O link que você acessou pode estar quebrado, a página ter sido removida ou o endereço não existir."
                           </p>
                           <div class="mt-10 flex flex-wrap items-center justify-center gap-3">
-                              <a href="/" class=(button_variants(ButtonVariant::Primary, ButtonSize::Lg))>
+                              <a href=(href!(page)) class=(button_variants(ButtonVariant::Primary, ButtonSize::Lg))>
                                   "Voltar ao início"
                               </a>
-                              <a href="/produtos" class=(button_variants(ButtonVariant::Outline, ButtonSize::Lg))>
+                              <a href=(href!(crate::app::produtos::page)) class=(button_variants(ButtonVariant::Outline, ButtonSize::Lg))>
                                   "Ver catálogo"
                               </a>
                           </div>
@@ -147,7 +146,8 @@ async fn root(cx: &Cx, slot: Slot<'_>) -> Result<impl View> {
               <link rel="stylesheet" href=(tailwind::stylesheet!())>
               topcoat::runtime::script()
               topcoat::dev::script()
-              (ViewHandle::unescaped_unchecked(THEME_INIT_SCRIPT))
+              <script src=(THEME_INIT_SCRIPT)></script>
+              <script src=(THEME_TOGGLE_SCRIPT)></script>
           </head>
           <body>
               if let Some(ref name) = impersonation_name {
@@ -156,7 +156,7 @@ async fn root(cx: &Cx, slot: Slot<'_>) -> Result<impl View> {
                           "Você está atuando como "
                           <strong>(name.as_str())</strong>
                       </span>
-                      <form method="post" action="/stop-impersonating" class="inline">
+                      <form method="post" action=(href!(stop_impersonating)) class="inline">
                           <button
                               type="submit"
                               class="rounded border border-amber-700/50 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-950 hover:bg-white dark:bg-amber-900 dark:text-amber-50"
@@ -192,7 +192,7 @@ async fn stop_impersonating(
   let redirect = body
     .and_then(|Form(b)| b.redirect)
     .filter(|p| p.starts_with('/') && !p.starts_with("//"))
-    .unwrap_or_else(|| "/dashboard".to_string());
+    .unwrap_or_else(|| href!(crate::app::dashboard::page).resolve(cx));
   Ok(see_other(redirect))
 }
 
@@ -222,11 +222,11 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                       "Peças pensadas para quem ama sol, mar e estilo. Do biquíni clássico à saída de praia perfeita, tudo com a assinatura Linda Flor."
                   </p>
                   <div class="flex flex-wrap gap-3 pt-2">
-                      <a href="/produtos" class=(button_variants(ButtonVariant::Primary, ButtonSize::Lg))>
+                      <a href=(href!(crate::app::produtos::page)) class=(button_variants(ButtonVariant::Primary, ButtonSize::Lg))>
                           "Comprar agora"
                       </a>
                       <a
-                          href="/#sobre"
+                          href=(href!(page).fragment("sobre"))
                           class="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-white/50 px-5 text-base font-medium text-white transition-colors hover:bg-white/10"
                       >
                           "Ver coleções"
@@ -242,7 +242,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
               <h2 class="font-serif mt-2 text-4xl text-foreground md:text-5xl">"Explore a coleção"</h2>
           </div>
           <div class="grid gap-4 md:grid-cols-3">
-              <a href="/produtos?category=biquini" class="group relative aspect-[4/5] overflow-hidden">
+              <a href=(href!(crate::app::produtos::page).query([("category", "biquini")])) class="group relative aspect-[4/5] overflow-hidden">
                   <img
                       src="https://images.unsplash.com/photo-1598522325075-6dfac65b8df4?auto=format&fit=crop&w=1200&q=80"
                       alt="Biquínis"
@@ -251,7 +251,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                   <div class="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
                   <p class="absolute bottom-6 left-6 font-serif text-3xl text-white">"Biquínis"</p>
               </a>
-              <a href="/produtos?category=maio" class="group relative aspect-[4/5] overflow-hidden">
+              <a href=(href!(crate::app::produtos::page).query([("category", "maio")])) class="group relative aspect-[4/5] overflow-hidden">
                   <img
                       src="https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?auto=format&fit=crop&w=1200&q=80"
                       alt="Maiôs"
@@ -260,7 +260,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                   <div class="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
                   <p class="absolute bottom-6 left-6 font-serif text-3xl text-white">"Maiôs"</p>
               </a>
-              <a href="/produtos?category=saida_praia" class="group relative aspect-[4/5] overflow-hidden">
+              <a href=(href!(crate::app::produtos::page).query([("category", "saida_praia")])) class="group relative aspect-[4/5] overflow-hidden">
                   <img
                       src="https://images.unsplash.com/photo-1519046904884-53103b34b206?auto=format&fit=crop&w=1200&q=80"
                       alt="Saídas de praia"
@@ -279,7 +279,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                       <p class="text-[10px] tracking-widest text-primary uppercase">"Destaques"</p>
                       <h2 class="font-serif mt-2 text-4xl text-foreground md:text-5xl">"Os favoritos da temporada"</h2>
                   </div>
-                  <a href="/produtos" class="hidden items-center gap-2 text-[10px] tracking-wider uppercase md:inline-flex">
+                  <a href=(href!(crate::app::produtos::page)) class="hidden items-center gap-2 text-[10px] tracking-wider uppercase md:inline-flex">
                       "Ver tudo"
                   </a>
               </div>
@@ -328,10 +328,10 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
           </div>
       </section>
 
-      <section class="border-t border-border bg-foreground px-4 py-16 text-center text-primary-foreground md:px-8">
+      <section class="border-t border-border bg-foreground px-4 py-16 text-center text-background md:px-8">
           <p class="text-[10px] tracking-[0.24em] uppercase">"Atendimento personalizado"</p>
           <h2 class="font-serif mt-3 text-4xl md:text-5xl">"Fale com a gente no WhatsApp"</h2>
-          <p class="mx-auto mt-4 max-w-xl text-sm leading-relaxed text-primary-foreground/70">
+          <p class="mx-auto mt-4 max-w-xl text-sm leading-relaxed text-background/70">
               "Tire dúvidas sobre tamanhos, cores e disponibilidade. Estamos em Aracaju, de segunda a sábado, das 8h às 18h."
           </p>
           <a

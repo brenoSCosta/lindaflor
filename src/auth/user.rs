@@ -1,5 +1,3 @@
-//! Current user resolution from the Topcoat session cookie + Postgres.
-
 use std::time::{Duration, SystemTime};
 
 use sqlx::PgPool;
@@ -75,7 +73,7 @@ fn primitive_to_system_time(dt: PrimitiveDateTime) -> SystemTime {
 /// - Looks up the cookie token via [`session::token_hash`]
 /// - Loads the session + user from Postgres (hex TokenHash)
 /// - Rejects banned users (returns `None`)
-/// - Slides expiry about once per day ([`SESSION_UPDATE_AGE`]), Better Auth-style
+/// - Slides expiry about once per day ([`SESSION_UPDATE_AGE`])
 #[memoize(as_ref)]
 pub async fn current_user(cx: &Cx) -> Result<Option<SessionUser>> {
   let Some(hash) = session::token_hash(cx).await? else {

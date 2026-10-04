@@ -1,5 +1,3 @@
-//! Email verification: send + verify.
-
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use topcoat::{

@@ -6,25 +6,26 @@ use topcoat::{
   router::{
     content::Form,
     error::{SeeOther, see_other},
-    page, query_params, route,
+    href, page, query_params, route,
   },
   view::{View, ViewExt, view},
 };
 
+use crate::auth::service::{
+  self, clear_pending_2fa_cookie, portuguese_error_message,
+  read_pending_2fa_cookie,
+};
 use crate::components::button::{
   ButtonSize, ButtonVariant, button, button_variants,
 };
 use crate::components::card::{
   card, card_content, card_description, card_footer, card_header, card_title,
 };
+use crate::components::container::{ContainerVariant, container};
 use crate::components::input::input;
 use crate::components::label::label;
 use crate::components::switch::switch;
 use crate::components::tabs::{tabs, tabs_content, tabs_list, tabs_trigger};
-use lindaflor::auth::service::{
-  self, clear_pending_2fa_cookie, portuguese_error_message,
-  read_pending_2fa_cookie,
-};
 use topcoat::view::attributes;
 
 #[derive(Deserialize)]
@@ -40,6 +41,7 @@ struct TwoFactorQuery {
   error: Option<String>,
 }
 
+// TODO: Review this page
 #[page(GET "/two-factor")]
 pub async fn page(cx: &Cx) -> Result<impl View> {
   let query = query_params::<TwoFactorQuery>(cx)?;
@@ -49,10 +51,11 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
 
   if !has_pending {
     return Ok(view! {
-            <div class="flex min-h-screen items-center justify-center bg-background px-4 py-8">
-                <div class="w-full max-w-md">
+            container(
+                variant: ContainerVariant::Centered,
+                <div class="w-full">
                     <div class="mb-8 text-center">
-                        <a href="/" class="text-2xl font-bold text-primary">"Linda Flor"</a>
+                        <a href=(href!(crate::app::page)) class="text-2xl font-bold text-primary">"Linda Flor"</a>
                     </div>
                     card(
                         card_header(
@@ -63,7 +66,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                         )
                         card_footer(
                             <a
-                                href="/login"
+                                href=(href!(crate::app::login::page))
                                 class=(button_variants(ButtonVariant::Primary, ButtonSize::Md))
                             >
                                 "Ir para o login"
@@ -71,16 +74,17 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                         )
                     )
                 </div>
-            </div>
+            )
         }
         .boxed());
   }
 
   Ok(view! {
-        <div class="flex min-h-screen items-center justify-center bg-background px-4 py-8">
-            <div class="w-full max-w-md">
+        container(
+            variant: ContainerVariant::Centered,
+            <div class="w-full">
                 <div class="mb-8 text-center">
-                    <a href="/" class="text-2xl font-bold text-primary">"Linda Flor"</a>
+                    <a href=(href!(crate::app::page)) class="text-2xl font-bold text-primary">"Linda Flor"</a>
                 </div>
                 card(
                     card_header(
@@ -99,18 +103,18 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                             tabs_list(
                                 tabs_trigger(
                                     active: !is_backup,
-                                    attrs: attributes! { href="/two-factor" },
+                                    attrs: attributes! { href=(href!(page)) },
                                     "Autenticador"
                                 )
                                 tabs_trigger(
                                     active: is_backup,
-                                    attrs: attributes! { href="/two-factor?method=backup" },
+                                    attrs: attributes! { href=(href!(page).query([("method", "backup")])) },
                                     "Código de backup"
                                 )
                             )
                             tabs_content(
                                 if is_backup {
-                                    <form method="post" action="/two-factor?method=backup" class="flex flex-col gap-4">
+                                    <form method="post" action=(href!(two_factor_post).query([("method", "backup")])) class="flex flex-col gap-4">
                                         <div class="space-y-2">
                                             label(attrs: attributes! { for="backup_code" }, "Código de backup")
                                             input(attrs: attributes! { type="text" name="backup_code" id="backup_code" placeholder="xxxx-xxxx" autocomplete="off" class="font-mono" })
@@ -126,7 +130,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                         )
                                     </form>
                                 } else {
-                                    <form method="post" action="/two-factor" class="flex flex-col gap-4">
+                                    <form method="post" action=(href!(two_factor_post)) class="flex flex-col gap-4">
                                         <div class="space-y-2">
                                             label(attrs: attributes! { for="code" }, "Código de 6 dígitos")
                                             input(attrs: attributes! { type="text" name="code" id="code" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code" class="text-center text-xl tracking-widest font-mono" })
@@ -146,28 +150,14 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                         )
                     )
                     card_footer(
-                        <a href="/login" class="text-sm text-primary">
+                        <a href=(href!(crate::app::login::page)) class="text-sm text-primary">
                             "Cancelar e fazer login novamente"
                         </a>
                     )
                 )
             </div>
-        </div>
+        )
     }.boxed())
-}
-
-fn encode_query(s: &str) -> String {
-  let mut out = String::with_capacity(s.len());
-  for b in s.bytes() {
-    match b {
-      b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-        out.push(b as char)
-      }
-      b' ' => out.push_str("%20"),
-      _ => out.push_str(&format!("%{b:02X}")),
-    }
-  }
-  out
 }
 
 #[route(POST "/two-factor")]
@@ -177,7 +167,7 @@ pub async fn two_factor_post(
 ) -> Result<SeeOther> {
   let pool = app_context::<PgPool>(cx);
   let Some(token) = read_pending_2fa_cookie(cx) else {
-    return Ok(see_other("/login"));
+    return Ok(see_other(href!(crate::app::login::page).resolve(cx)));
   };
 
   let is_backup = topcoat::router::request::uri(cx)
@@ -196,21 +186,21 @@ pub async fn two_factor_post(
   match result {
     Ok(_) => {
       clear_pending_2fa_cookie(cx);
-      Ok(see_other("/dashboard"))
+      Ok(see_other(href!(crate::app::dashboard::page).resolve(cx)))
     }
     Err(err) => {
-      let dest = if is_backup {
-        format!(
-          "/two-factor?method=backup&error={}",
-          encode_query(&portuguese_error_message(&err))
-        )
+      let message = portuguese_error_message(&err);
+      if is_backup {
+        Ok(see_other(
+          href!(page)
+            .query([("method", "backup"), ("error", message.as_str())])
+            .resolve(cx),
+        ))
       } else {
-        format!(
-          "/two-factor?error={}",
-          encode_query(&portuguese_error_message(&err))
-        )
-      };
-      Ok(see_other(dest))
+        Ok(see_other(
+          href!(page).query([("error", message.as_str())]).resolve(cx),
+        ))
+      }
     }
   }
 }

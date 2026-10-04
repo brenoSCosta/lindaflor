@@ -22,11 +22,11 @@ http = "1"
 argon2 = { version = "0.6.0", features = ["alloc", "password-hash", "getrandom"] }
 password-hash = { version = "0.6.1", features = ["alloc", "getrandom", "phc"] }
 hex = "0.4.3"
+hmac = "0.12"
+sha2 = "0.10"
 time = "0.3.55"
 totp-rs = { version = "6", default-features = false, features = ["std", "otpauth", "gen_secret"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls", "form"] }
-aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio", "rustls"] }
-aws-sdk-s3 = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio", "rustls"] }
 
 [build-dependencies]
 topcoat = { version = "0.9", default-features = false, features = ["tailwind", "icon-iconify"] }
@@ -39,3 +39,6 @@ bytes = "1"
 # Faster incremental links for `topcoat dev` (see Topcoat getting started).
 [profile.dev]
 debug = "line-tables-only"
+
+[build]
+jobs = 4
