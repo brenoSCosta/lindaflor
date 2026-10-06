@@ -1,13 +1,11 @@
 #![allow(dead_code)]
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
 use http::{Method, Request, Response, StatusCode, header};
 use http_body_util::BodyExt;
-use postgresql_embedded::{PostgreSQL, SettingsBuilder};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use tokio::sync::OnceCell;
@@ -18,24 +16,16 @@ use uuid::Uuid;
 
 pub const SESSION_COOKIE: &str = "session";
 
+#[path = "../../src/embedded_postgres.rs"]
+mod embedded_postgres;
+
 pub struct TestEnv {
   pub database_url: String,
   /// Kept alive for the process lifetime.
-  _postgres: PostgreSQL,
+  _postgres: embedded_postgres::RunningPostgres,
 }
 
 static ENV: OnceCell<Arc<TestEnv>> = OnceCell::const_new();
-
-/// Prefer Postgres from PATH (devenv/nix) so we avoid theseus glibc/ABI issues.
-fn pg_installation_dir_from_path() -> Option<PathBuf> {
-  let path = std::env::var_os("PATH")?;
-  for dir in std::env::split_paths(&path) {
-    if dir.join("postgres").is_file() && dir.join("initdb").is_file() {
-      return dir.parent().map(PathBuf::from);
-    }
-  }
-  None
-}
 
 /// Shared env (one embedded PG). Each test opens its own pool against the migrated DB.
 pub async fn env() -> Arc<TestEnv> {
@@ -49,33 +39,14 @@ pub async fn env() -> Arc<TestEnv> {
       lindaflor::auth::routes::link_for_discover();
       let _ = lindaflor::api::health;
 
-      let settings =
-        if let Some(installation_dir) = pg_installation_dir_from_path() {
-          let socket_dir = std::env::temp_dir()
-            .join(format!("lindaflor-pg-sock-{}", std::process::id()));
-          let _ = std::fs::create_dir_all(&socket_dir);
-          SettingsBuilder::new()
-            .installation_dir(installation_dir)
-            .trust_installation_dir(true)
-            .socket_dir(socket_dir)
-            .timeout(Some(Duration::from_secs(30)))
-            .build()
-        } else {
-          SettingsBuilder::new()
-            .timeout(Some(Duration::from_secs(30)))
-            .build()
-        };
-
-      let mut postgres = PostgreSQL::new(settings);
-      postgres.setup().await.expect("postgres setup");
-      postgres.start().await.expect("postgres start");
-
+      let postgres = embedded_postgres::start().await;
       let database_name = format!("lindaflor_test_{}", Uuid::now_v7().simple());
       postgres
+        .server()
         .create_database(&database_name)
         .await
         .expect("create database");
-      let database_url = postgres.settings().url(&database_name);
+      let database_url = postgres.server().settings().url(&database_name);
 
       // Migrate once up front.
       let pool = PgPoolOptions::new()

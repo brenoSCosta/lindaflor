@@ -17,26 +17,33 @@
   },
   "rust-analyzer.linkedProjects": ["Cargo.toml"],
   "rust-analyzer.server.path": "${workspaceFolder}/.devenv/profile/bin/rust-analyzer",
+  "rust-analyzer.numThreads": 4,
+  "rust-analyzer.cachePriming.enable": false,
+  "rust-analyzer.cargo.allTargets": false,
   "rust-analyzer.cargo.targetDir": true,
   "rust-analyzer.server.extraEnv": {
     "PATH": "${workspaceFolder}/.devenv/profile/bin:${env:PATH}",
     "PKG_CONFIG_PATH": "${workspaceFolder}/.devenv/profile/lib/pkgconfig",
     "LD_LIBRARY_PATH": "${workspaceFolder}/.devenv/profile/lib:${env:LD_LIBRARY_PATH}",
-    "DATABASE_URL": "postgresql://postgres:postgres@localhost:4201/topcoat"
+    "DATABASE_URL": "postgresql://postgres:postgres@localhost:4201/topcoat",
+    "SQLX_OFFLINE": "true"
   },
   "rust-analyzer.cargo.extraEnv": {
     "PATH": "${workspaceFolder}/.devenv/profile/bin:${env:PATH}",
     "PKG_CONFIG_PATH": "${workspaceFolder}/.devenv/profile/lib/pkgconfig",
     "LD_LIBRARY_PATH": "${workspaceFolder}/.devenv/profile/lib:${env:LD_LIBRARY_PATH}",
-    "DATABASE_URL": "postgresql://postgres:postgres@localhost:4201/topcoat"
+    "DATABASE_URL": "postgresql://postgres:postgres@localhost:4201/topcoat",
+    "SQLX_OFFLINE": "true"
   },
   "rust-analyzer.check.extraEnv": {
     "PATH": "${workspaceFolder}/.devenv/profile/bin:${env:PATH}",
     "PKG_CONFIG_PATH": "${workspaceFolder}/.devenv/profile/lib/pkgconfig",
     "LD_LIBRARY_PATH": "${workspaceFolder}/.devenv/profile/lib:${env:LD_LIBRARY_PATH}",
-    "DATABASE_URL": "postgresql://postgres:postgres@localhost:4201/topcoat"
+    "DATABASE_URL": "postgresql://postgres:postgres@localhost:4201/topcoat",
+    "SQLX_OFFLINE": "true"
   },
   "rust-analyzer.check.command": "check",
+  "rust-analyzer.check.extraArgs": ["--bin", "lindaflor"],
   "rust-analyzer.procMacro.enable": true,
   "rust-analyzer.cargo.buildScripts.enable": true,
   "files.associations": {
@@ -44,10 +51,12 @@
   },
   "files.watcherExclude": {
     "**/target/**": true,
-    "**/node_modules/**": true
+    "**/node_modules/**": true,
+    "**/.sqlx/**": true
   },
   "search.exclude": {
     "**/target": true,
+    "**/.sqlx": true,
     "**/*.lock": true
   },
   "explorer.fileNesting.enabled": true,

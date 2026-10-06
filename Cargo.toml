@@ -39,6 +39,3 @@ bytes = "1"
 # Faster incremental links for `topcoat dev` (see Topcoat getting started).
 [profile.dev]
 debug = "line-tables-only"
-
-[build]
-jobs = 4

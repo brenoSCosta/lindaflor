@@ -1,0 +1,16 @@
+[cargo]
+allTargets = false
+targetDir = true
+
+[cargo.buildScripts]
+enable = true
+
+[cargo.extraEnv]
+SQLX_OFFLINE = "true"
+
+[check]
+command = "check"
+extraArgs = ["--bin", "lindaflor"]
+
+[check.extraEnv]
+SQLX_OFFLINE = "true"

@@ -32,6 +32,9 @@
     pkgs.zlib
   ];
   env.DATABASE_URL = "postgres://postgres:postgres@127.0.0.1:4201/topcoat";
+  # Ad-hoc cargo and rust-analyzer read .sqlx/ instead of opening a connection per query.
+  # `devenv up` overrides this and rewrites the cache. See scripts.cargo-with-sqlx.
+  env.SQLX_OFFLINE = "true";
   env.PGPORT = lib.mkForce "4201";
   env.VALKEY_URL = "redis://127.0.0.1:4202";
   env.S3_ENDPOINT = "http://127.0.0.1:4203";
@@ -75,7 +78,7 @@
     cargo-clippy = {
       enable = true;
       name = "cargo clippy";
-      entry = "cargo clippy --all-targets";
+      entry = "cargo-with-sqlx cargo clippy --all-targets";
       files = "\\.rs$";
       pass_filenames = false;
     };
@@ -180,16 +183,53 @@
         fi
         sleep 0.2
       done
-      sqlx migrate run
-
-      # Topcoat default: build, bundle assets, watch, keep serving across rebuilds.
-      exec topcoat dev --bin lindaflor
+      exec dev
     '';
   };
 
+  # Compile against the live schema and rewrite .sqlx/ for rust-analyzer.
+  scripts.dev.exec = ''
+    set -euo pipefail
+    export PATH="''${DEVENV_ROOT}/.devenv/state/cargo-install/bin:''${PATH}"
+    migrate_log=$(sqlx migrate run 2>&1)
+    if [ -n "$migrate_log" ]; then
+      printf '%s\n' "$migrate_log"
+    fi
+    # rustc skips query macros when no Rust file changed, so a new migration
+    # would leave .sqlx/ describing the old schema.
+    if printf '%s\n' "$migrate_log" | grep -q '^Applied '; then
+      touch src/lib.rs
+    fi
+    mkdir -p "''${DEVENV_ROOT}/.sqlx"
+    export SQLX_OFFLINE=false
+    export SQLX_OFFLINE_DIR="''${DEVENV_ROOT}/.sqlx"
+    exec topcoat dev --bin lindaflor
+  '';
+
+  # Postgres up: migrate, compile online, refresh .sqlx/. Postgres down: use the cache.
+  scripts.cargo-with-sqlx.exec = ''
+    set -euo pipefail
+    cache="''${DEVENV_ROOT}/.sqlx"
+    mkdir -p "$cache"
+    if psql "$DATABASE_URL" -c 'SELECT 1' >/dev/null 2>&1; then
+      migrate_log=$(sqlx migrate run 2>&1)
+      if [ -n "$migrate_log" ]; then
+        printf '%s\n' "$migrate_log"
+      fi
+      if printf '%s\n' "$migrate_log" | grep -q '^Applied '; then
+        touch src/lib.rs
+      fi
+      export SQLX_OFFLINE=false
+      export SQLX_OFFLINE_DIR="$cache"
+    else
+      export SQLX_OFFLINE=true
+    fi
+    exec "$@"
+  '';
+
   scripts.build.exec = ''
     export PATH="''${DEVENV_ROOT}/.devenv/state/cargo-install/bin:''${PATH}"
-    cargo build --bin lindaflor
+    cargo-with-sqlx cargo build --bin lindaflor
     topcoat asset bundle --bin lindaflor
   '';
 
@@ -199,18 +239,34 @@
   };
 
   scripts.lint = {
-    exec = "cargo clippy --all-targets";
+    exec = "cargo-with-sqlx cargo clippy --all-targets";
     description = "Lint with clippy";
   };
 
   scripts.test = {
-    exec = "cargo test";
+    exec = "cargo-with-sqlx cargo test";
     description = "Run tests (embedded Postgres)";
   };
 
   scripts.migrate = {
     exec = "sqlx migrate run";
     description = "Apply SQLx migrations";
+  };
+
+  scripts.prepare-sqlx = {
+    exec = ''
+      set -euo pipefail
+      migrate_log=$(sqlx migrate run 2>&1)
+      if [ -n "$migrate_log" ]; then
+        printf '%s\n' "$migrate_log"
+      fi
+      if printf '%s\n' "$migrate_log" | grep -q '^Applied '; then
+        touch src/lib.rs
+      fi
+      # Offline mode is the default. Preparing the cache has to reach Postgres.
+      SQLX_OFFLINE=false cargo sqlx prepare -- --all-targets
+    '';
+    description = "Regenerate the sqlx offline query cache";
   };
 
   scripts.clean = {
@@ -251,7 +307,7 @@
   '';
 
   scripts.seed.exec = ''
-    cargo run --bin seed
+    cargo-with-sqlx cargo run --bin seed
   '';
 
   enterShell = ''
@@ -259,13 +315,14 @@
     echo "lindaflor devenv"
     echo "  rustc: $(rustc --version 2>/dev/null || echo unavailable)"
     echo "  Start stack: devenv up"
-    echo "  App only:   topcoat dev --bin lindaflor"
+    echo "  App only:   devenv shell dev"
     echo "  Build:      devenv shell build"
     echo "  Clean:      devenv shell clean"
     echo "  Format:     devenv shell format"
     echo "  Lint:       devenv shell lint"
     echo "  Test:       devenv shell test"
     echo "  Migrate:    devenv shell migrate"
+    echo "  SQLx cache: devenv shell prepare-sqlx"
     echo "  Seed database: devenv shell seed"
     echo "  Show ports: devenv shell ports"
     echo "  Reset DB:   devenv shell db-reset"
