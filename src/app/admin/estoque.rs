@@ -3,14 +3,12 @@ use topcoat::{
   Result,
   context::Cx,
   context::app_context,
-  router::{href, page, query_params},
+  router::{page, query_params},
   runtime::{Event, shard, signal},
   view::{View, attributes, view},
 };
 
-use crate::app::auth_helpers::require_user;
-use crate::auth::service;
-use crate::auth::user::SessionUser;
+use crate::app::auth_helpers::require_admin;
 use crate::components::badge::{BadgeVariant, badge};
 use crate::components::card::{card, card_content, card_header, card_title};
 use crate::components::container::container;
@@ -28,19 +26,6 @@ const STOCK_QUERY_MAX: usize = 80;
 
 fn clamp_stock_query(raw: &str) -> String {
   raw.trim().chars().take(STOCK_QUERY_MAX).collect()
-}
-
-async fn require_admin(cx: &Cx) -> Result<SessionUser> {
-  let su = require_user(cx).await?;
-  if !service::is_admin(su.user.role.as_deref()) {
-    return Err(
-      topcoat::router::error::see_other(
-        href!(crate::app::dashboard::page).resolve(cx),
-      )
-      .into(),
-    );
-  }
-  Ok(su)
 }
 
 /// Stock search. Re-renders on the server when the query changes, without

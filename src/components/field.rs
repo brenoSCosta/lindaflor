@@ -1,5 +1,6 @@
 use topcoat::{
   Result,
+  runtime::Expr,
   view::{
     Attributes, Child, StaticClass, View, attributes, class, component, view,
   },
@@ -240,20 +241,32 @@ pub async fn field_separator(
 
 /// An error message for a field, announced when it appears.
 ///
-/// Render it only when there is an error. Give it an `id` referenced by the
-/// control's `aria-describedby`, and set `aria-invalid="true"` on the control.
-/// Child content can be a message or a list of messages.
+/// Pass a live `message` to render it and hide the element while it is empty.
+/// Pass static content as children instead, with no `message`. Give it an `id`
+/// referenced by the control's `aria-describedby`, and set `aria-invalid="true"`
+/// on the control. Child content can be a message or a list of messages.
 #[component]
 pub async fn field_error(
+  /// Live error text. Hidden while empty. Omit for static children.
+  #[into]
+  #[default]
+  message: Option<Expr<String>>,
   #[default] mut attrs: Attributes,
   #[default] child: Child<'_>,
 ) -> Result<impl View> {
+  let hidden_message = message.clone();
   Ok(view! {
       <div
           role="alert"
           class=(class!("text-sm text-destructive", attrs.remove("class")))
           (attrs)
+          if let Some(m) = hidden_message {
+              :hidden=$(m.is_empty())
+          }
       >
+          if let Some(m) = message {
+              $(m)
+          }
           (child)
       </div>
   })

@@ -15,10 +15,39 @@
   "[tailwindcss]": {
     "editor.defaultFormatter": "oxc.oxc-vscode"
   },
+  "rust-analyzer.files.exclude": [
+    "target",
+    ".git",
+    ".github",
+    "node_modules",
+    "dist",
+    "build"
+  ],
+  "rust-analyzer.files.watcher": "server",
+  "rust-analyzer.cargo.autoreload": true,
+  "rust-analyzer.cargo.buildScripts.enable": false,
+  "rust-analyzer.cargo.noDeps": true,
+  "rust-analyzer.checkOnSave": false,
+  "rust-analyzer.procMacro.enable": false,
+  "rust-analyzer.inlayHints.enable": false,
+  "rust-analyzer.lens.enable": false,
+  "rust-analyzer.completion.autoimport.enable": false,
+  "rust-analyzer.diagnostics.enable": true,
+  "rust-analyzer.diagnostics.experimental.enable": false,
+  // Disable caching
+  "rust-analyzer.cachePriming.enable": false,
+  "rust-analyzer.numThreads": 1,
+  "rust-analyzer.lru.capacity": 64,
+  "files.exclude": {
+    "**/target": true,
+    "**/.git": true,
+    "**/.github": true,
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/build": true
+  },
   "rust-analyzer.linkedProjects": ["Cargo.toml"],
   "rust-analyzer.server.path": "${workspaceFolder}/.devenv/profile/bin/rust-analyzer",
-  "rust-analyzer.numThreads": 4,
-  "rust-analyzer.cachePriming.enable": false,
   "rust-analyzer.cargo.allTargets": false,
   "rust-analyzer.cargo.targetDir": true,
   "rust-analyzer.server.extraEnv": {
@@ -44,20 +73,28 @@
   },
   "rust-analyzer.check.command": "check",
   "rust-analyzer.check.extraArgs": ["--bin", "lindaflor"],
-  "rust-analyzer.procMacro.enable": true,
-  "rust-analyzer.cargo.buildScripts.enable": true,
   "files.associations": {
     "*.css": "tailwindcss"
   },
   "files.watcherExclude": {
     "**/target/**": true,
     "**/node_modules/**": true,
-    "**/.sqlx/**": true
+    "**/.sqlx/**": true,
+    "**/.git/**": true,
+    "**/.github/**": true,
+    "**/dist/**": true,
+    "**/build/**": true
   },
   "search.exclude": {
     "**/target": true,
     "**/.sqlx": true,
-    "**/*.lock": true
+    "**/*.lock": true,
+    "**/target/**": true,
+    "**/.git/**": true,
+    "**/.github/**": true,
+    "**/node_modules/**": true,
+    "**/dist/**": true,
+    "**/build/**": true
   },
   "explorer.fileNesting.enabled": true,
   "explorer.compactFolders": true,

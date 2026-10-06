@@ -5,6 +5,7 @@ use topcoat::{
   context::Cx,
   context::app_context,
   router::{content::Form, error::redirect, href, page},
+  runtime::{expr, signal},
   view::{View, ViewExt, attributes, view},
 };
 use uuid::Uuid;
@@ -18,7 +19,7 @@ use crate::components::card::{
   card, card_content, card_footer, card_header, card_title,
 };
 use crate::components::container::{ContainerVariant, container};
-use crate::components::field::{field, field_label};
+use crate::components::field::{field, field_error, field_label};
 use crate::components::input::input;
 use crate::components::select::select;
 use crate::components::separator::separator;
@@ -116,15 +117,15 @@ pub async fn page(
 
   let intent = body
     .as_ref()
-    .and_then(|form| form.0.intent.clone())
+    .and_then(|posted| posted.0.intent.clone())
     .unwrap_or_default();
 
   if coupon_error.is_none()
     && intent == "pay"
-    && let Some(Form(form_input)) = body.take()
+    && let Some(Form(posted)) = body.take()
   {
     let order_id =
-      create_order(pool, &items, form_input, session_user_id).await?;
+      create_order(pool, &items, posted, session_user_id).await?;
     clear_cart(cx);
     return Err(
       redirect(
@@ -147,12 +148,134 @@ pub async fn page(
     .unwrap_or(0);
   let total = subtotal - discount + shipping.0;
 
+  let email_init = input_email(body.as_ref());
+  let name_init = input_name(body.as_ref());
+  let phone_init = input_phone(body.as_ref());
+  let street_init = input_street(body.as_ref());
+  let number_init = input_number(body.as_ref());
+  let complement_init = input_complement(body.as_ref());
+  let neighborhood_init = input_neighborhood(body.as_ref());
+  let city_init = input_city(body.as_ref());
+  let zip_init = input_zip(body.as_ref());
+
+  let guest_email = signal(cx, || email_init);
+  let guest_email_touched = signal(cx, || false);
+  let guest_email_error = expr!({
+    if !guest_email_touched.get() {
+      "".to_owned()
+    } else if guest_email.get().trim().is_empty() {
+      "Informe o e-mail.".to_owned()
+    } else if !guest_email.get().contains("@") {
+      "E-mail inválido.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+
+  let full_name = signal(cx, || name_init);
+  let full_name_touched = signal(cx, || false);
+  let full_name_error = expr!({
+    if !full_name_touched.get() {
+      "".to_owned()
+    } else if full_name.get().trim().is_empty() {
+      "Informe o nome completo.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+
+  let street = signal(cx, || street_init);
+  let street_touched = signal(cx, || false);
+  let street_error = expr!({
+    if !street_touched.get() {
+      "".to_owned()
+    } else if street.get().trim().is_empty() {
+      "Informe a rua.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+
+  let number = signal(cx, || number_init);
+  let number_touched = signal(cx, || false);
+  let number_error = expr!({
+    if !number_touched.get() {
+      "".to_owned()
+    } else if number.get().trim().is_empty() {
+      "Informe o número.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+
+  let neighborhood = signal(cx, || neighborhood_init);
+  let neighborhood_touched = signal(cx, || false);
+  let neighborhood_error = expr!({
+    if !neighborhood_touched.get() {
+      "".to_owned()
+    } else if neighborhood.get().trim().is_empty() {
+      "Informe o bairro.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+
+  let city = signal(cx, || city_init);
+  let city_touched = signal(cx, || false);
+  let city_error = expr!({
+    if !city_touched.get() {
+      "".to_owned()
+    } else if city.get().trim().is_empty() {
+      "Informe a cidade.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+
+  let zip_code = signal(cx, || zip_init);
+  let zip_code_touched = signal(cx, || false);
+  let zip_code_error = expr!({
+    if !zip_code_touched.get() {
+      "".to_owned()
+    } else if zip_code.get().trim().is_empty() {
+      "Informe o CEP.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+  let pay_blocked = expr!({
+    if guest_email.get().trim().is_empty() {
+      true
+    } else if !guest_email.get().contains("@") {
+      true
+    } else if full_name.get().trim().is_empty() {
+      true
+    } else if street.get().trim().is_empty() {
+      true
+    } else if number.get().trim().is_empty() {
+      true
+    } else if neighborhood.get().trim().is_empty() {
+      true
+    } else if city.get().trim().is_empty() {
+      true
+    } else if zip_code.get().trim().is_empty() {
+      true
+    } else {
+      false
+    }
+  });
+
   Ok(view! {
         container(
             variant: ContainerVariant::Wide,
             <h1 class="text-4xl font-bold tracking-tight @md/page:text-5xl">"Checkout"</h1>
 
-            <form method="post" action=(href!(page)) class="grid gap-4 @lg/page:grid-cols-[1.2fr_0.8fr]">
+            <form
+                    method="post"
+                    action=(href!(page))
+                    class="grid gap-4 @lg/page:grid-cols-[1.2fr_0.8fr]"
+                    novalidate=""
+                >
                 <div class="flex flex-col gap-4">
                     card(
                         card_header(
@@ -160,14 +283,26 @@ pub async fn page(
                         )
                         card_content(
                             field(
+                                attrs: attributes! {
+                                    :data-invalid=$( (!guest_email_error.is_empty()).then_some("true") )
+                                },
                                 field_label(attrs: attributes! { for="email" }, "E-mail")
-                                input(attrs: attributes! {
-                                    id="email"
-                                    type="email"
-                                    name="guest_email"
-                                    required="required"
-                                    value=(input_email(body.as_ref()))
-                                })
+                                input(
+                                    value: guest_email,
+                                    touched: guest_email_touched.clone(),
+                                    error: guest_email_error.clone(),
+                                    attrs: attributes! {
+                                        id="email"
+                                        name="guest_email"
+                                        type="email"
+                                        autocomplete="email"
+                                        aria-describedby="email-error"
+                                    }
+                                )
+                                field_error(
+                                    message: guest_email_error,
+                                    attrs: attributes! { id="email-error" }
+                                )
                             )
                         )
                     )
@@ -180,13 +315,26 @@ pub async fn page(
                             <div class="grid gap-4 @sm/page:grid-cols-2">
                                 <div class="@sm/page:col-span-2">
                                     field(
+                                        attrs: attributes! {
+                                            :data-invalid=$( (!full_name_error.is_empty()).then_some("true") )
+                                        },
                                         field_label(attrs: attributes! { for="name" }, "Nome completo")
-                                        input(attrs: attributes! {
-                                            id="name"
-                                            name="name"
-                                            required="required"
-                                            value=(input_name(body.as_ref()))
-                                        })
+                                        input(
+                                            value: full_name,
+                                            touched: full_name_touched.clone(),
+                                            error: full_name_error.clone(),
+                                            attrs: attributes! {
+                                                id="name"
+                                                name="name"
+                                                type="text"
+                                                autocomplete="name"
+                                                aria-describedby="name-error"
+                                            }
+                                        )
+                                        field_error(
+                                            message: full_name_error,
+                                            attrs: attributes! { id="name-error" }
+                                        )
                                     )
                                 </div>
                                 <div class="@sm/page:col-span-2">
@@ -197,55 +345,99 @@ pub async fn page(
                                             name="phone"
                                             inputMode="tel"
                                             placeholder="79999816511"
-                                            value=(input_phone(body.as_ref()))
+                                            value=(phone_init)
                                         })
                                     )
                                 </div>
                                 <div class="@sm/page:col-span-2">
                                     field(
+                                        attrs: attributes! {
+                                            :data-invalid=$( (!street_error.is_empty()).then_some("true") )
+                                        },
                                         field_label(attrs: attributes! { for="street" }, "Rua")
-                                        input(attrs: attributes! {
-                                            id="street"
-                                            name="street"
-                                            required="required"
-                                            value=(input_street(body.as_ref()))
-                                        })
+                                        input(
+                                            value: street,
+                                            touched: street_touched.clone(),
+                                            error: street_error.clone(),
+                                            attrs: attributes! {
+                                                id="street"
+                                                name="street"
+                                                aria-describedby="street-error"
+                                            }
+                                        )
+                                        field_error(
+                                            message: street_error,
+                                            attrs: attributes! { id="street-error" }
+                                        )
                                     )
                                 </div>
                                 field(
+                                    attrs: attributes! {
+                                        :data-invalid=$( (!number_error.is_empty()).then_some("true") )
+                                    },
                                     field_label(attrs: attributes! { for="number" }, "Número")
-                                    input(attrs: attributes! {
-                                        id="number"
-                                        name="number"
-                                        required="required"
-                                        value=(input_number(body.as_ref()))
-                                    })
+                                    input(
+                                        value: number,
+                                        touched: number_touched.clone(),
+                                        error: number_error.clone(),
+                                        attrs: attributes! {
+                                            id="number"
+                                            name="number"
+                                            aria-describedby="number-error"
+                                        }
+                                    )
+                                    field_error(
+                                        message: number_error,
+                                        attrs: attributes! { id="number-error" }
+                                    )
                                 )
                                 field(
                                     field_label(attrs: attributes! { for="complement" }, "Complemento")
                                     input(attrs: attributes! {
                                         id="complement"
                                         name="complement"
-                                        value=(input_complement(body.as_ref()))
+                                        value=(complement_init)
                                     })
                                 )
                                 field(
+                                    attrs: attributes! {
+                                        :data-invalid=$( (!neighborhood_error.is_empty()).then_some("true") )
+                                    },
                                     field_label(attrs: attributes! { for="neighborhood" }, "Bairro")
-                                    input(attrs: attributes! {
-                                        id="neighborhood"
-                                        name="neighborhood"
-                                        required="required"
-                                        value=(input_neighborhood(body.as_ref()))
-                                    })
+                                    input(
+                                        value: neighborhood,
+                                        touched: neighborhood_touched.clone(),
+                                        error: neighborhood_error.clone(),
+                                        attrs: attributes! {
+                                            id="neighborhood"
+                                            name="neighborhood"
+                                            aria-describedby="neighborhood-error"
+                                        }
+                                    )
+                                    field_error(
+                                        message: neighborhood_error,
+                                        attrs: attributes! { id="neighborhood-error" }
+                                    )
                                 )
                                 field(
+                                    attrs: attributes! {
+                                        :data-invalid=$( (!city_error.is_empty()).then_some("true") )
+                                    },
                                     field_label(attrs: attributes! { for="city" }, "Cidade")
-                                    input(attrs: attributes! {
-                                        id="city"
-                                        name="city"
-                                        required="required"
-                                        value=(input_city(body.as_ref()))
-                                    })
+                                    input(
+                                        value: city,
+                                        touched: city_touched.clone(),
+                                        error: city_error.clone(),
+                                        attrs: attributes! {
+                                            id="city"
+                                            name="city"
+                                            aria-describedby="city-error"
+                                        }
+                                    )
+                                    field_error(
+                                        message: city_error,
+                                        attrs: attributes! { id="city-error" }
+                                    )
                                 )
                                 field(
                                     field_label(attrs: attributes! { for="state" }, "Estado")
@@ -257,14 +449,25 @@ pub async fn page(
                                     )
                                 )
                                 field(
+                                    attrs: attributes! {
+                                        :data-invalid=$( (!zip_code_error.is_empty()).then_some("true") )
+                                    },
                                     field_label(attrs: attributes! { for="zip" }, "CEP")
-                                    input(attrs: attributes! {
-                                        id="zip"
-                                        name="zip_code"
-                                        required="required"
-                                        placeholder="49000-000"
-                                        value=(input_zip(body.as_ref()))
-                                    })
+                                    input(
+                                        value: zip_code,
+                                        touched: zip_code_touched.clone(),
+                                        error: zip_code_error.clone(),
+                                        attrs: attributes! {
+                                            id="zip"
+                                            name="zip_code"
+                                            placeholder="49000-000"
+                                            aria-describedby="zip-error"
+                                        }
+                                    )
+                                    field_error(
+                                        message: zip_code_error,
+                                        attrs: attributes! { id="zip-error" }
+                                    )
                                 )
                             </div>
                         )
@@ -343,20 +546,20 @@ pub async fn page(
                                         "Aplicar"
                                     )
                                 </div>
+                                if let Some(ref message) = coupon_error {
+                                    field_error((message.as_str()))
+                                }
                             )
                             if let Some(ref coupon) = resolved_coupon {
                                 <p class="text-sm text-muted-foreground">
                                     "Cupom " (coupon.code.as_str()) " aplicado."
                                 </p>
                             }
-                            if let Some(ref message) = coupon_error {
-                                <p class="text-sm text-destructive">(message.as_str())</p>
-                            }
                         )
                         card_footer(
                             button(
-                                variant: ButtonVariant::Primary,
                                 size: ButtonSize::Lg,
+                                blocked: pay_blocked,
                                 attrs: attributes! {
                                     type="submit"
                                     name="intent"
@@ -596,7 +799,7 @@ fn generate_pix_payload(
   let amount = format!("{:.2}", amount_cents as f64 / 100.0);
 
   let merchant_account =
-    emv_field("00", "br.gov.bcb.pix") + &emv_field("01", &key);
+    emv_field("00", "br.gov.bcb.pix") + &emv_field("01", key.as_str());
   let additional_data = emv_field("05", &txid);
 
   let payload_without_crc = emv_field("00", "01")

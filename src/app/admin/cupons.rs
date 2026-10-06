@@ -6,18 +6,15 @@ use topcoat::{
   Result,
   context::{Cx, app_context},
   router::{
-    content::Form,
-    error::{SeeOther, see_other},
-    href, page, query_params, route,
+    content::Form, href, page, query_params, response::Response, route,
   },
   runtime::{Event, procedure, shard, signal},
   view::{View, attributes, view},
 };
 use uuid::Uuid;
 
-use crate::app::auth_helpers::require_user;
+use crate::app::auth_helpers::require_admin;
 use crate::auth::service;
-use crate::auth::user::SessionUser;
 use crate::components::alert::{AlertVariant, alert, alert_title};
 use crate::components::badge::{BadgeVariant, badge};
 use crate::components::button::{
@@ -32,6 +29,7 @@ use crate::components::select::select;
 use crate::components::table::{
   table, table_body, table_cell, table_head, table_header, table_row,
 };
+use crate::components::toast::{Toast, set_toast, toast_redirect};
 
 #[derive(Deserialize)]
 struct CreateCouponForm {
@@ -78,7 +76,6 @@ struct UnassignForm {
 #[query_params(error = bad_request)]
 struct CouponsQuery {
   q: Option<String>,
-  erro: Option<String>,
   cupom: Option<String>,
   uq: Option<String>,
 }
@@ -113,23 +110,7 @@ struct AssignableUser {
   assigned: bool,
 }
 
-async fn require_admin(cx: &Cx) -> Result<SessionUser> {
-  let su = require_user(cx).await?;
-  if !service::is_admin(su.user.role.as_deref()) {
-    return Err(
-      see_other(href!(crate::app::dashboard::page).resolve(cx)).into(),
-    );
-  }
-  Ok(su)
-}
-
-fn coupons_url(
-  cx: &Cx,
-  q: &str,
-  cupom: &str,
-  uq: &str,
-  erro: Option<&str>,
-) -> String {
+fn coupons_url(cx: &Cx, q: &str, cupom: &str, uq: &str) -> String {
   let mut pairs = Vec::new();
   if !q.is_empty() {
     pairs.push(("q", q));
@@ -139,9 +120,6 @@ fn coupons_url(
   }
   if !cupom.is_empty() && !uq.is_empty() {
     pairs.push(("uq", uq));
-  }
-  if let Some(erro) = erro.map(str::trim).filter(|s| !s.is_empty()) {
-    pairs.push(("erro", erro));
   }
   href!(page).query(pairs).resolve(cx)
 }
@@ -154,12 +132,13 @@ fn form_text(raw: &Option<String>) -> String {
   raw.as_deref().unwrap_or("").trim().to_string()
 }
 
-fn back(cx: &Cx, q: &str, cupom: &str, uq: &str) -> SeeOther {
-  see_other(coupons_url(cx, q, cupom, uq, None))
+fn back(cx: &Cx, q: &str, cupom: &str, uq: &str) -> Result<Response> {
+  toast_redirect(cx, coupons_url(cx, q, cupom, uq))
 }
 
-fn fail(cx: &Cx, q: &str, cupom: &str, uq: &str, message: &str) -> SeeOther {
-  see_other(coupons_url(cx, q, cupom, uq, Some(message)))
+fn fail(cx: &Cx, q: &str, cupom: &str, uq: &str, message: &str) -> Result<Response> {
+  set_toast(cx, Toast::error(message));
+  toast_redirect(cx, coupons_url(cx, q, cupom, uq))
 }
 
 fn db_error_message(err: &sqlx::Error) -> String {
@@ -280,7 +259,7 @@ async fn load_coupons(
           "Ilimitado".to_string()
         };
         CouponListItem {
-          manage_href: coupons_url(cx, "", &id, "", None),
+          manage_href: coupons_url(cx, "", &id, ""),
           id,
           code,
           discount_label,
@@ -525,7 +504,7 @@ async fn coupon_directory(cx: &Cx, q: String) -> Result<impl View> {
                           table_cell(
                               <div class="flex items-center gap-2">
                                   <a href=(row.manage_href) class=(button_variants(ButtonVariant::Outline, ButtonSize::Sm))>"Atribuir"</a>
-                                  <form method="post" action=(href!(toggle_coupon)) class="inline">
+                                  <form method="post" action=(href!(toggle_coupon)) class="inline" data-toast-promise="" data-toast-loading="Atualizando…">
                                       <input type="hidden" name="coupon_id" value=(row.id.clone())>
                                       {
                                           let cid = row.id.clone();
@@ -560,7 +539,7 @@ async fn coupon_directory(cx: &Cx, q: String) -> Result<impl View> {
                                           }
                                       }
                                   </form>
-                                  <form method="post" action=(href!(delete_coupon)) class="inline">
+                                  <form method="post" action=(href!(delete_coupon)) class="inline" data-toast-promise="" data-toast-loading="Excluindo…">
                                       <input type="hidden" name="coupon_id" value=(row.id.clone())>
                                       button(
                                           variant: ButtonVariant::Destructive,
@@ -594,8 +573,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     .unwrap_or("")
     .to_string();
   let uq = clamp_coupon_query(query.uq.as_deref().unwrap_or(""));
-  let error_message = query.erro.clone().filter(|value| !value.is_empty());
-
   let (coupons, load_error) = match load_coupons(cx, pool, &q).await {
     Ok(coupons) => (coupons, None),
     Err(err) => (Vec::new(), Some(db_error_message(&err))),
@@ -623,15 +600,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
           <h1 class="text-2xl font-semibold tracking-tight">"Cupons"</h1>
           <p class="text-muted-foreground">"Crie cupons, acompanhe usos e atribua a usuários específicos."</p>
 
-          if let Some(message) = error_message {
-              <div class="mb-6">
-                  alert(
-                      variant: AlertVariant::Destructive,
-                      alert_title((message))
-                  )
-              </div>
-          }
-
           if let Some(message) = load_error {
               <div class="mb-6">
                   alert(
@@ -644,7 +612,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
               card(
                   card_header(card_title("Novo cupom"))
                   card_content(
-                      <form method="post" action=(href!(create_coupon)) class="grid gap-4 @xl/page:grid-cols-2 ">
+                      <form method="post" action=(href!(create_coupon)) class="grid gap-4 @xl/page:grid-cols-2 " data-toast-promise="" data-toast-loading="Criando cupom…">
                           <input type="hidden" name="q" value=(hidden_q)>
                           <div class="space-y-2">
                               label(attrs: attributes! { for="code" }, "Código")
@@ -768,7 +736,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                               <p class="font-medium">(user.name)</p>
                                               <p class="truncate text-xs text-muted-foreground">(user.email)</p>
                                           </div>
-                                          <form method="post" action=(href!(unassign_coupon))>
+                                          <form method="post" action=(href!(unassign_coupon)) data-toast-promise="" data-toast-loading="Removendo…">
                                               <input type="hidden" name="coupon_id" value=(assign_cupom.clone())>
                                               <input type="hidden" name="user_id" value=(user.id)>
                                               <input type="hidden" name="q" value=(assign_q.clone())>
@@ -787,7 +755,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                           } else {
                               <p class="mb-6 text-sm text-muted-foreground">"Nenhum usuário atribuído ainda."</p>
                           }
-                          <form method="post" action=(href!(assign_coupon))>
+                          <form method="post" action=(href!(assign_coupon)) data-toast-promise="" data-toast-loading="Atribuindo…">
                               <input type="hidden" name="coupon_id" value=(assign_cupom.clone())>
                               <input type="hidden" name="q" value=(assign_q.clone())>
                               <input type="hidden" name="cupom" value=(assign_cupom.clone())>
@@ -945,12 +913,12 @@ fn validate_create(body: &CreateCouponForm) -> Result<ValidCoupon, String> {
 async fn create_coupon(
   cx: &Cx,
   Form(body): Form<CreateCouponForm>,
-) -> Result<SeeOther> {
+) -> Result<Response> {
   let _actor = require_admin(cx).await?;
   let q = form_q(&body.q);
   let coupon = match validate_create(&body) {
     Ok(coupon) => coupon,
-    Err(message) => return Ok(fail(cx, &q, "", "", &message)),
+    Err(message) => return fail(cx, &q, "", "", &message),
   };
   let pool = app_context::<PgPool>(cx);
   let inserted = sqlx::query(
@@ -976,9 +944,9 @@ async fn create_coupon(
   .await;
 
   match inserted {
-    Ok(done) if done.rows_affected() == 1 => Ok(back(cx, &q, "", "")),
-    Ok(_) => Ok(fail(cx, &q, "", "", "Este código já está em uso.")),
-    Err(err) => Ok(fail(cx, &q, "", "", &db_error_message(&err))),
+    Ok(done) if done.rows_affected() == 1 => back(cx, &q, "", ""),
+    Ok(_) => fail(cx, &q, "", "", "Este código já está em uso."),
+    Err(err) => fail(cx, &q, "", "", &db_error_message(&err)),
   }
 }
 
@@ -1002,13 +970,13 @@ async fn toggle_coupon_proc(cx: &Cx, coupon_id: String) -> Result<bool> {
 }
 
 #[route(POST "/admin/cupons/toggle")]
-async fn toggle_coupon(cx: &Cx, Form(body): Form<IdForm>) -> Result<SeeOther> {
+async fn toggle_coupon(cx: &Cx, Form(body): Form<IdForm>) -> Result<Response> {
   let _actor = require_admin(cx).await?;
   let q = form_q(&body.q);
   let cupom = form_text(&body.cupom);
   let uq = form_text(&body.uq);
   let Some(coupon_id) = parse_uuid(&body.coupon_id) else {
-    return Ok(fail(cx, &q, &cupom, &uq, "Cupom inválido."));
+    return fail(cx, &q, &cupom, &uq, "Cupom inválido.");
   };
   let pool = app_context::<PgPool>(cx);
   match sqlx::query("UPDATE coupons SET active = NOT active WHERE id = $1")
@@ -1016,20 +984,20 @@ async fn toggle_coupon(cx: &Cx, Form(body): Form<IdForm>) -> Result<SeeOther> {
     .execute(pool)
     .await
   {
-    Ok(done) if done.rows_affected() == 1 => Ok(back(cx, &q, &cupom, &uq)),
-    Ok(_) => Ok(fail(cx, &q, &cupom, &uq, "Cupom não encontrado.")),
-    Err(err) => Ok(fail(cx, &q, &cupom, &uq, &db_error_message(&err))),
+    Ok(done) if done.rows_affected() == 1 => back(cx, &q, &cupom, &uq),
+    Ok(_) => fail(cx, &q, &cupom, &uq, "Cupom não encontrado."),
+    Err(err) => fail(cx, &q, &cupom, &uq, &db_error_message(&err)),
   }
 }
 
 #[route(POST "/admin/cupons/delete")]
-async fn delete_coupon(cx: &Cx, Form(body): Form<IdForm>) -> Result<SeeOther> {
+async fn delete_coupon(cx: &Cx, Form(body): Form<IdForm>) -> Result<Response> {
   let _actor = require_admin(cx).await?;
   let q = form_q(&body.q);
   let cupom = form_text(&body.cupom);
   let uq = form_text(&body.uq);
   let Some(coupon_id) = parse_uuid(&body.coupon_id) else {
-    return Ok(fail(cx, &q, &cupom, &uq, "Cupom inválido."));
+    return fail(cx, &q, &cupom, &uq, "Cupom inválido.");
   };
   let pool = app_context::<PgPool>(cx);
   match sqlx::query("DELETE FROM coupons WHERE id = $1")
@@ -1043,10 +1011,10 @@ async fn delete_coupon(cx: &Cx, Form(body): Form<IdForm>) -> Result<SeeOther> {
       } else {
         &cupom
       };
-      Ok(back(cx, &q, keep, &uq))
+      back(cx, &q, keep, &uq)
     }
-    Ok(_) => Ok(fail(cx, &q, &cupom, &uq, "Cupom não encontrado.")),
-    Err(err) => Ok(fail(cx, &q, &cupom, &uq, &db_error_message(&err))),
+    Ok(_) => fail(cx, &q, &cupom, &uq, "Cupom não encontrado."),
+    Err(err) => fail(cx, &q, &cupom, &uq, &db_error_message(&err)),
   }
 }
 
@@ -1054,13 +1022,13 @@ async fn delete_coupon(cx: &Cx, Form(body): Form<IdForm>) -> Result<SeeOther> {
 async fn assign_coupon(
   cx: &Cx,
   Form(body): Form<AssignForm>,
-) -> Result<SeeOther> {
+) -> Result<Response> {
   let _actor = require_admin(cx).await?;
   let q = form_q(&body.q);
   let cupom = form_text(&body.cupom);
   let uq = form_text(&body.uq);
   let Some(coupon_id) = parse_uuid(&body.coupon_id) else {
-    return Ok(fail(cx, &q, &cupom, &uq, "Cupom inválido."));
+    return fail(cx, &q, &cupom, &uq, "Cupom inválido.");
   };
   let user_ids: Vec<Uuid> = body
     .user_ids
@@ -1068,7 +1036,7 @@ async fn assign_coupon(
     .filter_map(|raw| parse_uuid(raw))
     .collect();
   if user_ids.is_empty() {
-    return Ok(fail(cx, &q, &cupom, &uq, "Selecione ao menos um usuário."));
+    return fail(cx, &q, &cupom, &uq, "Selecione ao menos um usuário.");
   }
   let pool = app_context::<PgPool>(cx);
   match sqlx::query(
@@ -1081,8 +1049,8 @@ async fn assign_coupon(
   .execute(pool)
   .await
   {
-    Ok(_) => Ok(back(cx, &q, &cupom, &uq)),
-    Err(err) => Ok(fail(cx, &q, &cupom, &uq, &db_error_message(&err))),
+    Ok(_) => back(cx, &q, &cupom, &uq),
+    Err(err) => fail(cx, &q, &cupom, &uq, &db_error_message(&err)),
   }
 }
 
@@ -1090,7 +1058,7 @@ async fn assign_coupon(
 async fn unassign_coupon(
   cx: &Cx,
   Form(body): Form<UnassignForm>,
-) -> Result<SeeOther> {
+) -> Result<Response> {
   let _actor = require_admin(cx).await?;
   let q = form_q(&body.q);
   let cupom = form_text(&body.cupom);
@@ -1098,7 +1066,7 @@ async fn unassign_coupon(
   let (Some(coupon_id), Some(user_id)) =
     (parse_uuid(&body.coupon_id), parse_uuid(&body.user_id))
   else {
-    return Ok(fail(cx, &q, &cupom, &uq, "Identificador inválido."));
+    return fail(cx, &q, &cupom, &uq, "Identificador inválido.");
   };
   let pool = app_context::<PgPool>(cx);
   match sqlx::query(
@@ -1109,7 +1077,7 @@ async fn unassign_coupon(
   .execute(pool)
   .await
   {
-    Ok(_) => Ok(back(cx, &q, &cupom, &uq)),
-    Err(err) => Ok(fail(cx, &q, &cupom, &uq, &db_error_message(&err))),
+    Ok(_) => back(cx, &q, &cupom, &uq),
+    Err(err) => fail(cx, &q, &cupom, &uq, &db_error_message(&err)),
   }
 }

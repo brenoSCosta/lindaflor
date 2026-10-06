@@ -4,10 +4,9 @@ use topcoat::{
   Result,
   context::{Cx, app_context},
   router::{
-    content::Form,
-    error::{SeeOther, see_other},
-    href, page, query_params, route,
+    content::Form, href, page, query_params, response::Response, route,
   },
+  runtime::{expr, signal},
   view::{View, ViewExt, view},
 };
 
@@ -22,10 +21,12 @@ use crate::components::card::{
   card, card_content, card_description, card_footer, card_header, card_title,
 };
 use crate::components::container::{ContainerVariant, container};
+use crate::components::field::{field, field_error, field_label};
 use crate::components::input::input;
 use crate::components::label::label;
 use crate::components::switch::switch;
 use crate::components::tabs::{tabs, tabs_content, tabs_list, tabs_trigger};
+use crate::components::toast::{Toast, set_toast, toast_redirect};
 use topcoat::view::attributes;
 
 #[derive(Deserialize)]
@@ -38,7 +39,6 @@ pub struct TwoFactorInput {
 #[query_params(error = bad_request)]
 struct TwoFactorQuery {
   method: Option<String>,
-  error: Option<String>,
 }
 
 // TODO: Review this page
@@ -46,7 +46,6 @@ struct TwoFactorQuery {
 pub async fn page(cx: &Cx) -> Result<impl View> {
   let query = query_params::<TwoFactorQuery>(cx)?;
   let is_backup = query.method.as_deref() == Some("backup");
-  let error_message = query.error.clone();
   let has_pending = read_pending_2fa_cookie(cx).is_some();
 
   if !has_pending {
@@ -79,6 +78,42 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
         .boxed());
   }
 
+  let code = signal(cx, String::new);
+  let code_touched = signal(cx, || false);
+  let code_error = expr!({
+    if !code_touched.get() {
+      "".to_owned()
+    } else if code.get().trim().is_empty() {
+      "Informe o código de 6 dígitos.".to_owned()
+    } else if code.get().trim().len() != 6.0 {
+      "O código deve ter 6 dígitos.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+
+  let backup_code = signal(cx, String::new);
+  let backup_code_touched = signal(cx, || false);
+  let backup_code_error = expr!({
+    if !backup_code_touched.get() {
+      "".to_owned()
+    } else if backup_code.get().trim().is_empty() {
+      "Informe o código de backup.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+  let code_blocked = expr!({
+    if code.get().trim().is_empty() {
+      true
+    } else if code.get().trim().len() != 6.0 {
+      true
+    } else {
+      false
+    }
+  });
+  let backup_blocked = expr!({ backup_code.get().trim().is_empty() });
+
   Ok(view! {
         container(
             variant: ContainerVariant::Centered,
@@ -94,11 +129,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                         )
                     )
                     card_content(
-                        if let Some(ref msg) = error_message {
-                            <div class="mb-4 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                                (msg.as_str())
-                            </div>
-                        }
                         tabs(
                             tabs_list(
                                 tabs_trigger(
@@ -114,33 +144,89 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                             )
                             tabs_content(
                                 if is_backup {
-                                    <form method="post" action=(href!(two_factor_post).query([("method", "backup")])) class="flex flex-col gap-4">
-                                        <div class="space-y-2">
-                                            label(attrs: attributes! { for="backup_code" }, "Código de backup")
-                                            input(attrs: attributes! { type="text" name="backup_code" id="backup_code" placeholder="xxxx-xxxx" autocomplete="off" class="font-mono" })
-                                        </div>
+                                    <form
+                                        method="post"
+                                        action=(href!(two_factor_post).query([("method", "backup")]))
+                                        class="flex flex-col gap-4"
+                                        novalidate=""
+                                        data-toast-promise=""
+                                        data-toast-loading="Verificando…"
+                                    >
+                                        field(
+                                            attrs: attributes! {
+                                                :data-invalid=$( (!backup_code_error.is_empty()).then_some("true") )
+                                            },
+                                            field_label(attrs: attributes! { for="backup_code" }, "Código de backup")
+                                            input(
+                                                value: backup_code,
+                                                touched: backup_code_touched.clone(),
+                                                error: backup_code_error.clone(),
+                                                attrs: attributes! {
+                                                    id="backup_code"
+                                                    name="backup_code"
+                                                    type="text"
+                                                    placeholder="xxxx-xxxx"
+                                                    autocomplete="off"
+                                                    class="font-mono"
+                                                    aria-describedby="backup_code-error"
+                                                }
+                                            )
+                                            field_error(
+                                                message: backup_code_error,
+                                                attrs: attributes! { id="backup_code-error" }
+                                            )
+                                        )
                                         <div class="flex items-center gap-2">
                                             switch(attrs: attributes! { type="checkbox" name="trust_device" id="trust_device" value="true" })
                                             label(attrs: attributes! { for="trust_device" }, "Confiar neste dispositivo por 30 dias")
                                         </div>
                                         button(
-                                            variant: ButtonVariant::Primary,
+                                            blocked: backup_blocked,
                                             attrs: attributes! { type="submit" },
                                             "Verificar"
                                         )
                                     </form>
                                 } else {
-                                    <form method="post" action=(href!(two_factor_post)) class="flex flex-col gap-4">
-                                        <div class="space-y-2">
-                                            label(attrs: attributes! { for="code" }, "Código de 6 dígitos")
-                                            input(attrs: attributes! { type="text" name="code" id="code" inputmode="numeric" maxlength="6" placeholder="000000" autocomplete="one-time-code" class="text-center text-xl tracking-widest font-mono" })
-                                        </div>
+                                    <form
+                                        method="post"
+                                        action=(href!(two_factor_post))
+                                        class="flex flex-col gap-4"
+                                        novalidate=""
+                                        data-toast-promise=""
+                                        data-toast-loading="Verificando…"
+                                    >
+                                        field(
+                                            attrs: attributes! {
+                                                :data-invalid=$( (!code_error.is_empty()).then_some("true") )
+                                            },
+                                            field_label(attrs: attributes! { for="code" }, "Código de 6 dígitos")
+                                            input(
+                                                value: code,
+                                                touched: code_touched.clone(),
+                                                error: code_error.clone(),
+                                                attrs: attributes! {
+                                                    id="code"
+                                                    name="code"
+                                                    type="text"
+                                                    inputmode="numeric"
+                                                    maxlength="6"
+                                                    placeholder="000000"
+                                                    autocomplete="one-time-code"
+                                                    class="text-center text-xl tracking-widest font-mono"
+                                                    aria-describedby="code-error"
+                                                }
+                                            )
+                                            field_error(
+                                                message: code_error,
+                                                attrs: attributes! { id="code-error" }
+                                            )
+                                        )
                                         <div class="flex items-center gap-2">
                                             switch(attrs: attributes! { type="checkbox" name="trust_device" id="trust_device" value="true" })
                                             label(attrs: attributes! { for="trust_device" }, "Confiar neste dispositivo por 30 dias")
                                         </div>
                                         button(
-                                            variant: ButtonVariant::Primary,
+                                            blocked: code_blocked,
                                             attrs: attributes! { type="submit" },
                                             "Verificar"
                                         )
@@ -160,14 +246,30 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     }.boxed())
 }
 
+fn two_factor_error_redirect(
+  cx: &Cx,
+  is_backup: bool,
+  message: &str,
+) -> Result<Response> {
+  set_toast(cx, Toast::error(message));
+  if is_backup {
+    toast_redirect(
+      cx,
+      href!(page).query([("method", "backup")]).resolve(cx),
+    )
+  } else {
+    toast_redirect(cx, href!(page).resolve(cx))
+  }
+}
+
 #[route(POST "/two-factor")]
 pub async fn two_factor_post(
   cx: &Cx,
   Form(body): Form<TwoFactorInput>,
-) -> Result<SeeOther> {
+) -> Result<Response> {
   let pool = app_context::<PgPool>(cx);
   let Some(token) = read_pending_2fa_cookie(cx) else {
-    return Ok(see_other(href!(crate::app::login::page).resolve(cx)));
+    return toast_redirect(cx, href!(crate::app::login::page).resolve(cx));
   };
 
   let is_backup = topcoat::router::request::uri(cx)
@@ -186,21 +288,11 @@ pub async fn two_factor_post(
   match result {
     Ok(_) => {
       clear_pending_2fa_cookie(cx);
-      Ok(see_other(href!(crate::app::dashboard::page).resolve(cx)))
+      set_toast(cx, Toast::success("Verificado."));
+      toast_redirect(cx, href!(crate::app::dashboard::page).resolve(cx))
     }
     Err(err) => {
-      let message = portuguese_error_message(&err);
-      if is_backup {
-        Ok(see_other(
-          href!(page)
-            .query([("method", "backup"), ("error", message.as_str())])
-            .resolve(cx),
-        ))
-      } else {
-        Ok(see_other(
-          href!(page).query([("error", message.as_str())]).resolve(cx),
-        ))
-      }
+      two_factor_error_redirect(cx, is_backup, &portuguese_error_message(&err))
     }
   }
 }

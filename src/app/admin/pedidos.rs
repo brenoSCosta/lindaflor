@@ -10,9 +10,7 @@ use topcoat::{
   view::{View, attributes, view},
 };
 
-use crate::app::auth_helpers::require_user;
-use crate::auth::service;
-use crate::auth::user::SessionUser;
+use crate::app::auth_helpers::require_admin;
 use crate::components::button::{ButtonSize, ButtonVariant, button_variants};
 use crate::components::container::container;
 use crate::components::input::input;
@@ -55,20 +53,6 @@ fn parse_page(raw: &Option<String>) -> i64 {
     .and_then(|value| value.parse().ok())
     .filter(|number| *number > 0)
     .unwrap_or(1)
-}
-
-async fn require_admin(cx: &Cx) -> Result<SessionUser> {
-  let su = require_user(cx).await?;
-  if !service::is_admin(su.user.role.as_deref()) {
-    return Err(see_other_fallback(cx).into());
-  }
-  Ok(su)
-}
-
-fn see_other_fallback(cx: &Cx) -> topcoat::router::error::SeeOther {
-  topcoat::router::error::see_other(
-    href!(crate::app::dashboard::page).resolve(cx),
-  )
 }
 
 /// Search, status filter, and pagination. Re-renders on the server when any

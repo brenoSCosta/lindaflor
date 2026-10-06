@@ -5,18 +5,15 @@ use topcoat::{
   context::{Cx, app_context},
   icon::{icon, iconify::iconify_icon},
   router::{
-    content::Form,
-    error::{SeeOther, see_other},
-    href, page, query_params, route,
+    content::Form, href, page, query_params, response::Response, route,
   },
   runtime::{Event, shard, signal},
   view::{StaticClass, View, attributes, class, view},
 };
 use uuid::Uuid;
 
-use crate::app::auth_helpers::require_user;
+use crate::app::auth_helpers::require_admin;
 use crate::auth::service;
-use crate::auth::user::SessionUser;
 use crate::components::alert::{AlertVariant, alert, alert_title};
 use crate::components::alert_dialog::alert_dialog;
 use crate::components::badge::{BadgeVariant, badge};
@@ -41,6 +38,7 @@ use crate::components::select::select;
 use crate::components::table::{
   table, table_body, table_cell, table_head, table_header, table_row,
 };
+use crate::components::toast::{Toast, set_toast, toast_redirect};
 
 const MENU_ITEM: StaticClass = class!(
   "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm \
@@ -95,7 +93,6 @@ struct RevokeForm {
 struct UsersQuery {
   q: Option<String>,
   page: Option<String>,
-  erro: Option<String>,
   papel: Option<String>,
   editar: Option<String>,
   banir: Option<String>,
@@ -154,7 +151,6 @@ fn users_url(
   q: &str,
   page_num: i64,
   extra: Option<(&str, &str)>,
-  erro: Option<&str>,
 ) -> String {
   let page_value = page_num.to_string();
   let mut pairs = Vec::new();
@@ -166,9 +162,6 @@ fn users_url(
   }
   if let Some((key, value)) = extra {
     pairs.push((key, value));
-  }
-  if let Some(erro) = erro.map(str::trim).filter(|s| !s.is_empty()) {
-    pairs.push(("erro", erro));
   }
   href!(page).query(pairs).resolve(cx)
 }
@@ -210,38 +203,18 @@ fn admin_error_message(err: &topcoat::Error) -> String {
   }
 }
 
-fn back(cx: &Cx, q: &str, page_num: i64) -> SeeOther {
-  see_other(users_url(cx, q, page_num, None, None))
+fn back(cx: &Cx, q: &str, page_num: i64) -> Result<Response> {
+  toast_redirect(cx, users_url(cx, q, page_num, None))
 }
 
-fn fail(cx: &Cx, q: &str, page_num: i64, err: &topcoat::Error) -> SeeOther {
-  see_other(users_url(
-    cx,
-    q,
-    page_num,
-    None,
-    Some(&admin_error_message(err)),
-  ))
+fn fail(cx: &Cx, q: &str, page_num: i64, err: &topcoat::Error) -> Result<Response> {
+  set_toast(cx, Toast::error(admin_error_message(err)));
+  toast_redirect(cx, users_url(cx, q, page_num, None))
 }
 
-fn invalid_id(cx: &Cx, q: &str, page_num: i64) -> SeeOther {
-  see_other(users_url(
-    cx,
-    q,
-    page_num,
-    None,
-    Some("Identificador inválido."),
-  ))
-}
-
-async fn require_admin(cx: &Cx) -> Result<SessionUser> {
-  let su = require_user(cx).await?;
-  if !service::is_admin(su.user.role.as_deref()) {
-    return Err(
-      see_other(href!(crate::app::dashboard::page).resolve(cx)).into(),
-    );
-  }
-  Ok(su)
+fn invalid_id(cx: &Cx, q: &str, page_num: i64) -> Result<Response> {
+  set_toast(cx, Toast::error("Identificador inválido."));
+  toast_redirect(cx, users_url(cx, q, page_num, None))
 }
 
 fn parse_uuid(raw: &str) -> Option<Uuid> {
@@ -271,7 +244,7 @@ fn role_variant(role: Option<&str>) -> BadgeVariant {
 }
 
 fn action_href(cx: &Cx, q: &str, page_num: i64, key: &str, id: &str) -> String {
-  users_url(cx, q, page_num, Some((key, id)), None)
+  users_url(cx, q, page_num, Some((key, id)))
 }
 
 const USER_QUERY_MAX: usize = 80;
@@ -442,7 +415,7 @@ async fn user_directory(
                                       <a href=(row.href_revogar) class=(class!(MENU_ITEM))>"Revogar todas as sessões"</a>
                                       if row.show_impersonate {
                                           dropdown_menu_separator()
-                                          <form method="post" action=(href!(impersonate))>
+                                          <form method="post" action=(href!(impersonate)) data-toast-promise="" data-toast-loading="Entrando…">
                                               <input type="hidden" name="user_id" value=(row.id)>
                                               <input type="hidden" name="q" value=(row.q)>
                                               <input type="hidden" name="page" value=(row.page)>
@@ -540,8 +513,8 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     None => None,
   };
 
-  let mut error_message = query.erro.clone().filter(|value| !value.is_empty());
-  if panel_raw.is_some() && panel_user.is_none() && error_message.is_none() {
+  let mut error_message = None;
+  if panel_raw.is_some() && panel_user.is_none() {
     error_message = Some("Usuário não encontrado.".to_string());
   }
 
@@ -612,7 +585,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     "Isso excluirá permanentemente {subject_name} e seus dados. Esta ação não pode ser desfeita."
   );
   let sessions_title = format!("Sessões de {subject_name}");
-  let list_href = users_url(cx, &q, page_num, None, None);
+  let list_href = users_url(cx, &q, page_num, None);
   let revoke_all_href =
     action_href(cx, &q, page_num, "revogar_todas", &dialog_id);
   let hidden_q = q.clone();
@@ -641,7 +614,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                       attrs: attributes! { aria-label="Definir papel" },
                       dialog_content(
                           dialog_header(dialog_title("Definir papel"))
-                          <form method="post" action=(href!(set_role)) class="flex flex-col gap-4">
+                          <form method="post" action=(href!(set_role)) class="flex flex-col gap-4" data-toast-promise="" data-toast-loading="Salvando…">
                               <input type="hidden" name="user_id" value=(dialog_id)>
                               <input type="hidden" name="q" value=(hidden_q)>
                               <input type="hidden" name="page" value=(hidden_page)>
@@ -671,7 +644,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                       attrs: attributes! { aria-label="Atualizar usuário" },
                       dialog_content(
                           dialog_header(dialog_title("Atualizar usuário"))
-                          <form method="post" action=(href!(update_name)) class="flex flex-col gap-4">
+                          <form method="post" action=(href!(update_name)) class="flex flex-col gap-4" data-toast-promise="" data-toast-loading="Salvando…">
                               <input type="hidden" name="user_id" value=(dialog_id)>
                               <input type="hidden" name="q" value=(hidden_q)>
                               <input type="hidden" name="page" value=(hidden_page)>
@@ -706,7 +679,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                               dialog_title("Banir usuário")
                               dialog_description((ban_text))
                           )
-                          <form method="post" action=(href!(ban_user)) class="flex flex-col gap-4">
+                          <form method="post" action=(href!(ban_user)) class="flex flex-col gap-4" data-toast-promise="" data-toast-loading="Banindo…">
                               <input type="hidden" name="user_id" value=(dialog_id)>
                               <input type="hidden" name="q" value=(hidden_q)>
                               <input type="hidden" name="page" value=(hidden_page)>
@@ -737,7 +710,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                               dialog_title("Revogar banimento")
                               dialog_description((unban_text))
                           )
-                          <form method="post" action=(href!(unban_user))>
+                          <form method="post" action=(href!(unban_user)) data-toast-promise="" data-toast-loading="Desbanindo…">
                               <input type="hidden" name="user_id" value=(dialog_id)>
                               <input type="hidden" name="q" value=(hidden_q)>
                               <input type="hidden" name="page" value=(hidden_page)>
@@ -769,7 +742,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                               <p class="truncate text-xs text-muted-foreground">(session.ip_address)</p>
                                               <p class="truncate text-xs text-muted-foreground">(session.user_agent)</p>
                                           </div>
-                                          <form method="post" action=(href!(revoke_session))>
+                                          <form method="post" action=(href!(revoke_session)) data-toast-promise="" data-toast-loading="Revogando…">
                                               <input type="hidden" name="session_id" value=(session.id)>
                                               <input type="hidden" name="user_id" value=(session.user_id)>
                                               <input type="hidden" name="q" value=(session.q)>
@@ -804,7 +777,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                               dialog_title("Revogar todas as sessões")
                               dialog_description((revoke_text))
                           )
-                          <form method="post" action=(href!(revoke_sessions))>
+                          <form method="post" action=(href!(revoke_sessions)) data-toast-promise="" data-toast-loading="Revogando…">
                               <input type="hidden" name="user_id" value=(dialog_id)>
                               <input type="hidden" name="q" value=(hidden_q)>
                               <input type="hidden" name="page" value=(hidden_page)>
@@ -828,7 +801,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                               dialog_title("Remover usuário")
                               dialog_description((remove_text))
                           )
-                          <form method="post" action=(href!(remove_user))>
+                          <form method="post" action=(href!(remove_user)) data-toast-promise="" data-toast-loading="Removendo…">
                               <input type="hidden" name="user_id" value=(dialog_id)>
                               <input type="hidden" name="q" value=(hidden_q)>
                               <input type="hidden" name="page" value=(hidden_page)>
@@ -849,86 +822,87 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
 }
 
 #[route(POST "/admin/usuarios/papel")]
-async fn set_role(cx: &Cx, Form(body): Form<RoleForm>) -> Result<SeeOther> {
+async fn set_role(cx: &Cx, Form(body): Form<RoleForm>) -> Result<Response> {
   let actor = require_admin(cx).await?;
   let q = form_q(&body.q);
   let page_num = form_page(&body.page);
   let Some(user_id) = parse_uuid(&body.user_id) else {
-    return Ok(invalid_id(cx, &q, page_num));
+    return invalid_id(cx, &q, page_num);
   };
   let pool = app_context::<PgPool>(cx);
   match service::set_user_role(pool, &actor, user_id, &body.role).await {
-    Ok(_) => Ok(back(cx, &q, page_num)),
-    Err(err) => Ok(fail(cx, &q, page_num, &err)),
+    Ok(_) => back(cx, &q, page_num),
+    Err(err) => fail(cx, &q, page_num, &err),
   }
 }
 
 #[route(POST "/admin/usuarios/nome")]
-async fn update_name(cx: &Cx, Form(body): Form<NameForm>) -> Result<SeeOther> {
+async fn update_name(cx: &Cx, Form(body): Form<NameForm>) -> Result<Response> {
   let actor = require_admin(cx).await?;
   let q = form_q(&body.q);
   let page_num = form_page(&body.page);
   let Some(user_id) = parse_uuid(&body.user_id) else {
-    return Ok(invalid_id(cx, &q, page_num));
+    return invalid_id(cx, &q, page_num);
   };
   let pool = app_context::<PgPool>(cx);
   match service::admin_update_user_name(pool, &actor, user_id, &body.name).await
   {
-    Ok(_) => Ok(back(cx, &q, page_num)),
-    Err(err) => Ok(fail(cx, &q, page_num, &err)),
+    Ok(_) => back(cx, &q, page_num),
+    Err(err) => fail(cx, &q, page_num, &err),
   }
 }
 
 #[route(POST "/admin/usuarios/banir")]
-async fn ban_user(cx: &Cx, Form(body): Form<BanForm>) -> Result<SeeOther> {
+async fn ban_user(cx: &Cx, Form(body): Form<BanForm>) -> Result<Response> {
   let actor = require_admin(cx).await?;
   let q = form_q(&body.q);
   let page_num = form_page(&body.page);
   let Some(user_id) = parse_uuid(&body.user_id) else {
-    return Ok(invalid_id(cx, &q, page_num));
+    return invalid_id(cx, &q, page_num);
   };
   let pool = app_context::<PgPool>(cx);
   match service::ban_user(pool, &actor, user_id, body.ban_reason.as_deref())
     .await
   {
-    Ok(_) => Ok(back(cx, &q, page_num)),
-    Err(err) => Ok(fail(cx, &q, page_num, &err)),
+    Ok(_) => back(cx, &q, page_num),
+    Err(err) => fail(cx, &q, page_num, &err),
   }
 }
 
 #[route(POST "/admin/usuarios/desbanir")]
-async fn unban_user(cx: &Cx, Form(body): Form<IdForm>) -> Result<SeeOther> {
+async fn unban_user(cx: &Cx, Form(body): Form<IdForm>) -> Result<Response> {
   let actor = require_admin(cx).await?;
   let q = form_q(&body.q);
   let page_num = form_page(&body.page);
   let Some(user_id) = parse_uuid(&body.user_id) else {
-    return Ok(invalid_id(cx, &q, page_num));
+    return invalid_id(cx, &q, page_num);
   };
   let pool = app_context::<PgPool>(cx);
   match service::unban_user(pool, &actor, user_id).await {
-    Ok(_) => Ok(back(cx, &q, page_num)),
-    Err(err) => Ok(fail(cx, &q, page_num, &err)),
+    Ok(_) => back(cx, &q, page_num),
+    Err(err) => fail(cx, &q, page_num, &err),
   }
 }
 
 #[route(POST "/admin/usuarios/atuar")]
-async fn impersonate(cx: &Cx, Form(body): Form<IdForm>) -> Result<SeeOther> {
+async fn impersonate(cx: &Cx, Form(body): Form<IdForm>) -> Result<Response> {
   let actor = require_admin(cx).await?;
   let q = form_q(&body.q);
   let page_num = form_page(&body.page);
   let Some(user_id) = parse_uuid(&body.user_id) else {
-    return Ok(invalid_id(cx, &q, page_num));
+    return invalid_id(cx, &q, page_num);
   };
   let pool = app_context::<PgPool>(cx);
   match service::impersonate_user(cx, pool, &actor, user_id).await {
-    Ok(_) => Ok(see_other(href!(crate::app::dashboard::page).resolve(cx))),
+    Ok(_) => toast_redirect(cx, href!(crate::app::dashboard::page).resolve(cx)),
     Err(err) => {
       let message = if err.to_string() == "forbidden" {
         "Não é possível atuar como um administrador.".to_string()
       } else {
         admin_error_message(&err)
       };
-      Ok(see_other(users_url(cx, &q, page_num, None, Some(&message))))
+      set_toast(cx, Toast::error(message));
+      toast_redirect(cx, users_url(cx, &q, page_num, None))
     }
   }
 }
@@ -937,12 +911,12 @@ async fn impersonate(cx: &Cx, Form(body): Form<IdForm>) -> Result<SeeOther> {
 async fn revoke_session(
   cx: &Cx,
   Form(body): Form<RevokeForm>,
-) -> Result<SeeOther> {
+) -> Result<Response> {
   let actor = require_admin(cx).await?;
   let q = form_q(&body.q);
   let page_num = form_page(&body.page);
   let Some(session_id) = parse_uuid(&body.session_id) else {
-    return Ok(invalid_id(cx, &q, page_num));
+    return invalid_id(cx, &q, page_num);
   };
   let pool = app_context::<PgPool>(cx);
   let back_to = users_url(
@@ -950,17 +924,13 @@ async fn revoke_session(
     &q,
     page_num,
     Some(("sessoes", body.user_id.trim())),
-    None,
   );
   match service::revoke_admin_session(pool, &actor, session_id).await {
-    Ok(_) => Ok(see_other(back_to)),
-    Err(err) => Ok(see_other(users_url(
-      cx,
-      &q,
-      page_num,
-      Some(("sessoes", body.user_id.trim())),
-      Some(&admin_error_message(&err)),
-    ))),
+    Ok(_) => toast_redirect(cx, back_to),
+    Err(err) => {
+      set_toast(cx, Toast::error(admin_error_message(&err)));
+      toast_redirect(cx, back_to)
+    }
   }
 }
 
@@ -968,31 +938,32 @@ async fn revoke_session(
 async fn revoke_sessions(
   cx: &Cx,
   Form(body): Form<IdForm>,
-) -> Result<SeeOther> {
+) -> Result<Response> {
   let actor = require_admin(cx).await?;
   let q = form_q(&body.q);
   let page_num = form_page(&body.page);
   let Some(user_id) = parse_uuid(&body.user_id) else {
-    return Ok(invalid_id(cx, &q, page_num));
+    return invalid_id(cx, &q, page_num);
   };
   let pool = app_context::<PgPool>(cx);
   match service::revoke_admin_user_sessions(pool, &actor, user_id).await {
-    Ok(_) => Ok(back(cx, &q, page_num)),
-    Err(err) => Ok(fail(cx, &q, page_num, &err)),
+    Ok(_) => back(cx, &q, page_num),
+    Err(err) => fail(cx, &q, page_num, &err),
   }
 }
 
 #[route(POST "/admin/usuarios/remover")]
-async fn remove_user(cx: &Cx, Form(body): Form<IdForm>) -> Result<SeeOther> {
+async fn remove_user(cx: &Cx, Form(body): Form<IdForm>) -> Result<Response> {
   let actor = require_admin(cx).await?;
   let q = form_q(&body.q);
   let page_num = form_page(&body.page);
   let Some(user_id) = parse_uuid(&body.user_id) else {
-    return Ok(invalid_id(cx, &q, page_num));
+    return invalid_id(cx, &q, page_num);
   };
   let pool = app_context::<PgPool>(cx);
   match service::remove_user(pool, &actor, user_id).await {
-    Ok(_) => Ok(back(cx, &q, page_num)),
-    Err(err) => Ok(fail(cx, &q, page_num, &err)),
+    Ok(_) => back(cx, &q, page_num),
+    Err(err) => fail(cx, &q, page_num, &err),
   }
 }
+

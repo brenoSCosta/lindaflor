@@ -7,10 +7,10 @@ use topcoat::{
   icon::{icon, iconify::iconify_icon},
   router::{
     content::{Form, multipart::Multipart},
-    error::{SeeOther, bad_request, see_other},
-    href, page, query_params, route,
+    error::bad_request,
+    href, page, query_params, response::Response, route,
   },
-  runtime::{Event, procedure, signal},
+  runtime::{Event, expr, procedure, signal},
   view::{View, component, view},
 };
 use uuid::Uuid;
@@ -35,9 +35,11 @@ use crate::components::dialog::{
   dialog, dialog_content, dialog_description, dialog_footer, dialog_header,
   dialog_title,
 };
+use crate::components::field::{field, field_error, field_label};
 use crate::components::input::input;
 use crate::components::separator::separator;
 use crate::components::tabs::{tabs, tabs_content, tabs_list, tabs_trigger};
+use crate::components::toast::{Toast, set_toast, toast_redirect};
 use topcoat::view::attributes;
 
 /// Content-hashed URL for the profile-tab cropper. Only the settings page renders it.
@@ -62,8 +64,6 @@ pub struct SettingsInput {
 #[query_params(error = bad_request)]
 struct SettingsQuery {
   tab: Option<String>,
-  saved: Option<String>,
-  error: Option<String>,
   setup: Option<String>,
 }
 
@@ -124,8 +124,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let pool = app_context::<PgPool>(cx);
   let query = query_params::<SettingsQuery>(cx)?;
   let tab = query.tab.as_deref().unwrap_or("profile").to_string();
-  let saved = query.saved.is_some();
-  let error_message = query.error.clone();
   let setup_mode = query.setup.as_deref() == Some("1");
 
   let sessions = service::list_user_sessions(cx, pool, su.user.id).await?;
@@ -218,17 +216,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                   )
               )
               tabs_content(
-                  if saved {
-                      <div class="rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground shadow-sm">
-                          "Alterações salvas com sucesso."
-                      </div>
-                  }
-                  if let Some(ref msg) = error_message {
-                      <div class="mt-6 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                          (msg.as_str())
-                      </div>
-                  }
-
                   <div :hidden=$(active.get() != "profile")>
                       profile_tab(
                           name: user_name.clone(),
@@ -269,6 +256,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
 
 #[component]
 async fn profile_tab(
+  cx: &Cx,
   name: String,
   email: String,
   initials: String,
@@ -276,6 +264,18 @@ async fn profile_tab(
   has_avatar: bool,
 ) -> Result<impl View> {
   let name_value = name.clone();
+  let display_name = signal(cx, || name_value.clone());
+  let display_name_touched = signal(cx, || false);
+  let display_name_error = expr!({
+    if !display_name_touched.get() {
+      "".to_owned()
+    } else if display_name.get().trim().is_empty() {
+      "Informe o nome.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+  let profile_blocked = expr!({ display_name.get().trim().is_empty() });
   Ok(view! {
       card(
           card_header(
@@ -302,7 +302,12 @@ async fn profile_tab(
                           "Alterar foto"
                       )
                       if has_avatar {
-                          <form method="post" action=(href!(settings_post).query([("tab", "profile")]))>
+                          <form
+                              method="post"
+                              action=(href!(settings_post).query([("tab", "profile")]))
+                              data-toast-promise=""
+                              data-toast-loading="Removendo foto…"
+                          >
                               <input type="hidden" name="action" value="remove_avatar">
                               button(
                                   variant: ButtonVariant::Outline,
@@ -315,14 +320,39 @@ async fn profile_tab(
                       </div>
                   </div>
               </div>
-              <form method="post" action=(href!(settings_post).query([("tab", "profile")])) class="mt-6 flex flex-col gap-4">
+              <form
+                  method="post"
+                  action=(href!(settings_post).query([("tab", "profile")]))
+                  class="mt-6 flex flex-col gap-4"
+                  novalidate=""
+                  data-toast-promise=""
+                  data-toast-loading="Salvando…"
+              >
                   <input type="hidden" name="action" value="update_profile">
-                  <div class="space-y-2">
-                      <label for="name">"Nome de exibição"</label>
-                      input(attrs: attributes! { type="text" name="name" id="name" value=(name_value) })
-                  </div>
+                  field(
+                      attrs: attributes! {
+                          :data-invalid=$( (!display_name_error.is_empty()).then_some("true") )
+                      },
+                      field_label(attrs: attributes! { for="name" }, "Nome de exibição")
+                      input(
+                          value: display_name,
+                          touched: display_name_touched.clone(),
+                          error: display_name_error.clone(),
+                          attrs: attributes! {
+                              id="name"
+                              name="name"
+                              type="text"
+                              autocomplete="name"
+                              aria-describedby="name-error"
+                          }
+                      )
+                      field_error(
+                          message: display_name_error,
+                          attrs: attributes! { id="name-error" }
+                      )
+                  )
                   button(
-                      variant: ButtonVariant::Primary,
+                      blocked: profile_blocked,
                       attrs: attributes! { type="submit" class="w-fit" },
                       "Salvar alterações"
                   )
@@ -435,7 +465,86 @@ async fn profile_tab(
 }
 
 #[component]
-async fn account_tab(email: String) -> Result<impl View> {
+async fn account_tab(cx: &Cx, email: String) -> Result<impl View> {
+  let min_password_len = crate::auth::service::MIN_PASSWORD_LEN as f64;
+  let new_email = signal(cx, String::new);
+  let new_email_touched = signal(cx, || false);
+  let new_email_error = expr!({
+    if !new_email_touched.get() {
+      "".to_owned()
+    } else if new_email.get().trim().is_empty() {
+      "Informe o e-mail.".to_owned()
+    } else if !new_email.get().contains("@") {
+      "E-mail inválido.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+
+  let current_password = signal(cx, String::new);
+  let current_password_touched = signal(cx, || false);
+  let current_password_error = expr!({
+    if !current_password_touched.get() {
+      "".to_owned()
+    } else if current_password.get().is_empty() {
+      "Informe a senha atual.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+
+  let new_password = signal(cx, String::new);
+  let new_password_touched = signal(cx, || false);
+  let new_password_error = expr!({
+    if !new_password_touched.get() {
+      "".to_owned()
+    } else if new_password.get().is_empty() {
+      "Informe a nova senha.".to_owned()
+    } else if new_password.get().len() < min_password_len {
+      "A senha deve ter pelo menos 8 caracteres.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+
+  let confirm_password = signal(cx, String::new);
+  let confirm_password_touched = signal(cx, || false);
+  let confirm_password_error = expr!({
+    if !confirm_password_touched.get() {
+      "".to_owned()
+    } else if confirm_password.get().is_empty() {
+      "Confirme a nova senha.".to_owned()
+    } else if confirm_password.get() != new_password.get() {
+      "As senhas não conferem.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+  let email_blocked = expr!({
+    if new_email.get().trim().is_empty() {
+      true
+    } else if !new_email.get().contains("@") {
+      true
+    } else {
+      false
+    }
+  });
+  let password_blocked = expr!({
+    if current_password.get().is_empty() {
+      true
+    } else if new_password.get().is_empty() {
+      true
+    } else if new_password.get().len() < min_password_len {
+      true
+    } else if confirm_password.get().is_empty() {
+      true
+    } else if confirm_password.get() != new_password.get() {
+      true
+    } else {
+      false
+    }
+  });
+
   Ok(view! {
       card(
           card_header(
@@ -448,37 +557,125 @@ async fn account_tab(email: String) -> Result<impl View> {
               )
           )
           card_content(
-              <form method="post" action=(href!(settings_post).query([("tab", "account")])) class="flex flex-col gap-4">
+              <form
+                  
+                      method="post"
+                      action=(href!(settings_post).query([("tab", "account")]))
+                      class="flex flex-col gap-4"
+                    novalidate=""
+                    data-toast-promise=""
+                    data-toast-loading="Atualizando e-mail…"
+                >
                   <input type="hidden" name="action" value="change_email">
                   <h3 class="text-sm font-medium">"Alterar e-mail"</h3>
-                  <div class="space-y-2">
-                      <label for="new_email">"Novo e-mail"</label>
-                      input(attrs: attributes! { type="email" name="new_email" id="new_email" })
-                  </div>
+                  field(
+                      attrs: attributes! {
+                          :data-invalid=$( (!new_email_error.is_empty()).then_some("true") )
+                      },
+                      field_label(attrs: attributes! { for="new_email" }, "Novo e-mail")
+                      input(
+                          value: new_email,
+                          touched: new_email_touched.clone(),
+                          error: new_email_error.clone(),
+                          attrs: attributes! {
+                              id="new_email"
+                              name="new_email"
+                              type="email"
+                              autocomplete="email"
+                              aria-describedby="new_email-error"
+                          }
+                      )
+                      field_error(
+                          message: new_email_error,
+                          attrs: attributes! { id="new_email-error" }
+                      )
+                  )
                   button(
-                      variant: ButtonVariant::Primary,
+                      blocked: email_blocked,
                       attrs: attributes! { type="submit" class="w-fit" },
                       "Atualizar e-mail"
                   )
               </form>
               separator(attrs: attributes! { class="my-5" })
-              <form method="post" action=(href!(settings_post).query([("tab", "account")])) class="flex flex-col gap-4">
+              <form
+                  
+                    method="post"
+                    action=(href!(settings_post).query([("tab", "account")]))
+                    class="flex flex-col gap-4"
+                    novalidate=""
+                    data-toast-promise=""
+                    data-toast-loading="Atualizando senha…"
+                >
                   <input type="hidden" name="action" value="change_password">
                   <h3 class="text-sm font-medium">"Alterar senha"</h3>
-                  <div class="space-y-2">
-                      <label for="current_password">"Senha atual"</label>
-                      input(attrs: attributes! { type="password" name="current_password" id="current_password" autocomplete="current-password" })
-                  </div>
-                  <div class="space-y-2">
-                      <label for="new_password">"Nova senha"</label>
-                      input(attrs: attributes! { type="password" name="new_password" id="new_password" autocomplete="new-password" })
-                  </div>
-                  <div class="space-y-2">
-                      <label for="confirm_password">"Confirmar nova senha"</label>
-                      input(attrs: attributes! { type="password" name="confirm_password" id="confirm_password" autocomplete="new-password" })
-                  </div>
+                  field(
+                      attrs: attributes! {
+                          :data-invalid=$( (!current_password_error.is_empty()).then_some("true") )
+                      },
+                      field_label(attrs: attributes! { for="current_password" }, "Senha atual")
+                      input(
+                          value: current_password,
+                          touched: current_password_touched.clone(),
+                          error: current_password_error.clone(),
+                          attrs: attributes! {
+                              id="current_password"
+                              name="current_password"
+                              type="password"
+                              autocomplete="current-password"
+                              aria-describedby="current_password-error"
+                          }
+                      )
+                      field_error(
+                          message: current_password_error,
+                          attrs: attributes! { id="current_password-error" }
+                      )
+                  )
+                  field(
+                      attrs: attributes! {
+                          :data-invalid=$( (!new_password_error.is_empty()).then_some("true") )
+                      },
+                      field_label(attrs: attributes! { for="new_password" }, "Nova senha")
+                      input(
+                          value: new_password,
+                          touched: new_password_touched.clone(),
+                          error: new_password_error.clone(),
+                          attrs: attributes! {
+                              id="new_password"
+                              name="new_password"
+                              type="password"
+                              autocomplete="new-password"
+                              aria-describedby="new_password-error"
+                          }
+                      )
+                      field_error(
+                          message: new_password_error,
+                          attrs: attributes! { id="new_password-error" }
+                      )
+                  )
+                  field(
+                      attrs: attributes! {
+                          :data-invalid=$( (!confirm_password_error.is_empty()).then_some("true") )
+                      },
+                      field_label(attrs: attributes! { for="confirm_password" }, "Confirmar nova senha")
+                      input(
+                          value: confirm_password,
+                          touched: confirm_password_touched.clone(),
+                          error: confirm_password_error.clone(),
+                          attrs: attributes! {
+                              id="confirm_password"
+                              name="confirm_password"
+                              type="password"
+                              autocomplete="new-password"
+                              aria-describedby="confirm_password-error"
+                          }
+                      )
+                      field_error(
+                          message: confirm_password_error,
+                          attrs: attributes! { id="confirm_password-error" }
+                      )
+                  )
                   button(
-                      variant: ButtonVariant::Primary,
+                      blocked: password_blocked,
                       attrs: attributes! { type="submit" class="w-fit" },
                       "Atualizar senha"
                   )
@@ -516,7 +713,12 @@ async fn sessions_tab(sessions: Vec<ListedSession>) -> Result<impl View> {
                               </p>
                           </div>
                           if !session.current {
-                              <form method="post" action=(href!(settings_post).query([("tab", "sessions")]))>
+                              <form
+                                  method="post"
+                                      action=(href!(settings_post).query([("tab", "sessions")]))
+                                      data-toast-promise=""
+                                      data-toast-loading="Revogando…"
+                                  >
                                   <input type="hidden" name="action" value="revoke_session">
                                   <input type="hidden" name="session_id" value=(session.id.to_string())>
                                   {
@@ -547,10 +749,45 @@ async fn sessions_tab(sessions: Vec<ListedSession>) -> Result<impl View> {
 
 #[component]
 async fn security_tab(
+  cx: &Cx,
   two_factor_enabled: bool,
   pending: Option<(String, String)>,
 ) -> Result<impl View> {
   let qr_uri = pending.as_ref().and_then(|(_, uri)| totp_qr_image_uri(uri));
+  let totp_code = signal(cx, String::new);
+  let totp_code_touched = signal(cx, || false);
+  let totp_code_error = expr!({
+    if !totp_code_touched.get() {
+      "".to_owned()
+    } else if totp_code.get().trim().is_empty() {
+      "Informe o código de 6 dígitos.".to_owned()
+    } else if totp_code.get().trim().len() != 6.0 {
+      "O código deve ter 6 dígitos.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+  let disable_password = signal(cx, String::new);
+  let disable_password_touched = signal(cx, || false);
+  let disable_password_error = expr!({
+    if !disable_password_touched.get() {
+      "".to_owned()
+    } else if disable_password.get().is_empty() {
+      "Informe a senha.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+  let totp_blocked = expr!({
+    if totp_code.get().trim().is_empty() {
+      true
+    } else if totp_code.get().trim().len() != 6.0 {
+      true
+    } else {
+      false
+    }
+  });
+  let disable_blocked = expr!({ disable_password.get().is_empty() });
   Ok(view! {
       card(
           card_header(
@@ -577,14 +814,41 @@ async fn security_tab(
                           <summary class="cursor-pointer">"Detalhes para configuração manual"</summary>
                           <p class="mt-1 break-all">(totp_uri.as_str())</p>
                       </details>
-                      <form method="post" action=(href!(settings_post).query([("tab", "security")])) class="flex flex-col gap-4">
+                      <form
+                              method="post"
+                              action=(href!(settings_post).query([("tab", "security")]))
+                              class="flex flex-col gap-4"
+                              novalidate=""
+                              data-toast-promise=""
+                              data-toast-loading="Confirmando…"
+                          >
                           <input type="hidden" name="action" value="confirm_2fa">
-                          <div class="space-y-2">
-                              <label for="code">"Código de 6 dígitos"</label>
-                              input(attrs: attributes! { type="text" name="code" id="code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" })
-                          </div>
+                          field(
+                              attrs: attributes! {
+                                  :data-invalid=$( (!totp_code_error.is_empty()).then_some("true") )
+                              },
+                              field_label(attrs: attributes! { for="code" }, "Código de 6 dígitos")
+                              input(
+                                  value: totp_code,
+                                  touched: totp_code_touched.clone(),
+                                  error: totp_code_error.clone(),
+                                  attrs: attributes! {
+                                      id="code"
+                                      name="code"
+                                      type="text"
+                                      inputmode="numeric"
+                                      maxlength="6"
+                                      autocomplete="one-time-code"
+                                      aria-describedby="code-error"
+                                  }
+                              )
+                              field_error(
+                                  message: totp_code_error,
+                                  attrs: attributes! { id="code-error" }
+                              )
+                          )
                           button(
-                              variant: ButtonVariant::Primary,
+                              blocked: totp_blocked,
                               attrs: attributes! { type="submit" class="w-fit" },
                               "Confirmar 2FA"
                           )
@@ -603,21 +867,52 @@ async fn security_tab(
                           </p>
                       </div>
                       if two_factor_enabled {
-                          <form method="post" action=(href!(settings_post).query([("tab", "security")])) class="flex items-end gap-2">
+                          <form
+                              method="post"
+                                  action=(href!(settings_post).query([("tab", "security")]))
+                                  class="flex items-end gap-2"
+                                  novalidate=""
+                                  data-toast-promise=""
+                                  data-toast-loading="Desativando…"
+                              >
                               <input type="hidden" name="action" value="disable_2fa">
-                              <div class="space-y-1">
-                                  <label for="password" class="text-xs">"Senha"</label>
-                                  input(attrs: attributes! { type="password" name="password" id="password" required="" })
-                              </div>
+                              field(
+                                  attrs: attributes! {
+                                      :data-invalid=$( (!disable_password_error.is_empty()).then_some("true") )
+                                  },
+                                  field_label(attrs: attributes! { for="password" }, "Senha")
+                                  input(
+                                      value: disable_password,
+                                      touched: disable_password_touched.clone(),
+                                      error: disable_password_error.clone(),
+                                      attrs: attributes! {
+                                          id="password"
+                                          name="password"
+                                          type="password"
+                                          autocomplete="current-password"
+                                          aria-describedby="password-error"
+                                      }
+                                  )
+                                  field_error(
+                                      message: disable_password_error,
+                                      attrs: attributes! { id="password-error" }
+                                  )
+                              )
                               button(
                                   variant: ButtonVariant::Outline,
                                   size: ButtonSize::Sm,
+                                  blocked: disable_blocked,
                                   attrs: attributes! { type="submit" },
                                   "Desativar 2FA"
                               )
                           </form>
                       } else {
-                          <form method="post" action=(href!(settings_post).query([("tab", "security")]))>
+                          <form
+                              method="post"
+                                  action=(href!(settings_post).query([("tab", "security")]))
+                                  data-toast-promise=""
+                                  data-toast-loading="Ativando…"
+                              >
                               <input type="hidden" name="action" value="enable_2fa">
                               button(
                                   variant: ButtonVariant::Primary,
@@ -661,7 +956,12 @@ async fn linked_accounts_tab(
                               </p>
                           </div>
                           if account.provider_id != CREDENTIAL_PROVIDER_ID {
-                              <form method="post" action=(href!(settings_post).query([("tab", "linked-accounts")]))>
+                              <form
+                                  method="post"
+                                      action=(href!(settings_post).query([("tab", "linked-accounts")]))
+                                      data-toast-promise=""
+                                      data-toast-loading="Desconectando…"
+                                  >
                                   <input type="hidden" name="action" value="unlink">
                                   <input type="hidden" name="provider_id" value=(account.provider_id.clone())>
                                   <input type="hidden" name="account_id" value=(account.account_id.clone())>
@@ -694,7 +994,12 @@ async fn linked_accounts_tab(
                                   "Não conectado"
                               </p>
                           </div>
-                          <form method="post" action=(href!(settings_post).query([("tab", "linked-accounts")]))>
+                          <form
+                              method="post"
+                                  action=(href!(settings_post).query([("tab", "linked-accounts")]))
+                                  data-toast-promise=""
+                                  data-toast-loading="Conectando…"
+                              >
                               <input type="hidden" name="action" value="link_google">
                               button(
                                   variant: ButtonVariant::Outline,
@@ -712,7 +1017,29 @@ async fn linked_accounts_tab(
 }
 
 #[component]
-async fn danger_tab() -> Result<impl View> {
+async fn danger_tab(cx: &Cx) -> Result<impl View> {
+  let confirm_email = signal(cx, String::new);
+  let confirm_email_touched = signal(cx, || false);
+  let confirm_email_error = expr!({
+    if !confirm_email_touched.get() {
+      "".to_owned()
+    } else if confirm_email.get().trim().is_empty() {
+      "Informe o e-mail.".to_owned()
+    } else if !confirm_email.get().contains("@") {
+      "E-mail inválido.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+  let delete_blocked = expr!({
+    if confirm_email.get().trim().is_empty() {
+      true
+    } else if !confirm_email.get().contains("@") {
+      true
+    } else {
+      false
+    }
+  });
   Ok(view! {
       card(
           card_header(
@@ -722,14 +1049,40 @@ async fn danger_tab() -> Result<impl View> {
               )
           )
           card_content(
-              <form method="post" action=(href!(settings_post).query([("tab", "danger")])) class="flex flex-col gap-4">
+              <form
+                  method="post"
+                      action=(href!(settings_post).query([("tab", "danger")]))
+                      class="flex flex-col gap-4"
+                      novalidate=""
+                      data-toast-promise=""
+                      data-toast-loading="Excluindo conta…"
+                  >
                   <input type="hidden" name="action" value="delete_user">
-                  <div class="space-y-2">
-                      <label for="confirm_email">"Seu e-mail"</label>
-                      input(attrs: attributes! { type="email" name="confirm_email" id="confirm_email" autocomplete="off" required="" })
-                  </div>
+                  field(
+                      attrs: attributes! {
+                          :data-invalid=$( (!confirm_email_error.is_empty()).then_some("true") )
+                      },
+                      field_label(attrs: attributes! { for="confirm_email" }, "Seu e-mail")
+                      input(
+                          value: confirm_email,
+                          touched: confirm_email_touched.clone(),
+                          error: confirm_email_error.clone(),
+                          attrs: attributes! {
+                              id="confirm_email"
+                              name="confirm_email"
+                              type="email"
+                              autocomplete="off"
+                              aria-describedby="confirm_email-error"
+                          }
+                      )
+                      field_error(
+                          message: confirm_email_error,
+                          attrs: attributes! { id="confirm_email-error" }
+                      )
+                  )
                   button(
                       variant: ButtonVariant::Destructive,
+                      blocked: delete_blocked,
                       attrs: attributes! { type="submit" class="w-fit" },
                       "Excluir conta"
                   )
@@ -743,18 +1096,18 @@ async fn danger_tab() -> Result<impl View> {
 pub async fn upload_avatar(
   cx: &Cx,
   mut multipart: Multipart,
-) -> Result<SeeOther> {
+) -> Result<Response> {
   let su = require_user(cx).await?;
   let pool = app_context::<PgPool>(cx);
   let store = object_store(cx);
 
   let mut file: Option<(String, Vec<u8>)> = None;
-  while let Some(field) = multipart.next_field().await? {
-    if field.name() != Some("file") {
+  while let Some(part) = multipart.next_field().await? {
+    if part.name() != Some("file") {
       continue;
     }
-    let content_type = field.content_type().unwrap_or("").to_owned();
-    let bytes = field.bytes().await?.to_vec();
+    let content_type = part.content_type().unwrap_or("").to_owned();
+    let bytes = part.bytes().await?.to_vec();
     file = Some((content_type, bytes));
   }
 
@@ -768,16 +1121,14 @@ pub async fn upload_avatar(
   )
   .await
   {
-    Ok(_) => Ok(see_other(
-      href!(page)
-        .query([("tab", "profile"), ("saved", "1")])
-        .resolve(cx),
-    )),
-    Err(err) => Ok(see_other(
-      href!(page)
-        .query([("tab", "profile"), ("error", err.to_string().as_str())])
-        .resolve(cx),
-    )),
+    Ok(_) => {
+      set_toast(cx, Toast::success("Alterações salvas com sucesso."));
+      toast_redirect(cx, href!(page).query([("tab", "profile")]).resolve(cx))
+    }
+    Err(err) => {
+      set_toast(cx, Toast::error(err.to_string()));
+      toast_redirect(cx, href!(page).query([("tab", "profile")]).resolve(cx))
+    }
   }
 }
 
@@ -809,11 +1160,15 @@ async fn unlink_account_proc(
   Ok(true)
 }
 
+fn settings_tab_url(cx: &Cx, tab: &str) -> String {
+  href!(page).query([("tab", tab)]).resolve(cx)
+}
+
 #[route(POST "/settings")]
 pub async fn settings_post(
   cx: &Cx,
   Form(body): Form<SettingsInput>,
-) -> Result<SeeOther> {
+) -> Result<Response> {
   let su = require_user(cx).await?;
   let pool = app_context::<PgPool>(cx);
   let tab = topcoat::router::request::uri(cx)
@@ -826,33 +1181,27 @@ pub async fn settings_post(
 
   let action = body.action.as_deref().unwrap_or("");
   let err_redirect = |msg: &str| {
-    see_other(
-      href!(page)
-        .query([("tab", tab.as_str()), ("error", msg)])
-        .resolve(cx),
-    )
+    set_toast(cx, Toast::error(msg));
+    toast_redirect(cx, settings_tab_url(cx, &tab))
   };
   let ok_redirect = || {
-    see_other(
-      href!(page)
-        .query([("tab", tab.as_str()), ("saved", "1")])
-        .resolve(cx),
-    )
+    set_toast(cx, Toast::success("Alterações salvas com sucesso."));
+    toast_redirect(cx, settings_tab_url(cx, &tab))
   };
 
   match action {
     "remove_avatar" => {
       let store = object_store(cx);
       match auth_avatar::remove_avatar(pool, &store, su.user.id).await {
-        Ok(()) => Ok(ok_redirect()),
-        Err(err) => Ok(err_redirect(&err.to_string())),
+        Ok(()) => ok_redirect(),
+        Err(err) => err_redirect(&err.to_string()),
       }
     }
     "update_profile" => {
       let name = body.name.as_deref().unwrap_or("");
       match service::update_user_name(pool, su.user.id, name).await {
-        Ok(_) => Ok(ok_redirect()),
-        Err(err) => Ok(err_redirect(&portuguese_error_message(&err))),
+        Ok(_) => ok_redirect(),
+        Err(err) => err_redirect(&portuguese_error_message(&err)),
       }
     }
     "change_email" => {
@@ -867,8 +1216,8 @@ pub async fn settings_post(
       )
       .await
       {
-        Ok(()) => Ok(ok_redirect()),
-        Err(err) => Ok(err_redirect(&portuguese_error_message(&err))),
+        Ok(()) => ok_redirect(),
+        Err(err) => err_redirect(&portuguese_error_message(&err)),
       }
     }
     "change_password" => {
@@ -876,7 +1225,7 @@ pub async fn settings_post(
       let new_password = body.new_password.as_deref().unwrap_or("");
       let confirm = body.confirm_password.as_deref().unwrap_or("");
       if new_password != confirm {
-        return Ok(err_redirect("As senhas não conferem."));
+        return err_redirect("As senhas não conferem.");
       }
       match service::change_password(
         pool,
@@ -888,8 +1237,8 @@ pub async fn settings_post(
       )
       .await
       {
-        Ok(()) => Ok(ok_redirect()),
-        Err(err) => Ok(err_redirect(&portuguese_error_message(&err))),
+        Ok(()) => ok_redirect(),
+        Err(err) => err_redirect(&portuguese_error_message(&err)),
       }
     }
     "revoke_session" => {
@@ -898,7 +1247,7 @@ pub async fn settings_post(
         .as_deref()
         .and_then(|s| Uuid::parse_str(s).ok())
       else {
-        return Ok(err_redirect("Sessão inválida."));
+        return err_redirect("Sessão inválida.");
       };
       match service::revoke_user_session(
         cx,
@@ -909,38 +1258,39 @@ pub async fn settings_post(
       )
       .await
       {
-        Ok(()) => Ok(ok_redirect()),
-        Err(err) => Ok(err_redirect(&portuguese_error_message(&err))),
+        Ok(()) => ok_redirect(),
+        Err(err) => err_redirect(&portuguese_error_message(&err)),
       }
     }
     "enable_2fa" => match service::enable_two_factor(pool, &su.user).await {
-      Ok(_) => Ok(see_other(
+      Ok(_) => toast_redirect(
+        cx,
         href!(page)
           .query([("tab", "security"), ("setup", "1")])
           .resolve(cx),
-      )),
-      Err(err) => Ok(err_redirect(&portuguese_error_message(&err))),
+      ),
+      Err(err) => err_redirect(&portuguese_error_message(&err)),
     },
     "confirm_2fa" => {
       let code = body.code.as_deref().unwrap_or("");
       match service::confirm_enable_two_factor(pool, &su.user, code).await {
-        Ok(()) => Ok(ok_redirect()),
-        Err(err) => Ok(see_other(
-          href!(page)
-            .query([
-              ("tab", "security"),
-              ("setup", "1"),
-              ("error", portuguese_error_message(&err).as_str()),
-            ])
-            .resolve(cx),
-        )),
+        Ok(()) => ok_redirect(),
+        Err(err) => {
+          set_toast(cx, Toast::error(portuguese_error_message(&err)));
+          toast_redirect(
+            cx,
+            href!(page)
+              .query([("tab", "security"), ("setup", "1")])
+              .resolve(cx),
+          )
+        }
       }
     }
     "disable_2fa" => {
       let password = body.password.as_deref();
       match service::disable_two_factor(pool, &su.user, password, None).await {
-        Ok(()) => Ok(ok_redirect()),
-        Err(err) => Ok(err_redirect(&portuguese_error_message(&err))),
+        Ok(()) => ok_redirect(),
+        Err(err) => err_redirect(&portuguese_error_message(&err)),
       }
     }
     "link_google" => {
@@ -953,8 +1303,8 @@ pub async fn settings_post(
       )
       .await
       {
-        Ok(url) => Ok(see_other(url)),
-        Err(err) => Ok(err_redirect(&portuguese_error_message(&err))),
+        Ok(url) => toast_redirect(cx, url),
+        Err(err) => err_redirect(&portuguese_error_message(&err)),
       }
     }
     "unlink" => {
@@ -968,19 +1318,17 @@ pub async fn settings_post(
       )
       .await
       {
-        Ok(()) => Ok(ok_redirect()),
-        Err(err) => Ok(err_redirect(&portuguese_error_message(&err))),
+        Ok(()) => ok_redirect(),
+        Err(err) => err_redirect(&portuguese_error_message(&err)),
       }
     }
     "delete_user" => {
       let confirm = body.confirm_email.as_deref().unwrap_or("");
       match service::delete_user_confirmed(cx, pool, &su.user, confirm).await {
-        Ok(()) => Ok(see_other(href!(crate::app::page).resolve(cx))),
-        Err(err) => Ok(err_redirect(&portuguese_error_message(&err))),
+        Ok(()) => toast_redirect(cx, href!(crate::app::page).resolve(cx)),
+        Err(err) => err_redirect(&portuguese_error_message(&err)),
       }
     }
-    _ => Ok(see_other(
-      href!(page).query([("tab", tab.as_str())]).resolve(cx),
-    )),
+    _ => toast_redirect(cx, settings_tab_url(cx, &tab)),
   }
 }

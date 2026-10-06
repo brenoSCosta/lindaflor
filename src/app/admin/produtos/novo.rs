@@ -1,9 +1,11 @@
 use topcoat::{
   Result,
+  context::Cx,
   router::page,
   view::{View, attributes, view},
 };
 
+use crate::app::auth_helpers::require_admin;
 use crate::components::button::{ButtonVariant, button};
 use crate::components::card::{card, card_content};
 use crate::components::checkbox::checkbox;
@@ -14,7 +16,8 @@ use crate::components::select::select;
 use crate::components::textarea::textarea;
 
 #[page]
-pub async fn page() -> Result<impl View> {
+pub async fn page(cx: &Cx) -> Result<impl View> {
+  let _actor = require_admin(cx).await?;
   Ok(view! {
       container(
           <h1 class="text-2xl font-semibold tracking-tight">"Novo produto"</h1>

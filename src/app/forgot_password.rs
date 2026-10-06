@@ -8,6 +8,7 @@ use topcoat::{
     error::{SeeOther, see_other},
     href, page, route,
   },
+  runtime::{expr, signal},
   view::{View, view},
 };
 
@@ -19,8 +20,8 @@ use crate::components::card::{
   card, card_content, card_description, card_footer, card_header, card_title,
 };
 use crate::components::container::{ContainerVariant, container};
+use crate::components::field::{field, field_error, field_label};
 use crate::components::input::input;
-use crate::components::label::label;
 use topcoat::view::attributes;
 
 #[derive(Deserialize)]
@@ -29,7 +30,30 @@ pub struct ForgotInput {
 }
 
 #[page(GET "/forgot-password")]
-pub async fn page() -> Result<impl View> {
+pub async fn page(cx: &Cx) -> Result<impl View> {
+  let email = signal(cx, String::new);
+  let email_touched = signal(cx, || false);
+  let email_error = expr!({
+    if !email_touched.get() {
+      "".to_owned()
+    } else if email.get().trim().is_empty() {
+      "Informe o e-mail.".to_owned()
+    } else if !email.get().contains("@") {
+      "E-mail inválido.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+  let submit_blocked = expr!({
+    if email.get().trim().is_empty() {
+      true
+    } else if !email.get().contains("@") {
+      true
+    } else {
+      false
+    }
+  });
+
   Ok(view! {
       container(
           variant: ContainerVariant::Centered,
@@ -45,13 +69,36 @@ pub async fn page() -> Result<impl View> {
                       )
                   )
                   card_content(
-                      <form method="post" action=(href!(forgot_post)) class="flex flex-col gap-4">
-                          <div class="space-y-2">
-                              label(attrs: attributes! { for="email" }, "E-mail")
-                              input(attrs: attributes! { type="email" name="email" id="email" required="" })
-                          </div>
+                      <form
+                          method="post"
+                              action=(href!(forgot_post))
+                              class="flex flex-col gap-4"
+                              novalidate=""
+                          >
+                          field(
+                              attrs: attributes! {
+                                  :data-invalid=$( (!email_error.is_empty()).then_some("true") )
+                              },
+                              field_label(attrs: attributes! { for="email" }, "E-mail")
+                              input(
+                                  value: email,
+                                  touched: email_touched.clone(),
+                                  error: email_error.clone(),
+                                  attrs: attributes! {
+                                      id="email"
+                                      name="email"
+                                      type="email"
+                                      autocomplete="email"
+                                      aria-describedby="email-error"
+                                  }
+                              )
+                              field_error(
+                                  message: email_error,
+                                  attrs: attributes! { id="email-error" }
+                              )
+                          )
                           button(
-                              variant: ButtonVariant::Primary,
+                              blocked: submit_blocked,
                               attrs: attributes! { type="submit" },
                               "Enviar link"
                           )

@@ -10,9 +10,11 @@ use topcoat::{
   Result,
   context::Cx,
   context::app_context,
-  router::{href, page},
+  router::{Body, Next, href, layer, page, response::Response},
   view::{View, view},
 };
+
+use crate::app::auth_helpers::require_admin;
 
 use crate::components::card::{card, card_content, card_header, card_title};
 use crate::components::container::container;
@@ -20,8 +22,20 @@ use crate::components::table::{
   table, table_body, table_cell, table_head, table_header, table_row,
 };
 
+/// Defense-in-depth guard for `/admin` and below. Anonymous users go to
+/// `/login`, non-admins to `/dashboard` (see `require_admin`).
+///
+/// Shard/procedure endpoints bypass page/layout guards, so handlers must
+/// still call `require_admin` explicitly.
+#[layer]
+async fn admin_guard(cx: &Cx, body: Body, next: Next<'_>) -> Result<Response> {
+  require_admin(cx).await?;
+  next.run(cx, body).await
+}
+
 #[page]
 pub async fn page(cx: &Cx) -> Result<impl View> {
+  let _actor = require_admin(cx).await?;
   let pool = app_context::<PgPool>(cx);
 
   let total_products: i64 =

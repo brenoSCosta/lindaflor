@@ -7,6 +7,7 @@ use topcoat::{
   view::{View, ViewExt, attributes, view},
 };
 
+use crate::app::auth_helpers::require_admin;
 use crate::components::button::{ButtonVariant, button};
 use crate::components::card::{card, card_content};
 use crate::components::checkbox::checkbox;
@@ -20,6 +21,7 @@ path_param!(pub(crate) id: String, error = bad_request);
 
 #[page]
 pub async fn page(cx: &Cx) -> Result<impl View> {
+  let _actor = require_admin(cx).await?;
   let pool = app_context::<PgPool>(cx);
   let id = path_param::<Id>(cx)?;
 

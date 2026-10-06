@@ -270,8 +270,10 @@
   window.addEventListener("resize", layout);
 
   document.addEventListener("submit", function (e) {
+    if (e.defaultPrevented) return;
     var form = e.target;
     if (!form || !form.getAttribute || form.getAttribute("data-toast-promise") === null) return;
+    if (form.querySelector('[aria-invalid="true"]')) return;
     e.preventDefault();
     if (form.getAttribute("data-toast-pending") === "true") return;
     form.setAttribute("data-toast-pending", "true");

@@ -1,5 +1,6 @@
 use topcoat::{
   Result,
+  runtime::Expr,
   view::{Attributes, Child, Class, StaticClass, View, class, component, view},
 };
 
@@ -85,7 +86,8 @@ const BASE: StaticClass = class!(
   "inline-flex shrink-0 items-center justify-center border \
      text-sm font-medium whitespace-nowrap transition-colors outline-none select-none \
      focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 \
-     focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
+     focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 \
+     aria-disabled:opacity-50",
 );
 
 /// Builds the full class list for a button of the given `variant` and `size`.
@@ -114,6 +116,10 @@ pub fn button_variants(
 /// `attrs` are forwarded to the `<button>`, with extra classes added to its classes.
 /// Use [`button_variants`] to apply the same styling to another element.
 ///
+/// `blocked` signals an invalid state through `aria-disabled` without setting
+/// `disabled`, so the form still posts without JS and the server stays the source
+/// of truth for validation.
+///
 /// ```ignore
 /// view! {
 ///     button(
@@ -127,6 +133,10 @@ pub fn button_variants(
 pub async fn button(
   #[default] variant: ButtonVariant,
   #[default] size: ButtonSize,
+  /// Invalid state. Dims the button but keeps it submittable.
+  #[into]
+  #[default(false.into())]
+  blocked: Expr<bool>,
   #[default] mut attrs: Attributes,
   #[default] child: Child<'_>,
 ) -> Result<impl View> {
@@ -139,6 +149,7 @@ pub async fn button(
               attrs.remove("class"),
           ))
           (attrs)
+          :aria-disabled=$(if blocked { "true" } else { "false" })
       >
           (child)
       </button>

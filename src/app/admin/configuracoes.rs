@@ -7,6 +7,7 @@ use topcoat::{
   view::{View, attributes, view},
 };
 
+use crate::app::auth_helpers::require_admin;
 use crate::components::button::{ButtonVariant, button};
 use crate::components::card::{card, card_content};
 use crate::components::container::container;
@@ -17,6 +18,7 @@ use crate::components::textarea::textarea;
 
 #[page]
 pub async fn page(cx: &Cx) -> Result<impl View> {
+  let _actor = require_admin(cx).await?;
   let pool = app_context::<PgPool>(cx);
 
   let _settings = sqlx::query!(

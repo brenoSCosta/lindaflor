@@ -1,5 +1,6 @@
 use topcoat::{
   Result,
+  runtime::{Event, Expr, Signal},
   view::{Attributes, StaticClass, View, class, component, view},
 };
 
@@ -20,12 +21,43 @@ const INPUT: StaticClass = class!(
 /// the input's classes. It fills its container by default. Set `aria-invalid="true"` to
 /// show the error border and focus ring.
 ///
+/// Bind `value` to sync the input with a string signal, `touched` to mark the field
+/// visited on blur, and `error` to drive `aria-invalid` from a live error message.
+/// Omit them for an uncontrolled input.
+///
 /// ```ignore
 /// view! {
 ///     input(attrs: attributes! { type="email" placeholder="you@example.com" })
 /// }
 /// ```
 #[component]
-pub async fn input(#[default] mut attrs: Attributes) -> Result<impl View> {
-  Ok(view! { <input class=(class!(INPUT, attrs.remove("class"))) (attrs)> })
+pub async fn input(
+  /// Two-way binding for the input's value.
+  #[into]
+  #[default]
+  value: Option<Signal<String>>,
+  /// Marked `true` on blur. Combine with `error` for touched-only messages.
+  #[into]
+  #[default]
+  touched: Option<Signal<bool>>,
+  /// Live error message. A non-empty message sets `aria-invalid="true"`.
+  #[into]
+  #[default(String::new().into())]
+  error: Expr<String>,
+  #[default] mut attrs: Attributes,
+) -> Result<impl View> {
+  Ok(view! {
+      <input
+          class=(class!(INPUT, attrs.remove("class")))
+          (attrs)
+          if let Some(v) = value {
+              :value=$(v.get())
+              @input=$(|e: Event| v.set(e.target.value))
+          }
+          if let Some(t) = touched {
+              @blur=$(|_e: Event| t.set(true))
+          }
+          :aria-invalid=$(if error.is_empty() { "false" } else { "true" })
+      >
+  })
 }

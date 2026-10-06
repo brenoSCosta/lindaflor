@@ -25,7 +25,7 @@ use serde::Deserialize;
 use sqlx::PgPool;
 use topcoat::{
   Result,
-  asset::RouterBuilderAssetExt,
+  asset::{Asset, RouterBuilderAssetExt, asset},
   context::Cx,
   context::app_context,
   cookie::RouterBuilderCookieExt,
@@ -53,6 +53,9 @@ use crate::theme::{THEME_INIT_SCRIPT, THEME_TOGGLE_SCRIPT, read_theme};
 
 use self::store::product_card::product_card;
 use self::store::queries::list_products;
+
+/// Client-side reveal + `#sobre` landing behavior (see `assets/sobre.js`).
+const SOBRE_SCRIPT: Asset = asset!("assets/sobre.js");
 
 pub fn router(
   pool: PgPool,
@@ -207,6 +210,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let all_products = list_products(pool, None, None, false, true, None).await?;
 
   Ok(view! {
+      <script src=(SOBRE_SCRIPT) defer=""></script>
       <section class="relative min-h-[85vh] overflow-hidden">
           <img
               src="https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=2000&q=80"
@@ -292,15 +296,15 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
           </div>
       </section>
 
-      <section id="sobre" class="mx-auto grid max-w-7xl items-center gap-10 px-4 py-24 md:grid-cols-2 md:px-8">
-          <div class="overflow-hidden">
+      <section id="sobre" data-reveal="" class="mx-auto grid max-w-7xl scroll-mt-28 items-center gap-10 px-4 py-24 md:grid-cols-2 md:px-8">
+          <div class="overflow-hidden rounded-2xl">
               <img
                   src="https://images.unsplash.com/photo-1544551763-46a013bb70d5?auto=format&fit=crop&w=1400&q=80"
                   alt="Praia em Aracaju"
                   class="aspect-[4/5] w-full object-cover"
               >
           </div>
-          <div class="space-y-6">
+          <div class="space-y-6" data-reveal="" style="transition-delay:120ms">
               <p class="text-[10px] tracking-widest text-primary uppercase">"Nossa história"</p>
               <h2 class="font-serif text-4xl leading-tight text-foreground md:text-5xl">
                   "Moda praia feita com carinho em Aracaju"

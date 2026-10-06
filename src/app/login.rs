@@ -6,19 +6,21 @@ use topcoat::{
   router::{
     content::Form, href, page, query_params, response::Response, route,
   },
+  runtime::{expr, signal},
   view::{View, view},
 };
 
 use crate::auth::service::{
-  self, SignInOutcome, portuguese_error_message, set_pending_2fa_cookie,
+  self, MIN_PASSWORD_LEN, SignInOutcome, portuguese_error_message,
+  set_pending_2fa_cookie,
 };
 use crate::components::button::{ButtonVariant, button};
 use crate::components::card::{
   card, card_content, card_description, card_footer, card_header, card_title,
 };
 use crate::components::container::{ContainerVariant, container};
+use crate::components::field::{field, field_error, field_label};
 use crate::components::input::input;
-use crate::components::label::label;
 use crate::components::separator::separator;
 use crate::components::toast::{Toast, set_toast, toast_redirect};
 use topcoat::view::attributes;
@@ -89,6 +91,74 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let invite_id = query.invite_id.clone().unwrap_or_default();
   let next = query.next.clone().unwrap_or_default();
 
+  let min_password_len = MIN_PASSWORD_LEN as f64;
+  let name = signal(cx, String::new);
+  let name_touched = signal(cx, || false);
+  let name_error = expr!({
+    if !name_touched.get() {
+      "".to_owned()
+    } else if name.get().trim().is_empty() {
+      "Informe o nome.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+
+  let email = signal(cx, || default_email.clone());
+  let email_touched = signal(cx, || false);
+  let email_error = expr!({
+    if !email_touched.get() {
+      "".to_owned()
+    } else if email.get().trim().is_empty() {
+      "Informe o e-mail.".to_owned()
+    } else if !email.get().contains("@") {
+      "E-mail inválido.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+
+  let password = signal(cx, String::new);
+  let password_touched = signal(cx, || false);
+  let password_error = expr!({
+    if !password_touched.get() {
+      "".to_owned()
+    } else if password.get().is_empty() {
+      "Informe a senha.".to_owned()
+    } else if password.get().len() < min_password_len {
+      "A senha deve ter pelo menos 8 caracteres.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+  let submit_blocked = expr!({
+    if is_signup {
+      if name.get().trim().is_empty() {
+        true
+      } else if email.get().trim().is_empty() {
+        true
+      } else if !email.get().contains("@") {
+        true
+      } else if password.get().is_empty() {
+        true
+      } else if password.get().len() < min_password_len {
+        true
+      } else {
+        false
+      }
+    } else if email.get().trim().is_empty() {
+      true
+    } else if !email.get().contains("@") {
+      true
+    } else if password.get().is_empty() {
+      true
+    } else if password.get().len() < min_password_len {
+      true
+    } else {
+      false
+    }
+  });
+
   Ok(view! {
       container(
           variant: ContainerVariant::Centered,
@@ -99,12 +169,13 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                   )
                   card_content(
                       <form
-                          method="post"
-                          action=(href!(login_post))
-                          class="flex flex-col gap-4"
-                          data-toast-promise=""
-                          data-toast-loading=(loading_label)
-                      >
+                              method="post"
+                              action=(href!(login_post))
+                              class="flex flex-col gap-4"
+                              novalidate=""
+                              data-toast-promise=""
+                              data-toast-loading=(loading_label)
+                          >
                           <input type="hidden" name="mode" value=(mode_value)>
                           if !invite_id.is_empty() {
                               <input type="hidden" name="invite_id" value=(invite_id.clone())>
@@ -113,19 +184,73 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                               <input type="hidden" name="next" value=(next.clone())>
                           }
                           if is_signup {
-                              <div class="space-y-2">
-                                  label(attrs: attributes! { for="name" }, "Nome")
-                                  input(attrs: attributes! { type="text" name="name" id="name" required="" })
-                              </div>
+                              field(
+                                  attrs: attributes! {
+                                      :data-invalid=$( (!name_error.is_empty()).then_some("true") )
+                                  },
+                                  field_label(attrs: attributes! { for="name" }, "Nome")
+                                  input(
+                                      value: name,
+                                      touched: name_touched.clone(),
+                                      error: name_error.clone(),
+                                      attrs: attributes! {
+                                          id="name"
+                                          name="name"
+                                          type="text"
+                                          autocomplete="name"
+                                          aria-describedby="name-error"
+                                      }
+                                  )
+                                  field_error(
+                                      message: name_error,
+                                      attrs: attributes! { id="name-error" }
+                                  )
+                              )
                           }
-                          <div class="space-y-2">
-                              label(attrs: attributes! { for="email" }, "E-mail")
-                              input(attrs: attributes! { type="email" name="email" id="email" value=(default_email) required="" })
-                          </div>
-                          <div class="space-y-2">
-                              label(attrs: attributes! { for="password" }, "Senha")
-                              input(attrs: attributes! { type="password" name="password" id="password" required="" })
-                          </div>
+                          field(
+                              attrs: attributes! {
+                                  :data-invalid=$( (!email_error.is_empty()).then_some("true") )
+                              },
+                              field_label(attrs: attributes! { for="email" }, "E-mail")
+                              input(
+                                  value: email,
+                                  touched: email_touched.clone(),
+                                  error: email_error.clone(),
+                                  attrs: attributes! {
+                                      id="email"
+                                      name="email"
+                                      type="email"
+                                      autocomplete="email"
+                                      aria-describedby="email-error"
+                                  }
+                              )
+                              field_error(
+                                  message: email_error,
+                                  attrs: attributes! { id="email-error" }
+                              )
+                          )
+                          field(
+                              attrs: attributes! {
+                                  :data-invalid=$( (!password_error.is_empty()).then_some("true") )
+                              },
+                              field_label(attrs: attributes! { for="password" }, "Senha")
+                              input(
+                                  value: password,
+                                  touched: password_touched.clone(),
+                                  error: password_error.clone(),
+                                  attrs: attributes! {
+                                      id="password"
+                                      name="password"
+                                      type="password"
+                                      autocomplete="current-password"
+                                      aria-describedby="password-error"
+                                  }
+                              )
+                              field_error(
+                                  message: password_error,
+                                  attrs: attributes! { id="password-error" }
+                              )
+                          )
                           if !is_signup {
                               <div class="text-right">
                                   <a href=(href!(crate::app::forgot_password::page)) class="text-sm text-primary">
@@ -134,7 +259,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                               </div>
                           }
                           button(
-                              variant: ButtonVariant::Primary,
+                              blocked: submit_blocked,
                               attrs: attributes! { type="submit" },
                               (submit_label)
                           )
@@ -154,7 +279,11 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                               separator(attrs: attributes! { class="flex-1" })
                           </div>
                           <div class="flex w-full flex-col gap-2">
-                              <form method="post" action=(href!(login_google)) class="w-full">
+                              <form
+                                  method="post"
+                                  action=(href!(login_google))
+                                  class="w-full"
+                              >
                                   <input type="hidden" name="callback_url" value=(safe_next(cx, query.invite_id.as_deref(), query.next.as_deref()))>
                                   button(
                                       variant: ButtonVariant::Outline,
