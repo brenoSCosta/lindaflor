@@ -93,6 +93,31 @@ fn normalize_tab(raw: &str) -> String {
   }
 }
 
+/// Build a `data:image/svg+xml` URI for a TOTP `otpauth://` URI so the
+/// settings page can show a scannable QR code with a plain `<img>`.
+/// Returns `None` when the payload cannot be encoded as a QR code.
+fn totp_qr_image_uri(totp_uri: &str) -> Option<String> {
+  use qrcode::{QrCode, render::svg};
+  let code = QrCode::new(totp_uri).ok()?;
+  let svg_xml: String =
+    code.render::<svg::Color>().min_dimensions(192, 192).build();
+  let mut uri = String::from("data:image/svg+xml,");
+  // Percent-encode characters that cannot appear in a double-quoted
+  // HTML attribute / CSS url(), mirroring `checkmark_style` in
+  // `components/select.rs` plus `<`/`>` for `src` attributes.
+  for c in svg_xml.chars() {
+    match c {
+      '%' => uri.push_str("%25"),
+      '"' => uri.push_str("%22"),
+      '#' => uri.push_str("%23"),
+      '<' => uri.push_str("%3C"),
+      '>' => uri.push_str("%3E"),
+      _ => uri.push(c),
+    }
+  }
+  Some(uri)
+}
+
 #[page(GET "/settings")]
 pub async fn page(cx: &Cx) -> Result<impl View> {
   let su = require_user(cx).await?;
@@ -194,7 +219,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
               )
               tabs_content(
                   if saved {
-                      <div class="mt-6 rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground shadow-sm">
+                      <div class="rounded-lg border border-border bg-background px-4 py-3 text-sm text-foreground shadow-sm">
                           "Alterações salvas com sucesso."
                       </div>
                   }
@@ -520,12 +545,12 @@ async fn sessions_tab(sessions: Vec<ListedSession>) -> Result<impl View> {
   })
 }
 
-// TODO: QR Code scanner
 #[component]
 async fn security_tab(
   two_factor_enabled: bool,
   pending: Option<(String, String)>,
 ) -> Result<impl View> {
+  let qr_uri = pending.as_ref().and_then(|(_, uri)| totp_qr_image_uri(uri));
   Ok(view! {
       card(
           card_header(
@@ -540,8 +565,18 @@ async fn security_tab(
                       <p class="text-sm text-muted-foreground">
                           "Escaneie o código no app autenticador ou digite o segredo manualmente, depois confirme com um código de 6 dígitos."
                       </p>
+                      if let Some(uri) = qr_uri {
+                          <div class="flex flex-col items-center gap-2">
+                              <div class="rounded-lg border border-border bg-white p-3">
+                                  <img src=(uri) alt="QR code para aplicativo autenticador" width="192" height="192" class="size-48">
+                              </div>
+                          </div>
+                      }
                       <p class="break-all font-mono text-xs">(secret.as_str())</p>
-                      <p class="break-all text-xs text-muted-foreground">(totp_uri.as_str())</p>
+                      <details class="text-xs text-muted-foreground">
+                          <summary class="cursor-pointer">"Detalhes para configuração manual"</summary>
+                          <p class="mt-1 break-all">(totp_uri.as_str())</p>
+                      </details>
                       <form method="post" action=(href!(settings_post).query([("tab", "security")])) class="flex flex-col gap-4">
                           <input type="hidden" name="action" value="confirm_2fa">
                           <div class="space-y-2">

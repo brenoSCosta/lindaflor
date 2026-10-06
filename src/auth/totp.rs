@@ -199,7 +199,9 @@ mod tests {
     assert!(consume_backup_code(&tampered, "ABCD-1234").is_none());
 
     // Malformed entries are skipped.
-    assert!(consume_backup_code("not-valid, ,no-dollar", "ABCD-1234").is_none());
+    assert!(
+      consume_backup_code("not-valid, ,no-dollar", "ABCD-1234").is_none()
+    );
     assert!(consume_backup_code("", "ABCD-1234").is_none());
   }
 }

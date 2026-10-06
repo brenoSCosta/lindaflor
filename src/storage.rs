@@ -170,8 +170,11 @@ impl S3ObjectStore {
     if !is_us_east_1 {
       req = req.header(reqwest::header::CONTENT_TYPE, "application/xml");
     }
-    let response =
-      req.body(body).send().await.map_err(StorageError::from_aws)?;
+    let response = req
+      .body(body)
+      .send()
+      .await
+      .map_err(StorageError::from_aws)?;
     if response.status().is_success() {
       Ok(())
     } else {
@@ -301,7 +304,11 @@ fn percent_encode_segment(segment: &str) -> String {
 /// Encode an object key for a URL path: each `/`-separated segment is
 /// encoded and `/` is preserved as the separator.
 fn encode_path(key: &str) -> String {
-  key.split('/').map(percent_encode_segment).collect::<Vec<_>>().join("/")
+  key
+    .split('/')
+    .map(percent_encode_segment)
+    .collect::<Vec<_>>()
+    .join("/")
 }
 
 /// Encode a value for a SigV4 query string: same rules as path segments
@@ -326,7 +333,11 @@ fn signed_host(endpoint: &str) -> String {
     // Best-effort fallback for a non-URL endpoint: strip the scheme and
     // take the authority component.
     let without_scheme = endpoint.split("://").last().unwrap_or(endpoint);
-    without_scheme.split('/').next().unwrap_or(without_scheme).to_string()
+    without_scheme
+      .split('/')
+      .next()
+      .unwrap_or(without_scheme)
+      .to_string()
   }
 }
 
@@ -392,7 +403,9 @@ fn status_error_with_body(
   body: &str,
 ) -> StorageError {
   let snippet: String = body.chars().take(500).collect();
-  StorageError::Other(format!("s3 request failed: status {status} body {snippet}"))
+  StorageError::Other(format!(
+    "s3 request failed: status {status} body {snippet}"
+  ))
 }
 
 type StoredObject = (String, Vec<u8>);
@@ -547,10 +560,7 @@ mod tests {
 
   #[test]
   fn s3_encode_unreserved_passthrough() {
-    assert_eq!(
-      percent_encode_segment("abcXYZ019-_.~"),
-      "abcXYZ019-_.~"
-    );
+    assert_eq!(percent_encode_segment("abcXYZ019-_.~"), "abcXYZ019-_.~");
     assert_eq!(encode_path("abcXYZ019-_.~"), "abcXYZ019-_.~");
     assert_eq!(encode_query_value("abcXYZ019-_.~"), "abcXYZ019-_.~");
   }
@@ -584,7 +594,9 @@ mod tests {
     assert_eq!(first, second);
     assert_eq!(first.len(), 64);
     assert!(
-      first.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
+      first
+        .chars()
+        .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()),
       "signature must be 64-char lowercase hex: {first}"
     );
     // A different secret must change the signature.
@@ -596,10 +608,7 @@ mod tests {
   #[test]
   fn s3_signed_host_includes_non_default_port() {
     assert_eq!(signed_host("http://localhost:9000"), "localhost:9000");
-    assert_eq!(
-      signed_host("http://localhost:9000/"),
-      "localhost:9000"
-    );
+    assert_eq!(signed_host("http://localhost:9000/"), "localhost:9000");
     assert_eq!(signed_host("https://s3.amazonaws.com"), "s3.amazonaws.com");
     // Default ports are omitted (Url normalizes them away).
     assert_eq!(signed_host("http://example.com:80"), "example.com");
@@ -685,8 +694,13 @@ mod tests {
     let access_key_id = std::env::var("S3_ACCESS_KEY_ID").ok();
     let secret_access_key = std::env::var("S3_SECRET_ACCESS_KEY").ok();
     let bucket = std::env::var("S3_BUCKET").ok();
-    let (Some(endpoint), Some(region), Some(access_key_id), Some(secret), Some(bucket)) =
-      (endpoint, region, access_key_id, secret_access_key, bucket)
+    let (
+      Some(endpoint),
+      Some(region),
+      Some(access_key_id),
+      Some(secret),
+      Some(bucket),
+    ) = (endpoint, region, access_key_id, secret_access_key, bucket)
     else {
       return;
     };
@@ -699,8 +713,7 @@ mod tests {
     };
     let store = ObjectStore::s3(&config);
     store.ensure_bucket().await.unwrap();
-    let key =
-      format!("avatars/_smoke/{}/test.bin", uuid::Uuid::now_v7());
+    let key = format!("avatars/_smoke/{}/test.bin", uuid::Uuid::now_v7());
     store
       .put(&key, b"smoke".to_vec(), "application/octet-stream")
       .await

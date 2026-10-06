@@ -87,7 +87,7 @@ async fn stock_directory(cx: &Cx, q: String) -> Result<impl View> {
               :value=$(q.get())
               @input=$(|e: Event| { q.set(e.target.value); })
           })
-      
+
       <div class="flex flex-col gap-6">
           card(
               card_header(card_title("Saldo por Depósito"))

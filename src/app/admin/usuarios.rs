@@ -375,7 +375,7 @@ async fn user_directory(
   };
 
   Ok(view! {
-      
+
           input(attrs: attributes! {
               id="user-search"
               type="search"
@@ -387,7 +387,7 @@ async fn user_directory(
                   current_page.set(1i64);
               })
           })
-      
+
 
       if is_empty {
           <p class="text-sm text-muted-foreground">"Nenhum usuário encontrado."</p>

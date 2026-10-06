@@ -83,7 +83,8 @@ pub fn render_whatsapp_template(
 
 pub fn whatsapp_link(number: &str, text: &str) -> String {
   let mut url = reqwest::Url::parse("https://wa.me/").expect("wa.me base URL");
-  url.path_segments_mut()
+  url
+    .path_segments_mut()
     .expect("wa.me can take a path")
     .pop_if_empty()
     .push(number);

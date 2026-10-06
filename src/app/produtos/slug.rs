@@ -11,7 +11,8 @@ use topcoat::{
 use crate::app::store::cart::{CartItem, add_to_cart};
 use crate::app::store::queries::{
   DEFAULT_WHATSAPP_NUMBER, category_label, format_price, get_product_by_slug,
-  get_store_settings, list_products,   render_whatsapp_template, size_label, whatsapp_link,
+  get_store_settings, list_products, render_whatsapp_template, size_label,
+  whatsapp_link,
 };
 use crate::components::accordion::{
   accordion, accordion_content, accordion_item, accordion_trigger,

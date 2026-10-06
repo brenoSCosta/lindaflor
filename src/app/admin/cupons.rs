@@ -390,7 +390,6 @@ async fn coupon_user_directory(
   let total = list.total;
 
   Ok(view! {
-      <div class="mb-4">
           input(attrs: attributes! {
               id="coupon-user-search"
               type="search"
@@ -402,7 +401,6 @@ async fn coupon_user_directory(
           <p class="mt-1 text-xs text-muted-foreground">
               "A busca redefine a seleção. Selecione e atribua em seguida. "(total)" usuário(s) encontrado(s)."
           </p>
-      </div>
 
       if is_empty {
           <p class="text-sm text-muted-foreground">"Nenhum usuário encontrado."</p>
@@ -475,7 +473,6 @@ async fn coupon_directory(cx: &Cx, q: String) -> Result<impl View> {
   let is_empty = coupons.is_empty();
 
   Ok(view! {
-      <div class="mb-4 max-w-xl">
           input(attrs: attributes! {
               id="coupon-search"
               type="search"
@@ -484,7 +481,6 @@ async fn coupon_directory(cx: &Cx, q: String) -> Result<impl View> {
               :value=$(q.get())
               @input=$(|e: Event| { q.set(e.target.value); })
           })
-      </div>
 
       if let Some(message) = load_error {
           <div class="mb-6">
@@ -645,7 +641,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
               </div>
           }
 
-          <div class="mb-8">
               card(
                   card_header(card_title("Novo cupom"))
                   card_content(
@@ -756,12 +751,11 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                       </form>
                   )
               )
-          </div>
 
           coupon_directory(q: q.clone())
 
           if show_assign {
-              
+
                   card(
                       card_header(card_title((format!("Atribuir {selected_code}"))))
                       card_content(
@@ -809,7 +803,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                           </form>
                       )
                   )
-              
+
           }
       )
   })

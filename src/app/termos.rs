@@ -42,7 +42,7 @@ pub async fn page() -> Result<impl View> {
                   </p>
               )
           )
-    
+
               card(
                   card_header(card_title("2. Uso do Site"))
                   card_content(
@@ -51,8 +51,8 @@ pub async fn page() -> Result<impl View> {
                       </p>
                   )
               )
-    
-    
+
+
               card(
                   card_header(card_title("3. Produtos e Preços"))
                   card_content(
@@ -61,8 +61,8 @@ pub async fn page() -> Result<impl View> {
                       </p>
                   )
               )
-    
-    
+
+
               card(
                   card_header(card_title("4. Pagamentos"))
                   card_content(
@@ -71,8 +71,8 @@ pub async fn page() -> Result<impl View> {
                       </p>
                   )
               )
-    
-    
+
+
               card(
                   card_header(card_title("5. Envio e Entrega"))
                   card_content(
@@ -81,8 +81,8 @@ pub async fn page() -> Result<impl View> {
                       </p>
                   )
               )
-    
-    
+
+
               card(
                   card_header(card_title("6. Trocas e Devoluções"))
                   card_content(
@@ -91,8 +91,8 @@ pub async fn page() -> Result<impl View> {
                       </p>
                   )
               )
-    
-    
+
+
               card(
                   card_header(card_title("7. Limitação de Responsabilidade"))
                   card_content(
@@ -101,7 +101,7 @@ pub async fn page() -> Result<impl View> {
                       </p>
                   )
               )
-    
+
       )
   })
 }

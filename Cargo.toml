@@ -26,6 +26,7 @@ hmac = "0.12"
 sha2 = "0.10"
 time = "0.3.55"
 totp-rs = { version = "6", default-features = false, features = ["std", "otpauth", "gen_secret"] }
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls", "form"] }
 
 [build-dependencies]
