@@ -31,7 +31,8 @@ use topcoat::{
   context::app_context,
   cookie::RouterBuilderCookieExt,
   router::{
-    BodyLimit, Router, RouterBuilderDiscoverExt, Slot, StatusCode,
+    BodyLimit, OriginPolicy, Router, RouterBuilderDiscoverExt, Slot,
+    StatusCode,
     content::Form,
     error::{NotFoundError, SeeOther, see_other},
     href, layout, module_router, not_found, page,
@@ -70,6 +71,12 @@ pub fn router(
     .app_context(pool)
     .app_context(valkey)
     .app_context(storage);
+
+  if let Some(origin) = crate::auth::google::app_origin() {
+    builder = builder
+      .base_url(origin.as_str())
+      .origin_policy(OriginPolicy::new().trust_origins([origin]));
+  }
 
   let bundle = topcoat::asset::AssetBundle::load().unwrap_or_else(|err| {
         panic!(

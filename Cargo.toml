@@ -16,7 +16,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenvy = "0.15"
 thiserror = "2"
-uuid = { version = "1", features = ["v7", "serde"] }
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
 rand = "0.8"
 http = "1"
 argon2 = { version = "0.6.0", features = ["alloc", "password-hash", "getrandom"] }

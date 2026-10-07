@@ -7,13 +7,15 @@ use topcoat::{
   router::{content::Form, href, page, path_param, query_params},
   view::{View, ViewExt, attributes, class, view},
 };
+use uuid::Uuid;
 
-use crate::app::store::cart::{CartItem, add_to_cart};
+use crate::app::store::cart::{CartError, add_item, load_or_create_cart};
 use crate::app::store::queries::{
   DEFAULT_WHATSAPP_NUMBER, category_label, format_price, get_product_by_slug,
   get_store_settings, list_products, render_whatsapp_template, size_label,
   whatsapp_link,
 };
+use crate::auth::user::current_user_owned;
 use crate::components::accordion::{
   accordion, accordion_content, accordion_item, accordion_trigger,
 };
@@ -56,40 +58,30 @@ pub async fn page(
   let resolve_summaries = crate::app::admin::produtos::resolve_summary_images;
 
   let mut added_to_cart = false;
+  let mut add_error: Option<String> = None;
   if let Some(Form(input)) = body
     && let Some(variant_id) =
       input.variant_id.as_deref().filter(|v| !v.is_empty())
-    && let Some(mut product) = get_product_by_slug(pool, slug).await?
-    && let Some(variant) = product
-      .variants
-      .iter()
-      .find(|v| v.id.to_string() == variant_id)
-      .cloned()
-    && variant.available > 0
   {
-    resolve_detail(&store, &mut product).await;
-    let image_url = product.images.first().map(|i| i.url.clone());
-    add_to_cart(
-      cx,
-      CartItem {
-        variant_id: variant.id.to_string(),
-        product_id: product.id.to_string(),
-        product_slug: product.slug.clone(),
-        product_name: product.name.clone(),
-        variant_label: format!(
-          "{} · {}",
-          size_label(&variant.size),
-          variant.color
-        ),
-        image_url,
-        unit_price_cents: variant
-          .price_in_cents
-          .unwrap_or(product.price_in_cents),
-        quantity: 1,
-        max_quantity: variant.available,
-      },
-    );
-    added_to_cart = true;
+    let user_id = current_user_owned(cx).await?.map(|session| session.user.id);
+    match Uuid::parse_str(variant_id) {
+      Ok(variant_id) => {
+        let cart = load_or_create_cart(cx, pool, user_id).await?;
+        match add_item(pool, cart.id, variant_id, 1).await {
+          Ok(()) => added_to_cart = true,
+          Err(CartError::InvalidVariant) => {
+            add_error = Some("Esta variação não está disponível.".to_string());
+          }
+          Err(CartError::OutOfStock) => {
+            add_error = Some("Esta peça está esgotada.".to_string());
+          }
+          Err(CartError::Db(error)) => return Err(error.into()),
+        }
+      }
+      Err(_) => {
+        add_error = Some("Variação inválida.".to_string());
+      }
+    }
   }
 
   let product = match get_product_by_slug(pool, slug).await? {
@@ -311,6 +303,9 @@ pub async fn page(
                                 </a>
                                 if added_to_cart {
                                     <p class="text-sm text-primary">"Adicionado ao carrinho!"</p>
+                                }
+                                if let Some(ref message) = add_error {
+                                    <p class="text-sm text-destructive">(message.as_str())</p>
                                 }
                                 if selected_available > 0 {
                                     badge(variant: BadgeVariant::Primary, "Em estoque")

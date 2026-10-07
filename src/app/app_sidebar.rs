@@ -1,7 +1,8 @@
 use crate::auth::user::SessionUser;
+use sqlx::PgPool;
 use topcoat::{
   Result,
-  context::Cx,
+  context::{Cx, app_context},
   cookie::{Cookies, cookies},
   icon::{icon, iconify::iconify_icon},
   router::{
@@ -16,10 +17,12 @@ use topcoat::{
 };
 
 use crate::app::auth_helpers::optional_user;
+use crate::app::store::cart::cart_item_count;
 use crate::app::utils::{object_store, resolve_storage_url};
 use crate::components::avatar::{
   AvatarSize, avatar, avatar_fallback, avatar_image,
 };
+use crate::components::badge::{BadgeVariant, badge};
 use crate::components::dropdown_menu::{
   dropdown_menu, dropdown_menu_label, dropdown_menu_separator,
   dropdown_menu_trigger,
@@ -397,6 +400,8 @@ pub async fn storefront_shell(
   #[default] child: Child<'_>,
 ) -> Result<impl View> {
   let logged_in = optional_user(cx).await?.is_some();
+  let pool = app_context::<PgPool>(cx);
+  let cart_count = cart_item_count(cx, pool).await?;
 
   Ok(view! {
       <div class="min-h-screen bg-background text-foreground">
@@ -425,8 +430,11 @@ pub async fn storefront_shell(
                               "Entrar"
                           </a>
                       }
-                      <a href=(href!(crate::app::carrinho::page)) class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">
+                      <a href=(href!(crate::app::carrinho::page)) class="inline-flex items-center gap-1.5 text-[10px] tracking-wider uppercase transition-colors hover:text-primary">
                           "Carrinho"
+                          if cart_count > 0 {
+                              badge(variant: BadgeVariant::Secondary, (cart_count))
+                          }
                       </a>
                   </div>
               </div>

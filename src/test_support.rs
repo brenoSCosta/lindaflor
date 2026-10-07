@@ -11,6 +11,7 @@ mod embedded_postgres;
 
 struct TestDb {
   pool: PgPool,
+  database_url: String,
   /// Kept alive for the process lifetime so the server is not shut down.
   _postgres: embedded_postgres::RunningPostgres,
 }
@@ -42,12 +43,26 @@ pub async fn pool() -> PgPool {
 
     Arc::new(TestDb {
       pool,
+      database_url,
       _postgres: postgres,
     })
   })
   .await
   .pool
   .clone()
+}
+
+/// Pool bound to the current Tokio runtime. Use in `#[tokio::test]` when the
+/// shared [`pool`] connections may have been created on a previous runtime.
+pub async fn fresh_pool() -> PgPool {
+  let _ = pool().await;
+  let url = DB.get().expect("test db").database_url.clone();
+  PgPoolOptions::new()
+    .max_connections(8)
+    .acquire_timeout(Duration::from_secs(30))
+    .connect(&url)
+    .await
+    .expect("connect fresh pool")
 }
 
 #[cfg(test)]

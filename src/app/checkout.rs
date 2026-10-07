@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::auth::user::current_user_owned;
 
+use crate::components::alert::{AlertVariant, alert, alert_title};
 use crate::components::button::{
   ButtonSize, ButtonVariant, button, button_variants,
 };
@@ -25,13 +26,40 @@ use crate::components::select::select;
 use crate::components::separator::separator;
 use crate::components::textarea::textarea;
 
-use crate::app::store::cart::{cart_subtotal_cents, clear_cart, read_cart};
+use crate::app::store::cart::{
+  QuoteError, cart_coupon_code, cart_subtotal_cents, clear_items_in_tx,
+  hydrate_cart, load_or_create_cart, quote_cart_for_checkout,
+};
 use crate::app::store::coupons::{
   CouponReject, ResolvedCoupon, resolve_coupon,
 };
+use crate::app::store::inventory::{
+  ReserveLine, release_expired_reservations_in_tx, reserve_for_order,
+};
 use crate::app::store::queries::format_price;
 
-#[derive(Deserialize)]
+#[derive(Debug)]
+enum CheckoutError {
+  Form(String),
+  Db(sqlx::Error),
+}
+
+impl From<sqlx::Error> for CheckoutError {
+  fn from(error: sqlx::Error) -> Self {
+    Self::Db(error)
+  }
+}
+
+impl std::fmt::Display for CheckoutError {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    match self {
+      Self::Form(message) => write!(f, "{message}"),
+      Self::Db(error) => write!(f, "{error}"),
+    }
+  }
+}
+
+#[derive(Deserialize, Clone)]
 pub struct CheckoutInput {
   guest_email: String,
   name: String,
@@ -64,7 +92,17 @@ pub async fn page(
   body: Option<Form<CheckoutInput>>,
 ) -> Result<impl View> {
   let pool = app_context::<PgPool>(cx);
-  let items = read_cart(cx);
+  let session_user_id: Option<Uuid> =
+    current_user_owned(cx).await?.map(|session| session.user.id);
+  let cart = load_or_create_cart(cx, pool, session_user_id).await?;
+  let mut hydrated = hydrate_cart(pool, cart.id).await?;
+  let store = crate::app::utils::object_store(cx);
+  for item in &mut hydrated.items {
+    item.image_url =
+      crate::app::utils::resolve_storage_url(&store, item.image_url.as_deref())
+        .await;
+  }
+  let items = hydrated.items;
 
   if items.is_empty() {
     return Ok(view! {
@@ -86,11 +124,9 @@ pub async fn page(
   }
 
   let subtotal = cart_subtotal_cents(&items);
-  let session_user_id: Option<Uuid> =
-    current_user_owned(cx).await?.map(|session| session.user.id);
 
-  let mut body = body;
-  let coupon_input = input_coupon(body.as_ref());
+  let stored_coupon = cart_coupon_code(pool, cart.id).await?;
+  let coupon_input = input_coupon(body.as_ref(), stored_coupon.as_deref());
 
   // DB-backed coupon validation. Preview reads through a rolled-back
   // transaction; order creation re-validates inside its own transaction
@@ -120,22 +156,33 @@ pub async fn page(
     .and_then(|posted| posted.0.intent.clone())
     .unwrap_or_default();
 
+  let mut checkout_error: Option<String> = None;
   if coupon_error.is_none()
     && intent == "pay"
-    && let Some(Form(posted)) = body.take()
+    && let Some(Form(posted)) = body.as_ref()
   {
-    let order_id = create_order(pool, &items, posted, session_user_id).await?;
-    clear_cart(cx);
-    return Err(
-      redirect(
-        href!(
-          crate::app::pedido::id::page,
-          crate::app::pedido::id::Id(order_id)
-        )
-        .resolve(cx),
-      )
-      .into(),
-    );
+    if let Err(message) = validate_pay_fields(posted) {
+      checkout_error = Some(message);
+    } else {
+      match create_order(pool, cart.id, posted.clone(), session_user_id).await {
+        Ok(created) => {
+          let token = created.access_token.to_string();
+          return Err(
+            redirect(
+              href!(
+                crate::app::pedido::id::page,
+                crate::app::pedido::id::Id(created.id)
+              )
+              .query([("t", token.as_str())])
+              .resolve(cx),
+            )
+            .into(),
+          );
+        }
+        Err(CheckoutError::Form(message)) => checkout_error = Some(message),
+        Err(CheckoutError::Db(error)) => return Err(error.into()),
+      }
+    }
   }
 
   let zip_digits: String = input_zip_digits(body.as_ref());
@@ -242,6 +289,22 @@ pub async fn page(
       "".to_owned()
     }
   });
+
+  let phone = signal(cx, || phone_init);
+  let phone_touched = signal(cx, || false);
+  let min_whatsapp_len = 10.0;
+  let max_whatsapp_len = 11.0;
+  let phone_error = expr!({
+    if !phone_touched.get() {
+      "".to_owned()
+    } else if phone.get().len() < min_whatsapp_len {
+      "Informe um WhatsApp válido (DDD + número).".to_owned()
+    } else if phone.get().len() > max_whatsapp_len {
+      "Informe um WhatsApp válido (DDD + número).".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
   let pay_blocked = expr!({
     if guest_email.get().trim().is_empty() {
       true
@@ -259,6 +322,10 @@ pub async fn page(
       true
     } else if zip_code.get().trim().is_empty() {
       true
+    } else if phone.get().len() < min_whatsapp_len {
+      true
+    } else if phone.get().len() > max_whatsapp_len {
+      true
     } else {
       false
     }
@@ -268,6 +335,12 @@ pub async fn page(
         container(
             variant: ContainerVariant::Wide,
             <h1 class="text-4xl font-bold tracking-tight @md/page:text-5xl">"Checkout"</h1>
+            if let Some(ref message) = checkout_error {
+                alert(
+                    variant: AlertVariant::Destructive,
+                    alert_title((message.as_str()))
+                )
+            }
 
             <form
                     method="post"
@@ -338,14 +411,27 @@ pub async fn page(
                                 </div>
                                 <div class="@sm/page:col-span-2">
                                     field(
-                                        field_label(attrs: attributes! { for="phone" }, "WhatsApp (opcional)")
-                                        input(attrs: attributes! {
-                                            id="phone"
-                                            name="phone"
-                                            inputMode="tel"
-                                            placeholder="79999816511"
-                                            value=(phone_init)
-                                        })
+                                        attrs: attributes! {
+                                            :data-invalid=$( (!phone_error.is_empty()).then_some("true") )
+                                        },
+                                        field_label(attrs: attributes! { for="phone" }, "WhatsApp")
+                                        input(
+                                            value: phone,
+                                            touched: phone_touched.clone(),
+                                            error: phone_error.clone(),
+                                            attrs: attributes! {
+                                                id="phone"
+                                                name="phone"
+                                                inputMode="tel"
+                                                autocomplete="tel"
+                                                placeholder="79999816511"
+                                                aria-describedby="phone-error"
+                                            }
+                                        )
+                                        field_error(
+                                            message: phone_error,
+                                            attrs: attributes! { id="phone-error" }
+                                        )
                                     )
                                 </div>
                                 <div class="@sm/page:col-span-2">
@@ -532,7 +618,7 @@ pub async fn page(
                                         name="coupon_code"
                                         placeholder="CUPOM10"
                                         class="min-w-0 flex-1"
-                                        value=(input_coupon(body.as_ref()))
+                                        value=(coupon_input.clone())
                                     })
                                     button(
                                         variant: ButtonVariant::Outline,
@@ -578,31 +664,137 @@ pub async fn page(
     }.boxed())
 }
 
-async fn create_order(
-  pool: &PgPool,
-  items: &[crate::app::store::cart::CartItem],
-  form_data: CheckoutInput,
-  user_id: Option<Uuid>,
-) -> Result<Uuid, sqlx::Error> {
-  let order_id = Uuid::now_v7();
+fn phone_digit_count(value: &str) -> usize {
+  value.chars().filter(|c| c.is_ascii_digit()).count()
+}
+
+fn validate_pay_fields(form_data: &CheckoutInput) -> Result<(), String> {
+  if form_data.guest_email.trim().is_empty()
+    || !form_data.guest_email.contains('@')
+  {
+    return Err("Informe um e-mail válido.".to_string());
+  }
+  if form_data.name.trim().is_empty() {
+    return Err("Informe o nome completo.".to_string());
+  }
+  let digits = phone_digit_count(&form_data.phone);
+  if digits < 10 || digits > 11 {
+    return Err("Informe um WhatsApp válido (DDD + número).".to_string());
+  }
+  if form_data.street.trim().is_empty() {
+    return Err("Informe a rua.".to_string());
+  }
+  if form_data.number.trim().is_empty() {
+    return Err("Informe o número.".to_string());
+  }
+  if form_data.neighborhood.trim().is_empty() {
+    return Err("Informe o bairro.".to_string());
+  }
+  if form_data.city.trim().is_empty() {
+    return Err("Informe a cidade.".to_string());
+  }
   let zip_digits: String = form_data
     .zip_code
     .chars()
     .filter(|c| c.is_ascii_digit())
     .collect();
-  let subtotal = cart_subtotal_cents(items);
-  let shipping = calculate_shipping(subtotal, &form_data.state, &zip_digits);
+  if zip_digits.is_empty() {
+    return Err("Informe o CEP.".to_string());
+  }
+  Ok(())
+}
+
+#[derive(Debug)]
+struct CreatedOrder {
+  id: Uuid,
+  access_token: Uuid,
+}
+
+async fn create_order(
+  pool: &PgPool,
+  cart_id: Uuid,
+  form_data: CheckoutInput,
+  user_id: Option<Uuid>,
+) -> Result<CreatedOrder, CheckoutError> {
+  if let Err(message) = validate_pay_fields(&form_data) {
+    return Err(CheckoutError::Form(message));
+  }
+
+  let settings = crate::app::store::queries::get_store_settings(pool).await?;
+  let order_id = Uuid::now_v7();
+  let access_token = Uuid::new_v4();
+  let zip_digits: String = form_data
+    .zip_code
+    .chars()
+    .filter(|c| c.is_ascii_digit())
+    .collect();
 
   let mut tx = pool.begin().await?;
-  let coupon_code = form_data.coupon_code.clone().unwrap_or_default();
-  let resolved = resolve_coupon(&mut tx, &coupon_code, subtotal, user_id, true)
+  let outcome = create_order_in_tx(
+    &mut tx,
+    &settings,
+    order_id,
+    access_token,
+    cart_id,
+    form_data,
+    user_id,
+    &zip_digits,
+  )
+  .await;
+  match outcome {
+    Ok(()) => {
+      tx.commit().await?;
+      Ok(CreatedOrder {
+        id: order_id,
+        access_token,
+      })
+    }
+    Err(error) => {
+      let _ = tx.rollback().await;
+      Err(error)
+    }
+  }
+}
+
+async fn create_order_in_tx(
+  tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+  settings: &crate::app::store::queries::StoreSettings,
+  order_id: Uuid,
+  access_token: Uuid,
+  cart_id: Uuid,
+  form_data: CheckoutInput,
+  user_id: Option<Uuid>,
+  zip_digits: &str,
+) -> Result<(), CheckoutError> {
+  release_expired_reservations_in_tx(tx).await?;
+  let items = quote_cart_for_checkout(tx, cart_id)
+    .await
+    .map_err(|error| match error {
+      QuoteError::Empty => {
+        CheckoutError::Form("Seu carrinho está vazio.".to_string())
+      }
+      QuoteError::Insufficient => CheckoutError::Form(
+        "Estoque insuficiente para concluir o pedido.".to_string(),
+      ),
+      QuoteError::Db(error) => CheckoutError::Db(error),
+    })?;
+  let subtotal = cart_subtotal_cents(&items);
+  let shipping = calculate_shipping(subtotal, &form_data.state, zip_digits);
+
+  let mut coupon_code = form_data.coupon_code.clone().unwrap_or_default();
+  if coupon_code.trim().is_empty() {
+    let stored: Option<String> =
+      sqlx::query_scalar("SELECT coupon_code FROM carts WHERE id = $1")
+        .bind(cart_id)
+        .fetch_one(&mut **tx)
+        .await?;
+    coupon_code = stored.unwrap_or_default();
+  }
+  let resolved = resolve_coupon(tx, &coupon_code, subtotal, user_id, true)
     .await
     .map_err(|outcome| match outcome {
-      // Preview validated the coupon just before submit; landing here
-      // means a concurrent redemption exhausted it inside this
-      // transaction.
-      CouponReject::Db(error) => error,
-      CouponReject::Invalid(message) => sqlx::Error::Protocol(message),
+      CouponReject::Db(error) => CheckoutError::Db(error),
+      CouponReject::Invalid(message) => CheckoutError::Form(message),
     })?;
   let discount = resolved
     .as_ref()
@@ -632,8 +824,8 @@ async fn create_order(
   };
 
   sqlx::query(
-        "INSERT INTO orders (id, user_id, guest_email, status, subtotal_cents, shipping_cents, discount_cents, total_cents, shipping_address, notes, coupon_id)
-         VALUES ($1, $2, $3, 'pending_payment', $4, $5, $6, $7, $8, $9, $10)",
+        "INSERT INTO orders (id, user_id, guest_email, status, subtotal_cents, shipping_cents, discount_cents, total_cents, shipping_address, notes, coupon_id, access_token)
+         VALUES ($1, $2, $3, 'pending_payment', $4, $5, $6, $7, $8, $9, $10, $11)",
     )
     .bind(order_id)
     .bind(user_id)
@@ -645,24 +837,46 @@ async fn create_order(
     .bind(address)
     .bind(notes.as_deref())
     .bind(coupon_id)
-    .execute(&mut *tx)
+    .bind(access_token)
+    .execute(&mut **tx)
     .await?;
 
-  for item in items {
-    sqlx::query!(
+  let mut reserve_lines = Vec::new();
+  for item in &items {
+    let variant_id = Uuid::parse_str(&item.variant_id).map_err(|_| {
+      CheckoutError::Form("Carrinho inválido. Atualize a página.".to_string())
+    })?;
+    sqlx::query(
             "INSERT INTO order_items (id, order_id, variant_id, product_name, variant_label, quantity, unit_price_cents)
              VALUES ($1, $2, $3, $4, $5, $6, $7)",
-            Uuid::now_v7(),
-            order_id,
-            Uuid::parse_str(&item.variant_id).unwrap_or(Uuid::now_v7()),
-            item.product_name,
-            item.variant_label,
-            item.quantity,
-            item.unit_price_cents,
         )
-        .execute(&mut *tx)
+        .bind(Uuid::now_v7())
+        .bind(order_id)
+        .bind(variant_id)
+        .bind(&item.product_name)
+        .bind(&item.variant_label)
+        .bind(item.quantity)
+        .bind(item.unit_price_cents)
+        .execute(&mut **tx)
         .await?;
+    reserve_lines.push(ReserveLine {
+      variant_id,
+      quantity: item.quantity,
+    });
   }
+
+  reserve_for_order(tx, order_id, &reserve_lines)
+    .await
+    .map_err(|error| match error {
+      crate::app::store::inventory::InventoryError::Insufficient => {
+        CheckoutError::Form(
+          "Estoque insuficiente para concluir o pedido.".to_string(),
+        )
+      }
+      crate::app::store::inventory::InventoryError::Db(error) => {
+        CheckoutError::Db(error)
+      }
+    })?;
 
   if let Some(coupon) = resolved.as_ref() {
     sqlx::query(
@@ -673,11 +887,10 @@ async fn create_order(
     .bind(coupon.id)
     .bind(user_id)
     .bind(order_id)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
   }
 
-  let settings = crate::app::store::queries::get_store_settings(pool).await?;
   let pix_code = generate_pix_payload(
     settings.pix_key.as_deref().unwrap_or(""),
     settings.pix_key_type.as_deref().unwrap_or("phone"),
@@ -698,17 +911,15 @@ async fn create_order(
       "discount_cents": discount,
   });
 
-  sqlx::query!(
-    "UPDATE orders SET payment_meta = $1 WHERE id = $2",
-    payment_meta,
-    order_id
-  )
-  .execute(&mut *tx)
-  .await?;
+  sqlx::query("UPDATE orders SET payment_meta = $1 WHERE id = $2")
+    .bind(payment_meta)
+    .bind(order_id)
+    .execute(&mut **tx)
+    .await?;
 
-  tx.commit().await?;
+  clear_items_in_tx(tx, cart_id).await?;
 
-  Ok(order_id)
+  Ok(())
 }
 
 fn calculate_shipping(
@@ -872,16 +1083,25 @@ fn input_notes(body: Option<&Form<CheckoutInput>>) -> String {
   body.map(|b| b.0.notes.clone()).unwrap_or_default()
 }
 
-fn input_coupon(body: Option<&Form<CheckoutInput>>) -> String {
-  body
-    .and_then(|b| b.0.coupon_code.clone())
-    .unwrap_or_default()
+fn input_coupon(
+  body: Option<&Form<CheckoutInput>>,
+  stored: Option<&str>,
+) -> String {
+  if let Some(posted) = body.and_then(|b| b.0.coupon_code.clone())
+    && !posted.trim().is_empty()
+  {
+    return posted;
+  }
+  stored.unwrap_or_default().to_string()
 }
 
 #[cfg(test)]
 mod tests {
   use super::*;
-  use crate::app::store::cart::CartItem;
+  use crate::app::store::cart::set_cart_coupon;
+  use crate::app::store::inventory::{
+    convert_reservation, release_expired_reservations, release_reservation,
+  };
 
   const UNIT_PRICE_CENTS: i32 = 10_000;
   const DISCOUNT_CENTS: i32 = 1_500;
@@ -904,28 +1124,10 @@ mod tests {
     }
   }
 
-  fn cart_line(product_id: Uuid, variant_id: Uuid) -> CartItem {
-    CartItem {
-      variant_id: variant_id.to_string(),
-      product_id: product_id.to_string(),
-      product_slug: format!("peca-{product_id}"),
-      product_name: "Peça teste".to_string(),
-      variant_label: "M / azul".to_string(),
-      image_url: None,
-      unit_price_cents: UNIT_PRICE_CENTS,
-      quantity: 1,
-      max_quantity: 5,
-    }
-  }
-
-  #[tokio::test]
-  async fn create_order_redeems_unique_coupon_once() {
-    let pool = crate::test_support::pool().await;
+  async fn seed_variant(pool: &PgPool, price: i32, stock: i32) -> (Uuid, Uuid) {
     let product_id = Uuid::now_v7();
     let variant_id = Uuid::now_v7();
-    let coupon_id = Uuid::now_v7();
-    let code = format!("Pay{}", Uuid::now_v7().simple());
-    let email = format!("checkout-{}@example.com", Uuid::now_v7().simple());
+    let warehouse_id = Uuid::now_v7();
 
     sqlx::query(
       "INSERT INTO products (id, name, slug, price_in_cents)
@@ -933,8 +1135,8 @@ mod tests {
     )
     .bind(product_id)
     .bind(format!("peca-{product_id}"))
-    .bind(UNIT_PRICE_CENTS)
-    .execute(&pool)
+    .bind(price)
+    .execute(pool)
     .await
     .expect("insert product");
 
@@ -945,9 +1147,65 @@ mod tests {
     .bind(variant_id)
     .bind(product_id)
     .bind(format!("sku-{variant_id}"))
-    .execute(&pool)
+    .execute(pool)
     .await
     .expect("insert variant");
+
+    sqlx::query(
+      "INSERT INTO warehouses (id, code, name, is_default, active)
+       VALUES ($1, $2, 'Principal', true, true)",
+    )
+    .bind(warehouse_id)
+    .bind(format!("wh-{}", warehouse_id.simple()))
+    .execute(pool)
+    .await
+    .expect("insert warehouse");
+
+    sqlx::query(
+      "INSERT INTO inventory (id, variant_id, warehouse_id, quantity, reserved)
+       VALUES ($1, $2, $3, $4, 0)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(variant_id)
+    .bind(warehouse_id)
+    .bind(stock)
+    .execute(pool)
+    .await
+    .expect("insert inventory");
+
+    (product_id, variant_id)
+  }
+
+  async fn seed_cart(pool: &PgPool, variant_id: Uuid, quantity: i32) -> Uuid {
+    let cart_id = Uuid::now_v7();
+    sqlx::query("INSERT INTO carts (id, token) VALUES ($1, $2)")
+      .bind(cart_id)
+      .bind(Uuid::now_v7())
+      .execute(pool)
+      .await
+      .expect("insert cart");
+    sqlx::query(
+      "INSERT INTO cart_items (id, cart_id, variant_id, quantity)
+       VALUES ($1, $2, $3, $4)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(cart_id)
+    .bind(variant_id)
+    .bind(quantity)
+    .execute(pool)
+    .await
+    .expect("insert cart item");
+    cart_id
+  }
+
+  #[tokio::test]
+  async fn create_order_redeems_unique_coupon_once() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (_product_id, variant_id) =
+      seed_variant(&pool, UNIT_PRICE_CENTS, 5).await;
+    let coupon_id = Uuid::now_v7();
+    let code = format!("Pay{}", Uuid::now_v7().simple());
+    let email = format!("checkout-{}@example.com", Uuid::now_v7().simple());
 
     sqlx::query(
       "INSERT INTO coupons (id, code, discount_type, discount_value, usage_type)
@@ -960,7 +1218,7 @@ mod tests {
     .await
     .expect("insert coupon");
 
-    let items = vec![cart_line(product_id, variant_id)];
+    let cart_id = seed_cart(&pool, variant_id, 1).await;
     let subtotal = UNIT_PRICE_CENTS;
     let zip_digits = "49000000";
     let (shipping_cents, _) = calculate_shipping(subtotal, "SE", zip_digits);
@@ -968,12 +1226,13 @@ mod tests {
 
     let order_id = create_order(
       &pool,
-      &items,
+      cart_id,
       checkout_input(&email, &code.to_lowercase()),
       None,
     )
     .await
-    .expect("create order");
+    .expect("create order")
+    .id;
 
     #[derive(sqlx::FromRow)]
     struct SavedOrder {
@@ -1021,9 +1280,10 @@ mod tests {
     .expect("count redemptions");
     assert_eq!(redemptions, 1);
 
+    let second_cart = seed_cart(&pool, variant_id, 1).await;
     let second = create_order(
       &pool,
-      &items,
+      second_cart,
       checkout_input(&email, &code.to_lowercase()),
       None,
     )
@@ -1050,5 +1310,403 @@ mod tests {
     .await
     .expect("count redemptions after retry");
     assert_eq!(redemptions, 1);
+  }
+
+  #[tokio::test]
+  async fn create_order_uses_live_db_price() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (product_id, variant_id) =
+      seed_variant(&pool, UNIT_PRICE_CENTS, 2).await;
+    let cart_id = seed_cart(&pool, variant_id, 1).await;
+    sqlx::query("UPDATE products SET price_in_cents = $2 WHERE id = $1")
+      .bind(product_id)
+      .bind(24_000)
+      .execute(&pool)
+      .await
+      .expect("bump price");
+
+    let email = format!("price-{}@example.com", Uuid::now_v7().simple());
+    let order_id =
+      create_order(&pool, cart_id, checkout_input(&email, ""), None)
+        .await
+        .expect("create order")
+        .id;
+
+    let subtotal: i32 =
+      sqlx::query_scalar("SELECT subtotal_cents FROM orders WHERE id = $1")
+        .bind(order_id)
+        .fetch_one(&pool)
+        .await
+        .expect("subtotal");
+    assert_eq!(subtotal, 24_000);
+
+    let unit: i32 = sqlx::query_scalar(
+      "SELECT unit_price_cents FROM order_items WHERE order_id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .expect("unit price");
+    assert_eq!(unit, 24_000);
+  }
+
+  #[tokio::test]
+  async fn create_order_reserves_inventory() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (_product_id, variant_id) =
+      seed_variant(&pool, UNIT_PRICE_CENTS, 3).await;
+    let cart_id = seed_cart(&pool, variant_id, 2).await;
+    let email = format!("reserve-{}@example.com", Uuid::now_v7().simple());
+    let order_id =
+      create_order(&pool, cart_id, checkout_input(&email, ""), None)
+        .await
+        .expect("create order")
+        .id;
+
+    let reserved: i32 = sqlx::query_scalar(
+      "SELECT reserved FROM inventory WHERE variant_id = $1",
+    )
+    .bind(variant_id)
+    .fetch_one(&pool)
+    .await
+    .expect("reserved");
+    assert_eq!(reserved, 2);
+
+    let expires: Option<time::OffsetDateTime> = sqlx::query_scalar(
+      "SELECT reservation_expires_at FROM orders WHERE id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .expect("expires");
+    assert!(expires.is_some());
+
+    let mut tx = pool.begin().await.expect("tx");
+    convert_reservation(&mut tx, order_id)
+      .await
+      .expect("convert");
+    tx.commit().await.expect("commit");
+
+    let row = sqlx::query_as::<_, (i32, i32)>(
+      "SELECT quantity, reserved FROM inventory WHERE variant_id = $1",
+    )
+    .bind(variant_id)
+    .fetch_one(&pool)
+    .await
+    .expect("inventory after convert");
+    assert_eq!(row, (1, 0));
+  }
+
+  #[tokio::test]
+  async fn last_unit_race_only_one_order_succeeds() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (_product_id, variant_id) =
+      seed_variant(&pool, UNIT_PRICE_CENTS, 1).await;
+    let cart_a = seed_cart(&pool, variant_id, 1).await;
+    let cart_b = seed_cart(&pool, variant_id, 1).await;
+    let email_a = format!("race-a-{}@example.com", Uuid::now_v7().simple());
+    let email_b = format!("race-b-{}@example.com", Uuid::now_v7().simple());
+
+    let (first, second) = tokio::join!(
+      create_order(&pool, cart_a, checkout_input(&email_a, ""), None),
+      create_order(&pool, cart_b, checkout_input(&email_b, ""), None),
+    );
+
+    let ok_count = [&first, &second].iter().filter(|r| r.is_ok()).count();
+    let err_count = [&first, &second].iter().filter(|r| r.is_err()).count();
+    assert_eq!(ok_count, 1, "exactly one checkout should succeed");
+    assert_eq!(err_count, 1, "the other checkout should fail");
+    let err = first.as_ref().err().or(second.as_ref().err()).unwrap();
+    let message = err.to_string();
+    assert_eq!(
+      message, "Estoque insuficiente para concluir o pedido.",
+      "unexpected error: {err}"
+    );
+
+    let loser_cart = if first.is_err() { cart_a } else { cart_b };
+    let remaining: Option<i32> = sqlx::query_scalar(
+      "SELECT quantity FROM cart_items WHERE cart_id = $1 AND variant_id = $2",
+    )
+    .bind(loser_cart)
+    .bind(variant_id)
+    .fetch_optional(&pool)
+    .await
+    .expect("loser cart line");
+    assert_eq!(remaining, Some(1), "loser cart should still have the line");
+  }
+
+  #[tokio::test]
+  async fn expired_reservation_is_released() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (_product_id, variant_id) =
+      seed_variant(&pool, UNIT_PRICE_CENTS, 2).await;
+    let cart_id = seed_cart(&pool, variant_id, 1).await;
+    let email = format!("expire-{}@example.com", Uuid::now_v7().simple());
+    let order_id =
+      create_order(&pool, cart_id, checkout_input(&email, ""), None)
+        .await
+        .expect("create order")
+        .id;
+
+    sqlx::query(
+      "UPDATE orders SET reservation_expires_at = now() - interval '1 hour' WHERE id = $1",
+    )
+    .bind(order_id)
+    .execute(&pool)
+    .await
+    .expect("expire");
+
+    release_expired_reservations(&pool)
+      .await
+      .expect("release expired");
+
+    let status: String =
+      sqlx::query_scalar("SELECT status::text FROM orders WHERE id = $1")
+        .bind(order_id)
+        .fetch_one(&pool)
+        .await
+        .expect("status");
+    assert_eq!(status, "cancelled");
+
+    let reserved: i32 = sqlx::query_scalar(
+      "SELECT reserved FROM inventory WHERE variant_id = $1",
+    )
+    .bind(variant_id)
+    .fetch_one(&pool)
+    .await
+    .expect("reserved");
+    assert_eq!(reserved, 0);
+  }
+
+  #[tokio::test]
+  async fn pay_requires_whatsapp() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (_product_id, variant_id) =
+      seed_variant(&pool, UNIT_PRICE_CENTS, 2).await;
+    let cart_id = seed_cart(&pool, variant_id, 1).await;
+    let email = format!("phone-{}@example.com", Uuid::now_v7().simple());
+    let mut posted = checkout_input(&email, "");
+    posted.phone = String::new();
+
+    let err = create_order(&pool, cart_id, posted, None)
+      .await
+      .expect_err("phone required");
+    assert!(
+      err.to_string().contains("WhatsApp"),
+      "unexpected error: {err}"
+    );
+  }
+
+  #[tokio::test]
+  async fn stored_cart_coupon_applies_when_checkout_omits_code() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (_product_id, variant_id) =
+      seed_variant(&pool, UNIT_PRICE_CENTS, 2).await;
+    let coupon_id = Uuid::now_v7();
+    let code = format!("CART{}", Uuid::now_v7().simple());
+    sqlx::query(
+      "INSERT INTO coupons (id, code, discount_type, discount_value, usage_type)
+       VALUES ($1, $2, 'fixed', $3, 'unlimited')",
+    )
+    .bind(coupon_id)
+    .bind(&code)
+    .bind(DISCOUNT_CENTS)
+    .execute(&pool)
+    .await
+    .expect("insert coupon");
+
+    let cart_id = seed_cart(&pool, variant_id, 1).await;
+    set_cart_coupon(&pool, cart_id, Some(&code))
+      .await
+      .expect("persist coupon");
+
+    let email = format!("stored-{}@example.com", Uuid::now_v7().simple());
+    let order_id =
+      create_order(&pool, cart_id, checkout_input(&email, ""), None)
+        .await
+        .expect("create order")
+        .id;
+
+    let saved_coupon: Option<Uuid> =
+      sqlx::query_scalar("SELECT coupon_id FROM orders WHERE id = $1")
+        .bind(order_id)
+        .fetch_one(&pool)
+        .await
+        .expect("coupon_id");
+    assert_eq!(saved_coupon, Some(coupon_id));
+  }
+
+  async fn seed_split_warehouses(
+    pool: &PgPool,
+    price: i32,
+    default_stock: i32,
+    other_stock: i32,
+  ) -> (Uuid, Uuid, Uuid) {
+    let product_id = Uuid::now_v7();
+    let variant_id = Uuid::now_v7();
+    let warehouse_a = Uuid::now_v7();
+    let warehouse_b = Uuid::now_v7();
+    let inventory_a = Uuid::now_v7();
+    let inventory_b = Uuid::now_v7();
+
+    sqlx::query(
+      "INSERT INTO products (id, name, slug, price_in_cents)
+       VALUES ($1, 'Peça teste', $2, $3)",
+    )
+    .bind(product_id)
+    .bind(format!("peca-{product_id}"))
+    .bind(price)
+    .execute(pool)
+    .await
+    .expect("insert product");
+
+    sqlx::query(
+      "INSERT INTO product_variants (id, product_id, sku, size, color)
+       VALUES ($1, $2, $3, 'm', 'azul')",
+    )
+    .bind(variant_id)
+    .bind(product_id)
+    .bind(format!("sku-{variant_id}"))
+    .execute(pool)
+    .await
+    .expect("insert variant");
+
+    sqlx::query(
+      "INSERT INTO warehouses (id, code, name, is_default, active)
+       VALUES ($1, $2, 'Principal', true, true), ($3, $4, 'Secundário', false, true)",
+    )
+    .bind(warehouse_a)
+    .bind(format!("wh-{}", warehouse_a.simple()))
+    .bind(warehouse_b)
+    .bind(format!("wh-{}", warehouse_b.simple()))
+    .execute(pool)
+    .await
+    .expect("insert warehouses");
+
+    sqlx::query(
+      "INSERT INTO inventory (id, variant_id, warehouse_id, quantity, reserved)
+       VALUES ($1, $2, $3, $4, 0), ($5, $2, $6, $7, 0)",
+    )
+    .bind(inventory_a)
+    .bind(variant_id)
+    .bind(warehouse_a)
+    .bind(default_stock)
+    .bind(inventory_b)
+    .bind(warehouse_b)
+    .bind(other_stock)
+    .execute(pool)
+    .await
+    .expect("insert inventory");
+
+    (variant_id, inventory_a, inventory_b)
+  }
+
+  #[tokio::test]
+  async fn reservations_convert_and_release_by_inventory_id() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (variant_id, inventory_a, inventory_b) =
+      seed_split_warehouses(&pool, UNIT_PRICE_CENTS, 1, 1).await;
+    let cart_id = seed_cart(&pool, variant_id, 2).await;
+    let email = format!("rows-{}@example.com", Uuid::now_v7().simple());
+    let order_id =
+      create_order(&pool, cart_id, checkout_input(&email, ""), None)
+        .await
+        .expect("create order")
+        .id;
+
+    let reserved_ids: Vec<Uuid> = sqlx::query_scalar(
+      "SELECT inventory_id FROM inventory_reservations WHERE order_id = $1 ORDER BY inventory_id",
+    )
+    .bind(order_id)
+    .fetch_all(&pool)
+    .await
+    .expect("reservation rows");
+    let mut expected = vec![inventory_a, inventory_b];
+    expected.sort();
+    let mut actual = reserved_ids;
+    actual.sort();
+    assert_eq!(actual, expected);
+
+    let mut tx = pool.begin().await.expect("tx");
+    convert_reservation(&mut tx, order_id)
+      .await
+      .expect("convert");
+    tx.commit().await.expect("commit");
+
+    let leftover: i64 = sqlx::query_scalar(
+      "SELECT COUNT(*) FROM inventory_reservations WHERE order_id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .expect("count after convert");
+    assert_eq!(leftover, 0);
+
+    let qty_a: i32 =
+      sqlx::query_scalar("SELECT quantity FROM inventory WHERE id = $1")
+        .bind(inventory_a)
+        .fetch_one(&pool)
+        .await
+        .expect("qty a");
+    let qty_b: i32 =
+      sqlx::query_scalar("SELECT quantity FROM inventory WHERE id = $1")
+        .bind(inventory_b)
+        .fetch_one(&pool)
+        .await
+        .expect("qty b");
+    assert_eq!((qty_a, qty_b), (0, 0));
+
+    let (variant_release, inv_r_a, inv_r_b) =
+      seed_split_warehouses(&pool, UNIT_PRICE_CENTS, 1, 1).await;
+    let release_cart = seed_cart(&pool, variant_release, 2).await;
+    let release_email =
+      format!("release-{}@example.com", Uuid::now_v7().simple());
+    let release_order = create_order(
+      &pool,
+      release_cart,
+      checkout_input(&release_email, ""),
+      None,
+    )
+    .await
+    .expect("create release order")
+    .id;
+
+    let reserved_count: i64 = sqlx::query_scalar(
+      "SELECT COUNT(*) FROM inventory_reservations WHERE order_id = $1",
+    )
+    .bind(release_order)
+    .fetch_one(&pool)
+    .await
+    .expect("reserved count");
+    assert_eq!(reserved_count, 2);
+
+    let mut tx = pool.begin().await.expect("tx");
+    release_reservation(&mut tx, release_order)
+      .await
+      .expect("release");
+    tx.commit().await.expect("commit");
+
+    let leftover: i64 = sqlx::query_scalar(
+      "SELECT COUNT(*) FROM inventory_reservations WHERE order_id = $1",
+    )
+    .bind(release_order)
+    .fetch_one(&pool)
+    .await
+    .expect("count after release");
+    assert_eq!(leftover, 0);
+
+    let reserved_a: i32 =
+      sqlx::query_scalar("SELECT reserved FROM inventory WHERE id = $1")
+        .bind(inv_r_a)
+        .fetch_one(&pool)
+        .await
+        .expect("reserved a");
+    let reserved_b: i32 =
+      sqlx::query_scalar("SELECT reserved FROM inventory WHERE id = $1")
+        .bind(inv_r_b)
+        .fetch_one(&pool)
+        .await
+        .expect("reserved b");
+    assert_eq!((reserved_a, reserved_b), (0, 0));
   }
 }

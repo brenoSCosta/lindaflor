@@ -3,11 +3,13 @@ use topcoat::{
   Result,
   context::Cx,
   context::app_context,
-  router::{href, page, path_param},
+  router::{href, page, path_param, query_params},
   runtime::{Event, procedure, signal},
   view::{View, ViewExt, attributes, view},
 };
 use uuid::Uuid;
+
+use crate::auth::user::current_user_owned;
 
 use crate::components::badge::{BadgeVariant, badge};
 use crate::components::button::{ButtonSize, ButtonVariant, button_variants};
@@ -27,6 +29,11 @@ use crate::app::store::queries::{
 
 path_param!(pub(crate) id: Uuid, error = not_found);
 
+#[query_params(error = not_found)]
+struct PedidoQuery {
+  t: Option<String>,
+}
+
 struct OrderItem {
   product_name: String,
   variant_label: String,
@@ -37,6 +44,8 @@ struct OrderItem {
 struct OrderDetail {
   id: Uuid,
   status: String,
+  user_id: Option<Uuid>,
+  access_token: Uuid,
   guest_email: Option<String>,
   subtotal_cents: i32,
   shipping_cents: i32,
@@ -48,35 +57,82 @@ struct OrderDetail {
   items: Vec<OrderItem>,
 }
 
+fn token_or_owner_allows(
+  stored_token: Uuid,
+  order_user_id: Option<Uuid>,
+  query_t: Option<&str>,
+  session_user_id: Option<Uuid>,
+) -> bool {
+  if let Some(raw) = query_t
+    && let Ok(parsed) = Uuid::parse_str(raw.trim())
+    && parsed == stored_token
+  {
+    return true;
+  }
+  matches!((order_user_id, session_user_id), (Some(owner), Some(user)) if owner == user)
+}
+
+#[derive(sqlx::FromRow)]
+struct OrderRow {
+  id: Uuid,
+  status: String,
+  user_id: Option<Uuid>,
+  access_token: Uuid,
+  guest_email: Option<String>,
+  subtotal_cents: i32,
+  shipping_cents: i32,
+  discount_cents: i32,
+  total_cents: i32,
+  shipping_address: Option<serde_json::Value>,
+  payment_meta: Option<serde_json::Value>,
+  created_at: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct ItemRow {
+  product_name: String,
+  variant_label: String,
+  quantity: i32,
+  unit_price_cents: i32,
+}
+
+#[derive(sqlx::FromRow)]
+struct StatusAccessRow {
+  status: String,
+  access_token: Uuid,
+  user_id: Option<Uuid>,
+}
+
 async fn get_order(
   pool: &PgPool,
   id: Uuid,
 ) -> Result<Option<OrderDetail>, sqlx::Error> {
-  let row = sqlx::query!(
-        "SELECT id, status::text AS \"status!\", guest_email, subtotal_cents, shipping_cents,
-            discount_cents, total_cents, shipping_address, payment_meta, created_at
-         FROM orders WHERE id = $1",
-        id
-    )
-    .fetch_optional(pool)
-    .await?;
+  let order = sqlx::query_as::<_, OrderRow>(
+    "SELECT id, status::text AS status, user_id, access_token, guest_email, subtotal_cents, shipping_cents,
+            discount_cents, total_cents, shipping_address, payment_meta, created_at::text AS created_at
+     FROM orders WHERE id = $1",
+  )
+  .bind(id)
+  .fetch_optional(pool)
+  .await?;
 
-  let order = match row {
-    Some(o) => o,
-    None => return Ok(None),
+  let Some(order) = order else {
+    return Ok(None);
   };
 
-  let items = sqlx::query!(
+  let items = sqlx::query_as::<_, ItemRow>(
     "SELECT product_name, variant_label, quantity, unit_price_cents
-         FROM order_items WHERE order_id = $1",
-    id
+     FROM order_items WHERE order_id = $1",
   )
+  .bind(id)
   .fetch_all(pool)
   .await?;
 
   Ok(Some(OrderDetail {
     id: order.id,
     status: order.status,
+    user_id: order.user_id,
+    access_token: order.access_token,
     guest_email: order.guest_email,
     subtotal_cents: order.subtotal_cents,
     shipping_cents: order.shipping_cents,
@@ -84,7 +140,7 @@ async fn get_order(
     total_cents: order.total_cents,
     shipping_address: order.shipping_address,
     payment_meta: order.payment_meta,
-    created_at: order.created_at.to_string(),
+    created_at: order.created_at,
     items: items
       .into_iter()
       .map(|i| OrderItem {
@@ -131,32 +187,64 @@ fn coupon_code_from_meta(
 /// the buyer taps "Atualizar status" after paying. The id comes from the
 /// page URL; anything else is rejected as unknown.
 #[procedure("/pedido/status-proc")]
-async fn refresh_order_status(cx: &Cx, order_id: String) -> Result<String> {
+async fn refresh_order_status(
+  cx: &Cx,
+  order_id: String,
+  access_token: String,
+) -> Result<String> {
   let Ok(id) = Uuid::parse_str(order_id.trim()) else {
     return Ok("unknown".to_string());
   };
   let pool = app_context::<PgPool>(cx);
-  let row = sqlx::query!(
-    "SELECT status::text AS \"status!\" FROM orders WHERE id = $1",
-    id
+  let row = sqlx::query_as::<_, StatusAccessRow>(
+    "SELECT status::text AS status, access_token, user_id
+     FROM orders WHERE id = $1",
   )
+  .bind(id)
   .fetch_optional(pool)
   .await?;
-  Ok(
-    row
-      .map(|r| r.status)
-      .unwrap_or_else(|| "unknown".to_string()),
-  )
+  let Some(row) = row else {
+    return Ok("unknown".to_string());
+  };
+  let session_user_id =
+    current_user_owned(cx).await?.map(|session| session.user.id);
+  let query_t = access_token.trim();
+  if !token_or_owner_allows(
+    row.access_token,
+    row.user_id,
+    (!query_t.is_empty()).then_some(query_t),
+    session_user_id,
+  ) {
+    return Ok("unknown".to_string());
+  }
+  Ok(row.status)
 }
 
 #[page]
 pub async fn page(cx: &Cx) -> Result<impl View> {
   let pool = app_context::<PgPool>(cx);
   let id = path_param::<Id>(cx)?;
+  let query = query_params::<PedidoQuery>(cx)?;
+  let query_t = query
+    .t
+    .as_deref()
+    .map(str::trim)
+    .filter(|value| !value.is_empty());
+  let session_user_id =
+    current_user_owned(cx).await?.map(|session| session.user.id);
 
   let order = match get_order(pool, *id).await? {
-    Some(o) => o,
-    None => {
+    Some(o)
+      if token_or_owner_allows(
+        o.access_token,
+        o.user_id,
+        query_t,
+        session_user_id,
+      ) =>
+    {
+      o
+    }
+    Some(_) | None => {
       return Ok(view! {
                 container(
                     variant: ContainerVariant::Narrow,
@@ -228,6 +316,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     .unwrap_or_default();
   let coupon_code = coupon_code_from_meta(order.payment_meta.as_ref());
   let order_id_string = order.id.to_string();
+  let refresh_token = query_t.unwrap_or("").to_string();
 
   // Browser-only UI state: copy feedback + manually refreshed status.
   // No WebSocket; the buyer taps the button after paying on their bank app.
@@ -247,7 +336,11 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                         type="button"
                         class="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-foreground/5"
                         @click=$(async |_e: Event| {
-                            let next = refresh_order_status(refresh_id.to_owned()).await;
+                            let next = refresh_order_status(
+                                refresh_id.to_owned(),
+                                refresh_token.to_owned(),
+                            )
+                            .await;
                             live_status.set(next);
                         })
                     >
@@ -403,4 +496,80 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
             }
         )
     }.boxed())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn matching_token_grants_access() {
+    let token = Uuid::now_v7();
+    assert!(token_or_owner_allows(
+      token,
+      None,
+      Some(&token.to_string()),
+      None
+    ));
+  }
+
+  #[test]
+  fn wrong_or_missing_token_denied_for_guest() {
+    let token = Uuid::now_v7();
+    assert!(!token_or_owner_allows(token, None, None, None));
+    assert!(!token_or_owner_allows(
+      token,
+      None,
+      Some(&Uuid::now_v7().to_string()),
+      None
+    ));
+  }
+
+  #[test]
+  fn owner_session_skips_token() {
+    let token = Uuid::now_v7();
+    let owner = Uuid::now_v7();
+    assert!(token_or_owner_allows(token, Some(owner), None, Some(owner)));
+    assert!(!token_or_owner_allows(
+      token,
+      Some(owner),
+      None,
+      Some(Uuid::now_v7())
+    ));
+  }
+
+  #[tokio::test]
+  async fn get_order_loads_access_token() {
+    let pool = crate::test_support::fresh_pool().await;
+    let order_id = Uuid::now_v7();
+    let access_token = Uuid::new_v4();
+    sqlx::query(
+      "INSERT INTO orders (id, guest_email, status, subtotal_cents, shipping_cents,
+           discount_cents, total_cents, access_token)
+       VALUES ($1, 'guest@example.com', 'pending_payment', 1000, 0, 0, 1000, $2)",
+    )
+    .bind(order_id)
+    .bind(access_token)
+    .execute(&pool)
+    .await
+    .expect("insert order");
+
+    let order = get_order(&pool, order_id)
+      .await
+      .expect("load")
+      .expect("present");
+    assert_eq!(order.access_token, access_token);
+    assert!(token_or_owner_allows(
+      order.access_token,
+      order.user_id,
+      Some(&access_token.to_string()),
+      None
+    ));
+    assert!(!token_or_owner_allows(
+      order.access_token,
+      order.user_id,
+      Some(&Uuid::new_v4().to_string()),
+      None
+    ));
+  }
 }

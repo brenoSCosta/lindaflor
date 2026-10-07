@@ -116,6 +116,11 @@ pub async fn start_session_for_user(
   )
   .await?;
 
+  if impersonated_by.is_none() {
+    crate::app::store::cart::merge_guest_cart_on_login(cx, pool, user.id)
+      .await?;
+  }
+
   Ok(SessionUser {
     user,
     session_id,

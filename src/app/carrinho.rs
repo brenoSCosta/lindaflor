@@ -1,11 +1,15 @@
 use serde::Deserialize;
+use sqlx::PgPool;
 use topcoat::{
   Result,
-  context::Cx,
+  context::{Cx, app_context},
   router::{content::Form, href, page},
   view::{View, attributes, view},
 };
+use uuid::Uuid;
 
+use crate::auth::user::current_user_owned;
+use crate::components::alert::{AlertVariant, alert, alert_title};
 use crate::components::badge::{BadgeVariant, badge};
 use crate::components::button::{
   ButtonSize, ButtonVariant, button, button_variants,
@@ -17,15 +21,23 @@ use crate::components::container::{ContainerVariant, container};
 use crate::components::separator::separator;
 
 use crate::app::store::cart::{
-  cart_item_count, cart_subtotal_cents, read_cart, remove_item, update_quantity,
+  cart_coupon_code, cart_subtotal_cents, hydrate_cart, load_or_create_cart,
+  remove_item, set_cart_coupon, set_quantity,
 };
+use crate::app::store::coupons::{CouponReject, resolve_coupon};
 use crate::app::store::queries::format_price;
+use crate::components::field::{field, field_error, field_label};
+use crate::components::input::input;
 
 #[derive(Deserialize)]
 pub struct CartUpdateInput {
   variant_id: Option<String>,
   quantity: Option<i32>,
   remove: Option<String>,
+  #[serde(default)]
+  coupon_code: Option<String>,
+  #[serde(default)]
+  intent: Option<String>,
 }
 
 #[page([GET, POST])]
@@ -33,28 +45,89 @@ pub async fn page(
   cx: &Cx,
   body: Option<Form<CartUpdateInput>>,
 ) -> Result<impl View> {
-  if let Some(Form(input)) = body
-    && let Some(variant_id) =
-      input.variant_id.as_deref().filter(|v| !v.is_empty())
-  {
-    if input.remove.as_deref() == Some("true") {
-      remove_item(cx, variant_id);
-    } else if let Some(quantity) = input.quantity {
-      update_quantity(cx, variant_id, quantity);
+  let pool = app_context::<PgPool>(cx);
+  let user_id = current_user_owned(cx).await?.map(|session| session.user.id);
+  let cart = load_or_create_cart(cx, pool, user_id).await?;
+
+  let mut coupon_error: Option<String> = None;
+  if let Some(Form(posted)) = body {
+    match posted.intent.as_deref() {
+      Some("apply_coupon") => {
+        let raw = posted.coupon_code.clone().unwrap_or_default();
+        if raw.trim().is_empty() {
+          set_cart_coupon(pool, cart.id, None).await?;
+        } else {
+          let mut tx = pool.begin().await?;
+          let subtotal = {
+            let hydrated = hydrate_cart(pool, cart.id).await?;
+            cart_subtotal_cents(&hydrated.items)
+          };
+          let outcome =
+            resolve_coupon(&mut tx, &raw, subtotal, user_id, false).await;
+          tx.rollback().await?;
+          match outcome {
+            Ok(Some(coupon)) => {
+              set_cart_coupon(pool, cart.id, Some(&coupon.code)).await?;
+            }
+            Ok(None) => {
+              set_cart_coupon(pool, cart.id, None).await?;
+            }
+            Err(CouponReject::Invalid(message)) => {
+              set_cart_coupon(pool, cart.id, None).await?;
+              coupon_error = Some(message);
+            }
+            Err(CouponReject::Db(error)) => return Err(error.into()),
+          }
+        }
+      }
+      Some("remove_coupon") => {
+        set_cart_coupon(pool, cart.id, None).await?;
+      }
+      _ => {
+        if let Some(variant_id) =
+          posted.variant_id.as_deref().filter(|v| !v.is_empty())
+          && let Ok(variant_id) = Uuid::parse_str(variant_id)
+        {
+          if posted.remove.as_deref() == Some("true") {
+            remove_item(pool, cart.id, variant_id).await?;
+          } else if let Some(quantity) = posted.quantity {
+            let _ = set_quantity(pool, cart.id, variant_id, quantity).await;
+          }
+        }
+      }
     }
   }
 
-  let mut items = read_cart(cx);
-  // Cart snapshots may hold storage keys; resolve them per request so
-  // uploaded images render (external URLs pass through, missing keys hide).
+  let mut hydrated = hydrate_cart(pool, cart.id).await?;
   let store = crate::app::utils::object_store(cx);
-  for item in &mut items {
+  for item in &mut hydrated.items {
     item.image_url =
       crate::app::utils::resolve_storage_url(&store, item.image_url.as_deref())
         .await;
   }
+  let items = hydrated.items;
+  let notices = hydrated.notices;
   let subtotal = cart_subtotal_cents(&items);
-  let item_count = cart_item_count(&items);
+  let stored_coupon = cart_coupon_code(pool, cart.id).await?;
+  let coupon_input = stored_coupon.clone().unwrap_or_default();
+  let mut preview_tx = pool.begin().await?;
+  let coupon_outcome =
+    resolve_coupon(&mut preview_tx, &coupon_input, subtotal, user_id, false)
+      .await;
+  preview_tx.rollback().await?;
+  let (resolved_coupon, preview_error) = match coupon_outcome {
+    Ok(coupon) => (coupon, None),
+    Err(CouponReject::Db(error)) => return Err(error.into()),
+    Err(CouponReject::Invalid(message)) => (None, Some(message)),
+  };
+  if coupon_error.is_none() {
+    coupon_error = preview_error;
+  }
+  let discount = resolved_coupon
+    .as_ref()
+    .map(|coupon| coupon.discount_cents)
+    .unwrap_or(0);
+  let item_count: i32 = items.iter().map(|item| item.quantity).sum();
   let free_shipping_threshold = 29900;
   let missing_for_free_shipping = (free_shipping_threshold - subtotal).max(0);
 
@@ -74,6 +147,17 @@ pub async fn page(
                   badge(variant: BadgeVariant::Secondary, (item_count))
               }
           </header>
+
+          if !notices.is_empty() {
+              <div class="flex flex-col gap-2">
+                  for notice in notices {
+                      alert(
+                          variant: AlertVariant::Neutral,
+                          alert_title((notice.message()))
+                      )
+                  }
+              </div>
+          }
 
           if items.is_empty() {
               <div class="py-16 text-center">
@@ -177,6 +261,49 @@ pub async fn page(
                               <span class="text-sm text-muted-foreground">"Subtotal"</span>
                               <span class="text-xl font-semibold text-primary">(format_price(subtotal))</span>
                           </div>
+                          if discount > 0 {
+                              <div class="flex items-center justify-between text-sm">
+                                  <span class="text-muted-foreground">"Desconto"</span>
+                                  <span>"-" (format_price(discount))</span>
+                              </div>
+                          }
+                          field(
+                              field_label(attrs: attributes! { for="coupon" }, "Cupom")
+                              <form method="post" action=(href!(page)) class="flex items-center gap-2">
+                                  <input type="hidden" name="intent" value="apply_coupon">
+                                  input(attrs: attributes! {
+                                      id="coupon"
+                                      name="coupon_code"
+                                      placeholder="CUPOM10"
+                                      class="min-w-0 flex-1"
+                                      value=(coupon_input.clone())
+                                  })
+                                  button(
+                                      variant: ButtonVariant::Outline,
+                                      attrs: attributes! { type="submit" },
+                                      "Aplicar"
+                                  )
+                              </form>
+                              if resolved_coupon.is_some() {
+                                  <form method="post" action=(href!(page)) class="mt-2">
+                                      <input type="hidden" name="intent" value="remove_coupon">
+                                      button(
+                                          variant: ButtonVariant::Ghost,
+                                          size: ButtonSize::Sm,
+                                          attrs: attributes! { type="submit" },
+                                          "Remover cupom"
+                                      )
+                                  </form>
+                              }
+                              if let Some(ref message) = coupon_error {
+                                  field_error((message.as_str()))
+                              }
+                          )
+                          if let Some(ref coupon) = resolved_coupon {
+                              <p class="text-sm text-muted-foreground">
+                                  "Cupom " (coupon.code.as_str()) " aplicado."
+                              </p>
+                          }
                           <p class="text-xs text-muted-foreground">
                               "Frete grátis para compras acima de R$ 299. Calculado no checkout."
                           </p>
