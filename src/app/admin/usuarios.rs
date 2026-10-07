@@ -207,7 +207,12 @@ fn back(cx: &Cx, q: &str, page_num: i64) -> Result<Response> {
   toast_redirect(cx, users_url(cx, q, page_num, None))
 }
 
-fn fail(cx: &Cx, q: &str, page_num: i64, err: &topcoat::Error) -> Result<Response> {
+fn fail(
+  cx: &Cx,
+  q: &str,
+  page_num: i64,
+  err: &topcoat::Error,
+) -> Result<Response> {
   set_toast(cx, Toast::error(admin_error_message(err)));
   toast_redirect(cx, users_url(cx, q, page_num, None))
 }
@@ -919,12 +924,8 @@ async fn revoke_session(
     return invalid_id(cx, &q, page_num);
   };
   let pool = app_context::<PgPool>(cx);
-  let back_to = users_url(
-    cx,
-    &q,
-    page_num,
-    Some(("sessoes", body.user_id.trim())),
-  );
+  let back_to =
+    users_url(cx, &q, page_num, Some(("sessoes", body.user_id.trim())));
   match service::revoke_admin_session(pool, &actor, session_id).await {
     Ok(_) => toast_redirect(cx, back_to),
     Err(err) => {
@@ -966,4 +967,3 @@ async fn remove_user(cx: &Cx, Form(body): Form<IdForm>) -> Result<Response> {
     Err(err) => fail(cx, &q, page_num, &err),
   }
 }
-

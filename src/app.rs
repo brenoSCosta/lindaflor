@@ -18,6 +18,7 @@ pub mod store;
 pub mod termos;
 pub mod trocas_devolucoes;
 pub mod two_factor;
+pub mod utils;
 pub mod verify_email;
 
 use redis::aio::MultiplexedConnection;
@@ -80,6 +81,9 @@ pub fn router(
 
   builder
     .layer(BodyLimit::max(3 * 1024 * 1024).at("/settings/avatar"))
+    // Product create/edit carry product fields plus up to 8 images @ 2MB each.
+    .layer(BodyLimit::max(20 * 1024 * 1024).at("/admin/produtos/create"))
+    .layer(BodyLimit::max(20 * 1024 * 1024).at("/admin/produtos/update"))
     .runtime()
     .build()
 }
@@ -205,9 +209,15 @@ not_found!("/");
 #[page]
 pub async fn page(cx: &Cx) -> Result<impl View> {
   let pool = app_context::<PgPool>(cx);
+  let store = crate::app::utils::object_store(cx);
 
   let featured = list_products(pool, None, None, true, true, None).await?;
+  let featured =
+    crate::app::admin::produtos::resolve_summary_images(&store, featured).await;
   let all_products = list_products(pool, None, None, false, true, None).await?;
+  let all_products =
+    crate::app::admin::produtos::resolve_summary_images(&store, all_products)
+      .await;
 
   Ok(view! {
       <script src=(SOBRE_SCRIPT) defer=""></script>

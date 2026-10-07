@@ -1,15 +1,24 @@
 pub mod id;
 pub mod novo;
 
+use std::collections::HashMap;
+
 use sqlx::PgPool;
 use topcoat::{
-  Result,
+  Error, Result,
   context::Cx,
   context::app_context,
-  router::{href, page, query_params},
+  router::{content::multipart::Multipart, href, page, query_params},
   runtime::{Event, shard, signal},
   view::{View, attributes, view},
 };
+use uuid::Uuid;
+
+use crate::app::utils::{
+  MSG_UNAVAILABLE, is_storage_key, resolve_storage_url, storage_failure,
+  validate_image,
+};
+use crate::storage::ObjectStore;
 
 use crate::app::auth_helpers::require_admin;
 use crate::components::badge::{BadgeVariant, badge};
@@ -276,4 +285,358 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
           product_directory(q: q, active: active, initial_page: page_num)
       )
   })
+}
+
+/// Collected multipart submission: repeated text values per field name plus
+/// uploaded files (`content_type`, `bytes`). Empty file parts are skipped.
+pub(crate) struct CollectedForm {
+  pub texts: HashMap<String, Vec<String>>,
+  pub files: Vec<(String, Vec<u8>)>,
+}
+
+pub(crate) async fn collect_multipart(
+  mut multipart: Multipart,
+) -> Result<CollectedForm> {
+  let mut texts: HashMap<String, Vec<String>> = HashMap::new();
+  let mut files = Vec::new();
+  while let Some(field) = multipart.next_field().await? {
+    let name = field.name().unwrap_or("").to_owned();
+    let is_file = field.file_name().is_some();
+    let content_type = field
+      .content_type()
+      .unwrap_or("application/octet-stream")
+      .to_owned();
+    if is_file || name == "images" {
+      let bytes = field.bytes().await?.to_vec();
+      if bytes.is_empty() {
+        continue;
+      }
+      files.push((content_type, bytes));
+    } else {
+      let text = field.text().await?;
+      texts.entry(name).or_default().push(text);
+    }
+  }
+  Ok(CollectedForm { texts, files })
+}
+
+pub(crate) fn first_text(
+  texts: &HashMap<String, Vec<String>>,
+  key: &str,
+) -> String {
+  texts
+    .get(key)
+    .and_then(|v| v.first())
+    .cloned()
+    .unwrap_or_default()
+}
+
+/// Shared validation for the product create/edit multipart forms.
+pub(crate) const VALID_CATEGORIES: [&str; 4] =
+  ["biquini", "maio", "saida_praia", "acessorio"];
+
+pub(crate) const VALID_SIZES: [&str; 5] = ["pp", "p", "m", "g", "gg"];
+
+pub(crate) fn validate_name(raw: &str) -> Result<String, &'static str> {
+  let name = raw.trim();
+  if name.is_empty() {
+    return Err("Informe o nome do produto.");
+  }
+  if name.chars().count() > 200 {
+    return Err("O nome deve ter no máximo 200 caracteres.");
+  }
+  Ok(name.to_string())
+}
+
+pub(crate) fn validate_slug(raw: &str) -> Result<String, &'static str> {
+  let slug = raw.trim().to_lowercase();
+  if slug.is_empty() {
+    return Err("Informe o slug do produto.");
+  }
+  if slug.len() > 120 {
+    return Err("O slug deve ter no máximo 120 caracteres.");
+  }
+  let valid = !slug.starts_with('-')
+    && !slug.ends_with('-')
+    && !slug.contains("--")
+    && slug
+      .chars()
+      .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+  if !valid {
+    return Err(
+      "O slug deve conter apenas letras minúsculas, números e hífens.",
+    );
+  }
+  Ok(slug)
+}
+
+pub(crate) fn validate_category(raw: &str) -> Result<String, &'static str> {
+  let category = raw.trim();
+  if VALID_CATEGORIES.contains(&category) {
+    Ok(category.to_string())
+  } else {
+    Err("Categoria inválida.")
+  }
+}
+
+pub(crate) fn validate_size(raw: &str) -> Result<String, &'static str> {
+  let size = raw.trim().to_lowercase();
+  if VALID_SIZES.contains(&size.as_str()) {
+    Ok(size)
+  } else {
+    Err("Tamanho inválido.")
+  }
+}
+
+/// Parse a Brazilian/standard price (`"199.90"`, `"199,90"`, `"199"`) to cents.
+pub(crate) fn parse_price_cents(raw: &str) -> Result<i32, &'static str> {
+  let trimmed = raw.trim();
+  if trimmed.is_empty() {
+    return Err("Informe o preço do produto.");
+  }
+  let normalized = if trimmed.contains(',') {
+    trimmed.replace('.', "").replace(',', ".")
+  } else {
+    trimmed.to_string()
+  };
+  let value: f64 = normalized
+    .parse()
+    .map_err(|_| "Preço inválido. Use 199.90.")?;
+  if !value.is_finite() || value <= 0.0 || value > 9_999_999.0 {
+    return Err("Preço inválido. Use 199.90.");
+  }
+  Ok((value * 100.0).round() as i32)
+}
+
+pub(crate) fn parse_quantity(raw: &str) -> Result<i32, &'static str> {
+  let quantity: i32 = raw.trim().parse().map_err(|_| "Estoque inválido.")?;
+  if !(0..=1_000_000).contains(&quantity) {
+    return Err("Estoque inválido.");
+  }
+  Ok(quantity)
+}
+
+pub(crate) fn optional_description(raw: &str) -> Option<String> {
+  let description = raw.trim();
+  if description.is_empty() {
+    None
+  } else {
+    Some(description.to_string())
+  }
+}
+
+/// Default warehouse for new variants/inventory, creating `PRINCIPAL` when
+/// no warehouse exists yet (mirrors the seed default).
+pub(crate) async fn ensure_default_warehouse(
+  pool: &PgPool,
+) -> Result<Uuid, sqlx::Error> {
+  if let Some(id) = sqlx::query_scalar::<_, Option<Uuid>>(
+    "SELECT id FROM warehouses WHERE is_default = true ORDER BY created_at LIMIT 1",
+  )
+  .fetch_one(pool)
+  .await?
+  {
+    return Ok(id);
+  }
+  if let Some(id) = sqlx::query_scalar::<_, Option<Uuid>>(
+    "SELECT id FROM warehouses ORDER BY created_at LIMIT 1",
+  )
+  .fetch_one(pool)
+  .await?
+  {
+    return Ok(id);
+  }
+  let id = Uuid::now_v7();
+  sqlx::query(
+    "INSERT INTO warehouses (id, code, name, is_default, active, created_at)
+     VALUES ($1, 'PRINCIPAL', 'Depósito Principal', true, true, now())",
+  )
+  .bind(id)
+  .execute(pool)
+  .await?;
+  Ok(id)
+}
+
+pub(crate) fn db_error_message(err: &sqlx::Error) -> String {
+  use std::borrow::Cow;
+  let message: Cow<'_, str> = if let sqlx::Error::Database(db) = err {
+    if db.constraint() == Some("product_variants_sku_uidx") {
+      "Este SKU já está em uso por outra variante.".into()
+    } else if db.constraint() == Some("products_slug_uidx") {
+      "Este slug já está em uso por outro produto.".into()
+    } else if db.code().as_deref() == Some("23503") {
+      "Não é possível remover variante com pedidos vinculados.".into()
+    } else {
+      "Não foi possível salvar. Tente novamente.".into()
+    }
+  } else {
+    "Não foi possível salvar. Tente novamente.".into()
+  };
+  message.into_owned()
+}
+
+// Product image uploads.
+//
+// Files are validated ([`validate_image`]) and stored in the configured
+// [`ObjectStore`] (S3 or memory) — never in the repo tree — under
+// `products/{product_id}/…`. `product_images.url` holds the storage key for
+// uploads or the original external URL (seed data); readers must resolve keys
+// because presigned URLs expire.
+
+pub(crate) const MAX_IMAGES_PER_PRODUCT: usize = 8;
+
+pub(crate) const MSG_COUNT: &str = "O produto pode ter no máximo 8 imagens";
+
+/// Validate `bytes`, store them under `products/{product_id}/…`, and insert
+/// the `product_images` row. Returns the storage key.
+pub(crate) async fn save_product_image(
+  pool: &PgPool,
+  store: &ObjectStore,
+  product_id: Uuid,
+  bytes: &[u8],
+  content_type: &str,
+  sort_order: i32,
+) -> Result<String> {
+  let kind = validate_image(bytes, content_type)?;
+  if matches!(store, ObjectStore::Unavailable) {
+    return Err(Error::msg(MSG_UNAVAILABLE));
+  }
+
+  let key = format!(
+    "products/{product_id}/{}.{ext}",
+    Uuid::now_v7(),
+    ext = kind.extension
+  );
+  store
+    .put(&key, bytes.to_vec(), kind.content_type)
+    .await
+    .map_err(storage_failure)?;
+
+  let inserted = sqlx::query(
+    "INSERT INTO product_images (id, product_id, url, alt, sort_order, created_at)
+     VALUES ($1, $2, $3, NULL, $4, now())",
+  )
+  .bind(Uuid::now_v7())
+  .bind(product_id)
+  .bind(&key)
+  .bind(sort_order)
+  .execute(pool)
+  .await;
+  if let Err(err) = inserted {
+    let _ = store.delete(&key).await;
+    return Err(Error::from(err));
+  }
+
+  Ok(key)
+}
+
+/// Delete a `product_images` row and its stored object (when key-like).
+/// External (`://`) URLs only lose the row. Missing rows are Ok.
+pub(crate) async fn delete_product_image(
+  pool: &PgPool,
+  store: &ObjectStore,
+  image_id: Uuid,
+) -> Result<()> {
+  let url = sqlx::query_scalar::<_, Option<String>>(
+    "SELECT url FROM product_images WHERE id = $1",
+  )
+  .bind(image_id)
+  .fetch_optional(pool)
+  .await?
+  .flatten();
+  let Some(url) = url else { return Ok(()) };
+
+  sqlx::query("DELETE FROM product_images WHERE id = $1")
+    .bind(image_id)
+    .execute(pool)
+    .await?;
+
+  if is_storage_key(&url) && !matches!(store, ObjectStore::Unavailable) {
+    let _ = store.delete(&url).await;
+  }
+  Ok(())
+}
+
+/// Resolve the cover `image_url` of each product summary (storage keys become
+/// presigned URLs; external URLs pass through).
+pub(crate) async fn resolve_summary_images(
+  store: &ObjectStore,
+  products: Vec<crate::app::store::queries::ProductSummary>,
+) -> Vec<crate::app::store::queries::ProductSummary> {
+  let mut resolved = Vec::with_capacity(products.len());
+  for mut product in products {
+    let url = product.image_url.as_deref();
+    product.image_url = resolve_storage_url(store, url).await;
+    resolved.push(product);
+  }
+  resolved
+}
+
+/// Resolve every gallery image of a product detail in place.
+pub(crate) async fn resolve_detail_images(
+  store: &ObjectStore,
+  detail: &mut crate::app::store::queries::ProductDetail,
+) {
+  for image in &mut detail.images {
+    if let Some(url) = resolve_storage_url(store, Some(&image.url)).await {
+      image.url = url;
+    } else {
+      image.url = String::new();
+    }
+  }
+  detail.images.retain(|image| !image.url.is_empty());
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::storage::StorageError;
+
+  fn png() -> Vec<u8> {
+    vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0]
+  }
+
+  #[tokio::test]
+  async fn save_and_delete_roundtrip() {
+    let pool = crate::test_support::pool().await;
+    let store = ObjectStore::memory();
+    let product_id = Uuid::now_v7();
+    sqlx::query(
+      "INSERT INTO products (id, name, slug, price_in_cents, category, active, featured, created_at, updated_at)
+       VALUES ($1, 'Camiseta', $2, 1000, 'acessorio', true, false, now(), now())",
+    )
+    .bind(product_id)
+    .bind(format!("img-test-{}", product_id.simple()))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let key =
+      save_product_image(&pool, &store, product_id, &png(), "image/png", 0)
+        .await
+        .unwrap();
+    assert!(key.starts_with(&format!("products/{product_id}/")));
+    assert!(key.ends_with(".png"));
+
+    let image_id: Uuid =
+      sqlx::query_scalar("SELECT id FROM product_images WHERE product_id = $1")
+        .bind(product_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    delete_product_image(&pool, &store, image_id).await.unwrap();
+    let remaining: i64 =
+      sqlx::query_scalar("SELECT COUNT(*) FROM product_images WHERE id = $1")
+        .bind(image_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(remaining, 0);
+    assert!(
+      store
+        .presign_get(&key)
+        .await
+        .is_err_and(|e| matches!(e, StorageError::NotFound))
+    );
+  }
 }

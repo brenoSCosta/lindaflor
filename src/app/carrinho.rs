@@ -44,7 +44,15 @@ pub async fn page(
     }
   }
 
-  let items = read_cart(cx);
+  let mut items = read_cart(cx);
+  // Cart snapshots may hold storage keys; resolve them per request so
+  // uploaded images render (external URLs pass through, missing keys hide).
+  let store = crate::app::utils::object_store(cx);
+  for item in &mut items {
+    item.image_url =
+      crate::app::utils::resolve_storage_url(&store, item.image_url.as_deref())
+        .await;
+  }
   let subtotal = cart_subtotal_cents(&items);
   let item_count = cart_item_count(&items);
   let free_shipping_threshold = 29900;

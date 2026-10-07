@@ -113,6 +113,9 @@ async fn catalog_results(
     None,
   )
   .await?;
+  let store = crate::app::utils::object_store(cx);
+  let products =
+    crate::app::admin::produtos::resolve_summary_images(&store, products).await;
 
   let heading = if term.is_empty() {
     "Catálogo".to_string()

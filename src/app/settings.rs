@@ -8,7 +8,9 @@ use topcoat::{
   router::{
     content::{Form, multipart::Multipart},
     error::bad_request,
-    href, page, query_params, response::Response, route,
+    href, page, query_params,
+    response::Response,
+    route,
   },
   runtime::{Event, expr, procedure, signal},
   view::{View, component, view},
@@ -16,8 +18,9 @@ use topcoat::{
 use uuid::Uuid;
 
 use crate::app::auth_helpers::require_user;
+use crate::app::utils::{object_store, resolve_storage_url};
 use crate::auth::CREDENTIAL_PROVIDER_ID;
-use crate::auth::avatar::{self as auth_avatar, object_store};
+use crate::auth::avatar::{self as auth_avatar};
 use crate::auth::google::GOOGLE_PROVIDER_ID;
 use crate::auth::service::{
   self, LinkedAccount, ListedSession, portuguese_error_message,
@@ -138,8 +141,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let user_email = su.user.email.clone();
   let user_initials = initials(&user_name);
   let store = object_store(cx);
-  let avatar_url =
-    auth_avatar::resolve_avatar_url(&store, su.user.image.as_deref()).await;
+  let avatar_url = resolve_storage_url(&store, su.user.image.as_deref()).await;
   let has_avatar = su
     .user
     .image
@@ -558,7 +560,7 @@ async fn account_tab(cx: &Cx, email: String) -> Result<impl View> {
           )
           card_content(
               <form
-                  
+
                       method="post"
                       action=(href!(settings_post).query([("tab", "account")]))
                       class="flex flex-col gap-4"
@@ -598,7 +600,7 @@ async fn account_tab(cx: &Cx, email: String) -> Result<impl View> {
               </form>
               separator(attrs: attributes! { class="my-5" })
               <form
-                  
+
                     method="post"
                     action=(href!(settings_post).query([("tab", "account")]))
                     class="flex flex-col gap-4"

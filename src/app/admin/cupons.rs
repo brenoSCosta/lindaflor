@@ -136,7 +136,13 @@ fn back(cx: &Cx, q: &str, cupom: &str, uq: &str) -> Result<Response> {
   toast_redirect(cx, coupons_url(cx, q, cupom, uq))
 }
 
-fn fail(cx: &Cx, q: &str, cupom: &str, uq: &str, message: &str) -> Result<Response> {
+fn fail(
+  cx: &Cx,
+  q: &str,
+  cupom: &str,
+  uq: &str,
+  message: &str,
+) -> Result<Response> {
   set_toast(cx, Toast::error(message));
   toast_redirect(cx, coupons_url(cx, q, cupom, uq))
 }

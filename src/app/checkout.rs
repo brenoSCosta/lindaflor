@@ -124,8 +124,7 @@ pub async fn page(
     && intent == "pay"
     && let Some(Form(posted)) = body.take()
   {
-    let order_id =
-      create_order(pool, &items, posted, session_user_id).await?;
+    let order_id = create_order(pool, &items, posted, session_user_id).await?;
     clear_cart(cx);
     return Err(
       redirect(

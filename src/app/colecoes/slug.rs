@@ -47,6 +47,9 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let product_count = count_collection_products(pool, &collection.id).await?;
   let products =
     list_products(pool, None, None, false, true, Some(slug)).await?;
+  let store = crate::app::utils::object_store(cx);
+  let products =
+    crate::app::admin::produtos::resolve_summary_images(&store, products).await;
 
   let collection_name = collection.name.clone();
   let collection_description = collection.description.clone();

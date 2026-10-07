@@ -51,18 +51,23 @@ pub async fn page(
 ) -> Result<impl View> {
   let pool = app_context::<PgPool>(cx);
   let slug = path_param::<Slug>(cx);
+  let store = crate::app::utils::object_store(cx);
+  let resolve_detail = crate::app::admin::produtos::resolve_detail_images;
+  let resolve_summaries = crate::app::admin::produtos::resolve_summary_images;
 
   let mut added_to_cart = false;
   if let Some(Form(input)) = body
     && let Some(variant_id) =
       input.variant_id.as_deref().filter(|v| !v.is_empty())
-    && let Some(product) = get_product_by_slug(pool, slug).await?
+    && let Some(mut product) = get_product_by_slug(pool, slug).await?
     && let Some(variant) = product
       .variants
       .iter()
       .find(|v| v.id.to_string() == variant_id)
+      .cloned()
     && variant.available > 0
   {
+    resolve_detail(&store, &mut product).await;
     let image_url = product.images.first().map(|i| i.url.clone());
     add_to_cart(
       cx,
@@ -88,7 +93,10 @@ pub async fn page(
   }
 
   let product = match get_product_by_slug(pool, slug).await? {
-        Some(p) => p,
+        Some(mut p) => {
+            resolve_detail(&store, &mut p).await;
+            p
+        }
         None => {
             return Ok(view! {
                 container(
@@ -109,6 +117,7 @@ pub async fn page(
   let related =
     list_products(pool, Some(&product.category), None, false, true, None)
       .await?;
+  let related = resolve_summaries(&store, related).await;
   let related: Vec<_> = related
     .into_iter()
     .filter(|p| p.slug != product.slug)

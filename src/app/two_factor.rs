@@ -253,10 +253,7 @@ fn two_factor_error_redirect(
 ) -> Result<Response> {
   set_toast(cx, Toast::error(message));
   if is_backup {
-    toast_redirect(
-      cx,
-      href!(page).query([("method", "backup")]).resolve(cx),
-    )
+    toast_redirect(cx, href!(page).query([("method", "backup")]).resolve(cx))
   } else {
     toast_redirect(cx, href!(page).resolve(cx))
   }

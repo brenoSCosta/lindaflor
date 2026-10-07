@@ -1,9 +1,8 @@
 mod common;
 
 use common::{pool_and_router, unique_email};
-use lindaflor::auth::avatar::{
-  remove_avatar, resolve_avatar_url, update_avatar,
-};
+use lindaflor::app::utils::resolve_storage_url;
+use lindaflor::auth::avatar::{remove_avatar, update_avatar};
 use lindaflor::storage::ObjectStore;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -85,7 +84,7 @@ async fn accepts_png_jpeg_and_webp() {
       user_image(&pool, user_id).await.as_deref(),
       Some(key.as_str())
     );
-    let url = resolve_avatar_url(&store, Some(&key)).await;
+    let url = resolve_storage_url(&store, Some(&key)).await;
     assert_eq!(url.as_deref(), Some(format!("memory://{key}").as_str()));
   }
 }
@@ -133,7 +132,7 @@ async fn replace_removes_previous_object() {
   assert_ne!(first, second);
   assert!(store.presign_get(&first).await.is_err());
   assert_eq!(
-    resolve_avatar_url(&store, Some(&second)).await.as_deref(),
+    resolve_storage_url(&store, Some(&second)).await.as_deref(),
     Some(format!("memory://{second}").as_str())
   );
   assert_eq!(
@@ -151,7 +150,7 @@ async fn external_url_is_kept_and_not_stored() {
   set_image(&pool, user_id, external).await;
 
   assert_eq!(
-    resolve_avatar_url(&store, Some(external)).await.as_deref(),
+    resolve_storage_url(&store, Some(external)).await.as_deref(),
     Some(external)
   );
 
@@ -163,7 +162,7 @@ async fn external_url_is_kept_and_not_stored() {
     Some(key.as_str())
   );
   assert!(store.presign_get(external).await.is_err());
-  assert!(resolve_avatar_url(&store, Some(&key)).await.is_some());
+  assert!(resolve_storage_url(&store, Some(&key)).await.is_some());
 }
 
 #[tokio::test]

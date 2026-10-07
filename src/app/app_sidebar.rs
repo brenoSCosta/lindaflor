@@ -16,7 +16,7 @@ use topcoat::{
 };
 
 use crate::app::auth_helpers::optional_user;
-use crate::auth::avatar::{self as auth_avatar, object_store};
+use crate::app::utils::{object_store, resolve_storage_url};
 use crate::components::avatar::{
   AvatarSize, avatar, avatar_fallback, avatar_image,
 };
@@ -145,11 +145,8 @@ pub async fn app_shell(
   let name = user.user.name.clone();
   let email = user.user.email.clone();
   let user_initials = initials(&name);
-  let avatar_url = auth_avatar::resolve_avatar_url(
-    &object_store(cx),
-    user.user.image.as_deref(),
-  )
-  .await;
+  let avatar_url =
+    resolve_storage_url(&object_store(cx), user.user.image.as_deref()).await;
   let menu_avatar_url = avatar_url.clone();
   let menu_name = name.clone();
   let menu_email = email.clone();

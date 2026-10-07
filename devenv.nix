@@ -161,12 +161,14 @@
 
   processes.db-studio = {
     exec = ''
+      echo "Waiting for Postgres (db-studio)..."
       for _ in $(seq 1 50); do
-        if psql "$DATABASE_URL" -c 'SELECT 1' >/dev/null 2>&1; then
+        if pg_isready -h 127.0.0.1 -p "''${PGPORT:-4201}" -U postgres -d topcoat -t 1 >/dev/null 2>&1; then
           break
         fi
         sleep 0.2
       done
+      echo "Postgres ready, starting pgweb..."
       exec pgweb --bind 127.0.0.1 --listen 4205 --skip-open --url "$DATABASE_URL"
     '';
   };
@@ -178,11 +180,12 @@
       # sqlx::query! needs live schema at compile time — migrate before topcoat builds.
       echo "Waiting for Postgres..."
       for _ in $(seq 1 50); do
-        if psql "$DATABASE_URL" -c 'SELECT 1' >/dev/null 2>&1; then
+        if pg_isready -h 127.0.0.1 -p "''${PGPORT:-4201}" -U postgres -d topcoat -t 1 >/dev/null 2>&1; then
           break
         fi
         sleep 0.2
       done
+      echo "Postgres ready, running migrations and starting dev server (compiling can take a few minutes)..."
       exec dev
     '';
   };
@@ -191,6 +194,7 @@
   scripts.dev.exec = ''
     set -euo pipefail
     export PATH="''${DEVENV_ROOT}/.devenv/state/cargo-install/bin:''${PATH}"
+    echo "Applying migrations..."
     migrate_log=$(sqlx migrate run 2>&1)
     if [ -n "$migrate_log" ]; then
       printf '%s\n' "$migrate_log"
@@ -203,6 +207,7 @@
     mkdir -p "''${DEVENV_ROOT}/.sqlx"
     export SQLX_OFFLINE=false
     export SQLX_OFFLINE_DIR="''${DEVENV_ROOT}/.sqlx"
+    echo "Migrations done, starting topcoat dev (compiling, this can take a few minutes)..."
     exec topcoat dev --bin lindaflor
   '';
 
@@ -211,7 +216,7 @@
     set -euo pipefail
     cache="''${DEVENV_ROOT}/.sqlx"
     mkdir -p "$cache"
-    if psql "$DATABASE_URL" -c 'SELECT 1' >/dev/null 2>&1; then
+    if PGCONNECT_TIMEOUT=2 psql "$DATABASE_URL" -c 'SELECT 1' >/dev/null 2>&1; then
       migrate_log=$(sqlx migrate run 2>&1)
       if [ -n "$migrate_log" ]; then
         printf '%s\n' "$migrate_log"

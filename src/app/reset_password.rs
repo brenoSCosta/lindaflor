@@ -183,7 +183,11 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   })
 }
 
-fn reset_error_redirect(cx: &Cx, token: &str, message: &str) -> Result<Response> {
+fn reset_error_redirect(
+  cx: &Cx,
+  token: &str,
+  message: &str,
+) -> Result<Response> {
   set_toast(cx, Toast::error(message));
   toast_redirect(cx, href!(page).query([("token", token)]).resolve(cx))
 }
