@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Postgres, Transaction};
 use topcoat::{
-  context::Cx,
+  context::{Cx, app_context},
   cookie::{Cookie, Cookies, SameSite, cookies},
+  runtime::procedure,
 };
 use uuid::Uuid;
 
@@ -10,6 +11,7 @@ use crate::app::store::inventory::{
   lock_cart_inventory, release_expired_reservations,
 };
 use crate::app::store::queries::size_label;
+use crate::auth::user::current_user_owned;
 use crate::config::app_env;
 
 pub const CART_COOKIE: &str = "lindaflor_cart";
@@ -426,6 +428,76 @@ pub async fn clear_items_in_tx(
   Ok(())
 }
 
+/// JS fast-path for the product-page add form. Returns the new item count as a
+/// decimal string. Shopper-facing failures use the POST form fallback.
+#[procedure("/carrinho/adicionar")]
+pub async fn add_to_cart_proc(
+  cx: &Cx,
+  variant_id: String,
+) -> topcoat::Result<String> {
+  let pool = app_context::<PgPool>(cx);
+  let user_id = current_user_owned(cx).await?.map(|session| session.user.id);
+  let variant_id = Uuid::parse_str(variant_id.trim())
+    .map_err(|_| topcoat::Error::msg("Variação inválida."))?;
+  let cart = load_or_create_cart(cx, pool, user_id).await?;
+  match add_item(pool, cart.id, variant_id, 1).await {
+    Ok(()) => {
+      let n =
+        cart_item_count_for_token(pool, cart.token).await?.max(0) as usize;
+      Ok(n.to_string())
+    }
+    Err(CartError::InvalidVariant) => {
+      Err(topcoat::Error::msg("Esta variação não está disponível."))
+    }
+    Err(CartError::OutOfStock) => {
+      Err(topcoat::Error::msg("Esta peça está esgotada."))
+    }
+    Err(CartError::Db(error)) => Err(error.into()),
+  }
+}
+
+/// JS fast-path for the cart-page remove form. Returns the new item count.
+#[procedure("/carrinho/remover")]
+pub async fn remove_from_cart_proc(
+  cx: &Cx,
+  variant_id: String,
+) -> topcoat::Result<String> {
+  let pool = app_context::<PgPool>(cx);
+  let user_id = current_user_owned(cx).await?.map(|session| session.user.id);
+  let variant_id = Uuid::parse_str(variant_id.trim())
+    .map_err(|_| topcoat::Error::msg("Variação inválida."))?;
+  let cart = load_or_create_cart(cx, pool, user_id).await?;
+  remove_item(pool, cart.id, variant_id).await?;
+  let n = cart_item_count_for_token(pool, cart.token).await?.max(0) as usize;
+  Ok(n.to_string())
+}
+
+/// JS fast-path for the cart-page − / + forms. Returns the new item count.
+#[procedure("/carrinho/quantidade")]
+pub async fn set_cart_quantity_proc(
+  cx: &Cx,
+  variant_id: String,
+  quantity: String,
+) -> topcoat::Result<String> {
+  let pool = app_context::<PgPool>(cx);
+  let user_id = current_user_owned(cx).await?.map(|session| session.user.id);
+  let variant_id = Uuid::parse_str(variant_id.trim())
+    .map_err(|_| topcoat::Error::msg("Variação inválida."))?;
+  let quantity: i32 = quantity
+    .trim()
+    .parse()
+    .map_err(|_| topcoat::Error::msg("Quantidade inválida."))?;
+  let cart = load_or_create_cart(cx, pool, user_id).await?;
+  match set_quantity(pool, cart.id, variant_id, quantity).await {
+    Ok(()) | Err(CartError::InvalidVariant | CartError::OutOfStock) => {
+      let n =
+        cart_item_count_for_token(pool, cart.token).await?.max(0) as usize;
+      Ok(n.to_string())
+    }
+    Err(CartError::Db(error)) => Err(error.into()),
+  }
+}
+
 /// Header badge: sum of stored quantities for the cookie token (no create).
 pub async fn cart_item_count(
   cx: &Cx,
@@ -437,6 +509,13 @@ pub async fn cart_item_count(
   let Some(token) = parse_token(&value) else {
     return Ok(0);
   };
+  cart_item_count_for_token(pool, token).await
+}
+
+async fn cart_item_count_for_token(
+  pool: &PgPool,
+  token: Uuid,
+) -> Result<i32, sqlx::Error> {
   let count: Option<i32> = sqlx::query_scalar(
     r#"
         SELECT COALESCE(SUM(ci.quantity), 0)::int

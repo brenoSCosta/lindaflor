@@ -22,7 +22,7 @@ use crate::app::utils::{object_store, resolve_storage_url};
 use crate::components::avatar::{
   AvatarSize, avatar, avatar_fallback, avatar_image,
 };
-use crate::components::badge::{BadgeVariant, badge};
+use crate::components::button::{ButtonSize, ButtonVariant, button_variants};
 use crate::components::dropdown_menu::{
   dropdown_menu, dropdown_menu_label, dropdown_menu_separator,
   dropdown_menu_trigger,
@@ -401,7 +401,7 @@ pub async fn storefront_shell(
 ) -> Result<impl View> {
   let logged_in = optional_user(cx).await?.is_some();
   let pool = app_context::<PgPool>(cx);
-  let cart_count = cart_item_count(cx, pool).await?;
+  let cart_count = cart_item_count(cx, pool).await?.max(0) as usize;
 
   Ok(view! {
       <div class="min-h-screen bg-background text-foreground">
@@ -422,19 +422,40 @@ pub async fn storefront_shell(
                   <div class="flex items-center justify-end gap-2">
                       theme_toggle()
                       if logged_in {
-                          <a href=(href!(crate::app::dashboard::page)) class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">
-                              "Conta"
+                          <a
+                              href=(href!(crate::app::dashboard::page))
+                              class=(button_variants(ButtonVariant::Ghost, ButtonSize::Icon))
+                              aria-label="Conta"
+                              title="Conta"
+                          >
+                              icon(data: iconify_icon!("lucide:user"))
                           </a>
                       } else {
-                          <a href=(href!(crate::app::login::page)) class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">
-                              "Entrar"
+                          <a
+                              href=(href!(crate::app::login::page))
+                              class=(button_variants(ButtonVariant::Ghost, ButtonSize::Icon))
+                              aria-label="Entrar"
+                              title="Entrar"
+                          >
+                              icon(data: iconify_icon!("lucide:user"))
                           </a>
                       }
-                      <a href=(href!(crate::app::carrinho::page)) class="inline-flex items-center gap-1.5 text-[10px] tracking-wider uppercase transition-colors hover:text-primary">
-                          "Carrinho"
-                          if cart_count > 0 {
-                              badge(variant: BadgeVariant::Secondary, (cart_count))
-                          }
+                      <a
+                          href=(href!(crate::app::carrinho::page))
+                          class=(class!(button_variants(ButtonVariant::Ghost, ButtonSize::Icon), "relative"))
+                          aria-label="Carrinho"
+                          title="Carrinho"
+                      >
+                          icon(
+                              data: iconify_icon!("lucide:shopping-cart")
+                          )
+                          <span
+                              data-cart-count=""
+                              class="pointer-events-none absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] leading-none font-semibold text-white"
+                              hidden=(cart_count == 0)
+                          >
+                              (cart_count)
+                          </span>
                       </a>
                   </div>
               </div>

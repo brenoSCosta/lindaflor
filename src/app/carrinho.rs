@@ -4,6 +4,7 @@ use topcoat::{
   Result,
   context::{Cx, app_context},
   router::{content::Form, href, page},
+  runtime::Event,
   view::{View, attributes, view},
 };
 use uuid::Uuid;
@@ -22,7 +23,8 @@ use crate::components::separator::separator;
 
 use crate::app::store::cart::{
   cart_coupon_code, cart_subtotal_cents, hydrate_cart, load_or_create_cart,
-  remove_item, set_cart_coupon, set_quantity,
+  remove_from_cart_proc, remove_item, set_cart_coupon, set_cart_quantity_proc,
+  set_quantity,
 };
 use crate::app::store::coupons::{CouponReject, resolve_coupon};
 use crate::app::store::queries::format_price;
@@ -196,45 +198,91 @@ pub async fn page(
                                   </a>
                                   <p class="text-sm text-muted-foreground">(item.variant_label)</p>
                                   <div class="flex items-center gap-3 pt-2">
-                                      <form method="post" action=(href!(page)) class="inline-flex items-center gap-1">
-                                          <input type="hidden" name="variant_id" value=(item.variant_id.clone())>
-                                          <input type="hidden" name="quantity" value=(item.quantity - 1)>
-                                          button(
-                                              variant: ButtonVariant::Outline,
-                                              size: ButtonSize::Sm,
-                                              attrs: attributes! {
-                                                  type="submit"
-                                                  disabled=(item.quantity <= 1)
-                                                  aria-label="Diminuir"
-                                              },
-                                              "−"
-                                          )
-                                      </form>
+                                      {
+                                          let vid = item.variant_id.clone();
+                                          let minus_qty = (item.quantity - 1).to_string();
+                                          <form
+                                              method="post"
+                                              action=(href!(page))
+                                              class="inline-flex items-center gap-1"
+                                              @submit=$(async |e: Event| {
+                                                  e.prevent_default();
+                                                  let n = set_cart_quantity_proc(vid.to_owned(), minus_qty.to_owned()).await;
+                                                  raw!(
+                                                      "(() => { const apply = () => { const badge = document.querySelector('[data-cart-count]'); if (!badge) return; badge.textContent = ${n}; badge.hidden = ${n} === '0'; }; apply(); location.reload(); queueMicrotask(apply); setTimeout(apply, 0); })()",
+                                                      { let _ = n.clone(); }
+                                                  );
+                                              })
+                                          >
+                                              <input type="hidden" name="variant_id" value=(item.variant_id.clone())>
+                                              <input type="hidden" name="quantity" value=(item.quantity - 1)>
+                                              button(
+                                                  variant: ButtonVariant::Outline,
+                                                  size: ButtonSize::Sm,
+                                                  attrs: attributes! {
+                                                      type="submit"
+                                                      disabled=(item.quantity <= 1)
+                                                      aria-label="Diminuir"
+                                                  },
+                                                  "−"
+                                              )
+                                          </form>
+                                      }
                                       <span class="min-w-8 text-center text-sm">(item.quantity)</span>
-                                      <form method="post" action=(href!(page)) class="inline-flex items-center gap-1">
-                                          <input type="hidden" name="variant_id" value=(item.variant_id.clone())>
-                                          <input type="hidden" name="quantity" value=(item.quantity + 1)>
-                                          button(
-                                              variant: ButtonVariant::Outline,
-                                              size: ButtonSize::Sm,
-                                              attrs: attributes! {
-                                                  type="submit"
-                                                  disabled=(item.quantity >= item.max_quantity)
-                                                  aria-label="Aumentar"
-                                              },
-                                              "+"
-                                          )
-                                      </form>
-                                      <form method="post" action=(href!(page))>
-                                          <input type="hidden" name="variant_id" value=(item.variant_id.clone())>
-                                          <input type="hidden" name="remove" value="true">
-                                          button(
-                                              variant: ButtonVariant::Ghost,
-                                              size: ButtonSize::Sm,
-                                              attrs: attributes! { type="submit" aria-label="Remover" },
-                                              "✕"
-                                          )
-                                      </form>
+                                      {
+                                          let vid = item.variant_id.clone();
+                                          let plus_qty = (item.quantity + 1).to_string();
+                                          <form
+                                              method="post"
+                                              action=(href!(page))
+                                              class="inline-flex items-center gap-1"
+                                              @submit=$(async |e: Event| {
+                                                  e.prevent_default();
+                                                  let n = set_cart_quantity_proc(vid.to_owned(), plus_qty.to_owned()).await;
+                                                  raw!(
+                                                      "(() => { const apply = () => { const badge = document.querySelector('[data-cart-count]'); if (!badge) return; badge.textContent = ${n}; badge.hidden = ${n} === '0'; }; apply(); location.reload(); queueMicrotask(apply); setTimeout(apply, 0); })()",
+                                                      { let _ = n.clone(); }
+                                                  );
+                                              })
+                                          >
+                                              <input type="hidden" name="variant_id" value=(item.variant_id.clone())>
+                                              <input type="hidden" name="quantity" value=(item.quantity + 1)>
+                                              button(
+                                                  variant: ButtonVariant::Outline,
+                                                  size: ButtonSize::Sm,
+                                                  attrs: attributes! {
+                                                      type="submit"
+                                                      disabled=(item.quantity >= item.max_quantity)
+                                                      aria-label="Aumentar"
+                                                  },
+                                                  "+"
+                                              )
+                                          </form>
+                                      }
+                                      {
+                                          let vid = item.variant_id.clone();
+                                          <form
+                                              method="post"
+                                              action=(href!(page))
+                                              @submit=$(async |e: Event| {
+                                                  e.prevent_default();
+                                                  let n = remove_from_cart_proc(vid.to_owned()).await;
+                                                  raw!(
+                                                      "(() => { const apply = () => { const badge = document.querySelector('[data-cart-count]'); if (!badge) return; badge.textContent = ${n}; badge.hidden = ${n} === '0'; }; apply(); location.reload(); queueMicrotask(apply); setTimeout(apply, 0); })()",
+                                                      { let _ = n.clone(); }
+                                                  );
+                                              })
+                                          >
+                                              <input type="hidden" name="variant_id" value=(item.variant_id.clone())>
+                                              <input type="hidden" name="remove" value="true">
+                                              button(
+                                                  variant: ButtonVariant::Ghost,
+                                                  size: ButtonSize::Sm,
+                                                  attrs: attributes! { type="submit" aria-label="Remover" },
+                                                  "✕"
+                                              )
+                                          </form>
+                                      }
                                   </div>
                               </div>
                               <p class="shrink-0 text-right text-sm font-medium text-primary">

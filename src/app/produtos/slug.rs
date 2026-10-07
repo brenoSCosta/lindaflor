@@ -5,11 +5,14 @@ use topcoat::{
   context::Cx,
   context::app_context,
   router::{content::Form, href, page, path_param, query_params},
+  runtime::{Event, signal},
   view::{View, ViewExt, attributes, class, view},
 };
 use uuid::Uuid;
 
-use crate::app::store::cart::{CartError, add_item, load_or_create_cart};
+use crate::app::store::cart::{
+  CartError, add_item, add_to_cart_proc, load_or_create_cart,
+};
 use crate::app::store::queries::{
   DEFAULT_WHATSAPP_NUMBER, category_label, format_price, get_product_by_slug,
   get_store_settings, list_products, render_whatsapp_template, size_label,
@@ -187,6 +190,10 @@ pub async fn page(
     selected_variant.as_ref().map(|v| v.available).unwrap_or(0);
   let selected_variant_id_attr =
     selected_variant_id.clone().unwrap_or_default();
+  let added = signal(cx, || added_to_cart);
+  let add_error_sig = signal(cx, || add_error.clone().unwrap_or_default());
+  let add_variant_id = selected_variant_id_attr.clone();
+  let empty_error = String::new();
 
   Ok(view! {
         container(
@@ -262,10 +269,7 @@ pub async fn page(
                                             "opacity-50" if disabled,
                                         ))
                                     >
-                                        <span>
-                                            <span class="font-medium">(size_label(&variant.size)) " · " (variant.color)</span>
-                                            <span class="block text-xs">"SKU " (variant.sku)</span>
-                                        </span>
+                                        <span class="font-medium">(size_label(&variant.size)) " · " (variant.color)</span>
                                         <span class="text-sm">
                                             if variant.available > 0 {
                                                 (variant.available) " disponíveis"
@@ -281,7 +285,23 @@ pub async fn page(
 
                     card(
                         card_content(
-                            <form method="post" action=(href!(page, Slug(product_slug.clone()))) class="space-y-3">
+                            <form
+                                method="post"
+                                action=(href!(page, Slug(product_slug.clone())))
+                                class="space-y-3"
+                                @submit=$(async |e: Event| {
+                                    e.prevent_default();
+                                    let n = add_to_cart_proc(add_variant_id.to_owned()).await;
+                                    added.set(true);
+                                    add_error_sig.set(empty_error.clone());
+                                    raw!(
+                                        "(() => { const badge = document.querySelector('[data-cart-count]'); if (!badge) return; badge.textContent = ${n}; badge.hidden = ${n} === '0'; })()",
+                                        {
+                                            let _ = n.clone();
+                                        }
+                                    );
+                                })
+                            >
                                 <input type="hidden" name="variant_id" value=(selected_variant_id_attr)>
                                 button(
                                     variant: ButtonVariant::Primary,
@@ -301,12 +321,12 @@ pub async fn page(
                                 >
                                     "Comprar pelo WhatsApp"
                                 </a>
-                                if added_to_cart {
-                                    <p class="text-sm text-primary">"Adicionado ao carrinho!"</p>
-                                }
-                                if let Some(ref message) = add_error {
-                                    <p class="text-sm text-destructive">(message.as_str())</p>
-                                }
+                                <p class="text-sm text-primary" :hidden=$(!added.get())>
+                                    "Adicionado ao carrinho!"
+                                </p>
+                                <p class="text-sm text-destructive" :hidden=$(add_error_sig.get() == "")>
+                                    $(add_error_sig.get())
+                                </p>
                                 if selected_available > 0 {
                                     badge(variant: BadgeVariant::Primary, "Em estoque")
                                 } else {
