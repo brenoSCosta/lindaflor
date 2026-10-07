@@ -82,7 +82,7 @@
     var url;
     try {
       url = new URL(href, window.location.href);
-    } catch (err) {
+    } catch {
       return;
     }
     if (url.pathname !== window.location.pathname) return;

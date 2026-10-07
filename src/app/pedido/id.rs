@@ -330,7 +330,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
             <p class="text-xs uppercase tracking-widest text-muted-foreground">"Pedido #" (order_id_short)</p>
             <div class="flex flex-wrap items-center gap-3">
                 <h1 class="text-5xl font-bold tracking-tight">(heading)</h1>
-                badge(variant: status_badge_variant(&order.status), (status_label(&order.status)))
                 if is_pending {
                     <button
                         type="button"
@@ -348,9 +347,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                     </button>
                 }
             </div>
-            <p class="text-sm text-muted-foreground">
-                "Status atual: " $(live_status.get())
-            </p>
             <p class="text-muted-foreground">
                 "Enviamos as instruções para " (guest_email)
             </p>

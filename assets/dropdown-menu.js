@@ -168,7 +168,7 @@
     if (trigger && document.activeElement !== trigger) {
       try {
         trigger.focus({ preventScroll: true });
-      } catch (err) {
+      } catch {
         trigger.focus();
       }
     }

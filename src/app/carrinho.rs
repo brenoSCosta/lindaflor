@@ -207,11 +207,8 @@ pub async fn page(
                                               class="inline-flex items-center gap-1"
                                               @submit=$(async |e: Event| {
                                                   e.prevent_default();
-                                                  let n = set_cart_quantity_proc(vid.to_owned(), minus_qty.to_owned()).await;
-                                                  raw!(
-                                                      "(() => { const apply = () => { const badge = document.querySelector('[data-cart-count]'); if (!badge) return; badge.textContent = ${n}; badge.hidden = ${n} === '0'; }; apply(); location.reload(); queueMicrotask(apply); setTimeout(apply, 0); })()",
-                                                      { let _ = n.clone(); }
-                                                  );
+                                                  set_cart_quantity_proc(vid.to_owned(), minus_qty.to_owned()).await;
+                                                  raw!("location.reload()");
                                               })
                                           >
                                               <input type="hidden" name="variant_id" value=(item.variant_id.clone())>
@@ -224,7 +221,7 @@ pub async fn page(
                                                       disabled=(item.quantity <= 1)
                                                       aria-label="Diminuir"
                                                   },
-                                                  "−"
+                                                  "-"
                                               )
                                           </form>
                                       }
@@ -238,11 +235,8 @@ pub async fn page(
                                               class="inline-flex items-center gap-1"
                                               @submit=$(async |e: Event| {
                                                   e.prevent_default();
-                                                  let n = set_cart_quantity_proc(vid.to_owned(), plus_qty.to_owned()).await;
-                                                  raw!(
-                                                      "(() => { const apply = () => { const badge = document.querySelector('[data-cart-count]'); if (!badge) return; badge.textContent = ${n}; badge.hidden = ${n} === '0'; }; apply(); location.reload(); queueMicrotask(apply); setTimeout(apply, 0); })()",
-                                                      { let _ = n.clone(); }
-                                                  );
+                                                  set_cart_quantity_proc(vid.to_owned(), plus_qty.to_owned()).await;
+                                                  raw!("location.reload()");
                                               })
                                           >
                                               <input type="hidden" name="variant_id" value=(item.variant_id.clone())>
@@ -266,11 +260,8 @@ pub async fn page(
                                               action=(href!(page))
                                               @submit=$(async |e: Event| {
                                                   e.prevent_default();
-                                                  let n = remove_from_cart_proc(vid.to_owned()).await;
-                                                  raw!(
-                                                      "(() => { const apply = () => { const badge = document.querySelector('[data-cart-count]'); if (!badge) return; badge.textContent = ${n}; badge.hidden = ${n} === '0'; }; apply(); location.reload(); queueMicrotask(apply); setTimeout(apply, 0); })()",
-                                                      { let _ = n.clone(); }
-                                                  );
+                                                  remove_from_cart_proc(vid.to_owned()).await;
+                                                  raw!("location.reload()");
                                               })
                                           >
                                               <input type="hidden" name="variant_id" value=(item.variant_id.clone())>

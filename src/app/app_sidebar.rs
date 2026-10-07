@@ -22,7 +22,9 @@ use crate::app::utils::{object_store, resolve_storage_url};
 use crate::components::avatar::{
   AvatarSize, avatar, avatar_fallback, avatar_image,
 };
-use crate::components::button::{ButtonSize, ButtonVariant, button_variants};
+use crate::components::button::{
+  ButtonSize, ButtonVariant, button, button_variants,
+};
 use crate::components::dropdown_menu::{
   dropdown_menu, dropdown_menu_label, dropdown_menu_separator,
   dropdown_menu_trigger,
@@ -134,6 +136,19 @@ pub async fn app_shell(
           );
       })
   };
+  let close_sidebar = attributes! {
+      @click=$(|_e: Event| {
+          expanded.set(false);
+          let state = "collapsed";
+          let max_age = SIDEBAR_COOKIE_MAX_AGE;
+          raw!(
+              r#"document.cookie = "sidebar_state=" + String(${state}) + "; Path=/; Max-Age=" + String(${max_age});"#,
+              {
+                  let _ = (state, max_age);
+              }
+          );
+      })
+  };
   let rail_toggle = toggle_sidebar.clone();
   let pathname = uri(cx).path().to_owned();
   let dashboard_active = path_active(&pathname, "/dashboard");
@@ -170,25 +185,69 @@ pub async fn app_shell(
       sidebar_provider(
           sidebar(
               open: $(expanded.get()),
+              mobile_open: $(expanded.get()),
               collapsible: SidebarCollapsible::Icon,
-              sheet_attrs: attributes! { aria-label="Menu lateral" },
+              sheet_attrs: attributes! {
+                  id="app-sidebar"
+                  aria-label="Menu lateral"
+                  @keydown=$(|e: Event| {
+                      if e.key == "Escape" {
+                          expanded.set(false);
+                          let state = "collapsed";
+                          let max_age = SIDEBAR_COOKIE_MAX_AGE;
+                          raw!(
+                              r#"document.cookie = "sidebar_state=" + String(${state}) + "; Path=/; Max-Age=" + String(${max_age});"#,
+                              {
+                                  let _ = (state, max_age);
+                              }
+                          );
+                      }
+                  })
+                  @click=$(|e: Event| {
+                      if e.target.id == "app-sidebar" {
+                          expanded.set(false);
+                          let state = "collapsed";
+                          let max_age = SIDEBAR_COOKIE_MAX_AGE;
+                          raw!(
+                              r#"document.cookie = "sidebar_state=" + String(${state}) + "; Path=/; Max-Age=" + String(${max_age});"#,
+                              {
+                                  let _ = (state, max_age);
+                              }
+                          );
+                      }
+                  })
+              },
               sidebar_header(
-                  sidebar_menu(
-                      sidebar_menu_item(
-                          sidebar_menu_button(
-                              href: Some(home_href.as_str()),
-                              size: SidebarMenuButtonSize::Lg,
-                              tooltip: Some("Linda Flor"),
-                              <div class="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
-                                  icon(data: iconify_icon!("lucide:sun"))
-                              </div>
-                              <div class="grid flex-1 text-left text-sm leading-tight md:group-data-[collapsible=icon]/sidebar:hidden">
-                                  <span class="truncate font-medium">"Linda Flor"</span>
-                                  <span class="truncate text-xs text-muted-foreground">"Moda Praia"</span>
-                              </div>
+                  <div class="flex items-center gap-2">
+                      sidebar_menu(
+                          attrs: attributes! { class="flex-1" },
+                          sidebar_menu_item(
+                              sidebar_menu_button(
+                                  href: Some(home_href.as_str()),
+                                  size: SidebarMenuButtonSize::Lg,
+                                  tooltip: Some("Linda Flor"),
+                                  <div class="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+                                      icon(data: iconify_icon!("lucide:sun"))
+                                  </div>
+                                  <div class="grid flex-1 text-left text-sm leading-tight md:group-data-[collapsible=icon]/sidebar:hidden">
+                                      <span class="truncate font-medium">"Linda Flor"</span>
+                                      <span class="truncate text-xs text-muted-foreground">"Moda Praia"</span>
+                                  </div>
+                              )
                           )
                       )
-                  )
+                      button(
+                          variant: ButtonVariant::Ghost,
+                          size: ButtonSize::Icon,
+                          attrs: attributes! {
+                              type="button"
+                              class="md:hidden"
+                              aria-label="Fechar menu"
+                              (close_sidebar)
+                          },
+                          icon(data: iconify_icon!("lucide:x"))
+                      )
+                  </div>
               )
               sidebar_content(
                   sidebar_group(
@@ -380,6 +439,7 @@ pub async fn app_shell(
                   sidebar_trigger(
                       open: $(expanded.get()),
                       attrs: attributes! {
+                          aria-controls="app-sidebar"
                           (toggle_sidebar)
                       },
                   )
@@ -409,17 +469,17 @@ pub async fn storefront_shell(
               "Frete grátis acima de R$ 299 · Aracaju, SE"
           </div>
           <header class="sticky top-0 z-50 border-b border-border bg-background backdrop-blur">
-              <div class="mx-auto grid h-20 max-w-7xl grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 md:px-8">
-                  <nav class="hidden items-center gap-6 md:flex">
+              <div class="mx-auto grid h-20 max-w-7xl grid-cols-[1fr_auto] items-center gap-4 px-4 md:grid-cols-[1fr_auto_1fr] md:px-8">
+                  <a href=(href!(crate::app::page)) class="justify-self-start text-left md:col-start-2 md:justify-self-center md:text-center">
+                      <span class="font-serif text-2xl leading-none text-foreground">"Linda Flor"</span>
+                      <span class="block text-[10px] tracking-[0.24em] text-primary uppercase">"Moda Praia"</span>
+                  </a>
+                  <nav class="hidden items-center gap-6 md:col-start-1 md:row-start-1 md:flex">
                       <a href=(href!(crate::app::produtos::page)) class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">"Catálogo"</a>
                       <a href=(href!(crate::app::colecoes::page)) class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">"Coleções"</a>
                       <a href=(href!(crate::app::page).fragment("sobre")) class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">"Sobre"</a>
                   </nav>
-                  <a href=(href!(crate::app::page)) class="text-center">
-                      <span class="font-serif text-2xl leading-none text-foreground">"Linda Flor"</span>
-                      <span class="block text-[10px] tracking-[0.24em] text-primary uppercase">"Moda Praia"</span>
-                  </a>
-                  <div class="flex items-center justify-end gap-2">
+                  <div class="flex items-center justify-end justify-self-end gap-2">
                       theme_toggle()
                       if logged_in {
                           <a
