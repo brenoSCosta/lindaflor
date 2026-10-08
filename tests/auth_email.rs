@@ -1,9 +1,7 @@
-mod common;
-
-use common::{
+use http::StatusCode;
+use test_support::{
   json_post, pool_and_router, sign_up, unique_email, verification_token,
 };
-use http::StatusCode;
 
 #[tokio::test]
 async fn send_and_verify_email() {
@@ -24,6 +22,25 @@ async fn send_and_verify_email() {
   .await;
   assert_eq!(send.status, StatusCode::OK);
   assert_eq!(send.json["status"], true);
+
+  let stored = sqlx::query(
+    r#"
+        SELECT value, value_hash
+        FROM verifications
+        WHERE identifier LIKE $1
+        ORDER BY created_at DESC
+        LIMIT 1
+        "#,
+  )
+  .bind(format!("email-verification:{email}%"))
+  .fetch_one(&pool)
+  .await
+  .expect("verify token row");
+  let stored_value: String = sqlx::Row::get(&stored, "value");
+  assert!(
+    stored_value.is_empty(),
+    "verify token must not be plaintext"
+  );
 
   let token = verification_token(&pool, "email-verification:").await;
 
@@ -61,7 +78,10 @@ async fn change_email_and_confirm() {
     &router,
     "/api/auth/change-email",
     cookie,
-    serde_json::json!({ "newEmail": new_email }),
+    serde_json::json!({
+        "newEmail": new_email,
+        "password": "password123",
+    }),
   )
   .await;
   assert_eq!(change.status, StatusCode::OK, "{:?}", change.json);

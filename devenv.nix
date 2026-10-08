@@ -31,10 +31,11 @@
     pkgs.openssl
     pkgs.zlib
   ];
-  env.DATABASE_URL = "postgres://postgres:postgres@127.0.0.1:4201/topcoat";
   # Ad-hoc cargo and rust-analyzer read .sqlx/ instead of opening a connection per query.
   # `devenv up` overrides this and rewrites the cache. See scripts.cargo-with-sqlx.
   env.SQLX_OFFLINE = "true";
+
+  env.DATABASE_URL = "postgres://postgres:postgres@127.0.0.1:4201/topcoat";
   env.PGPORT = lib.mkForce "4201";
   env.VALKEY_URL = "redis://127.0.0.1:4202";
   env.S3_ENDPOINT = "http://127.0.0.1:4203";
@@ -44,8 +45,12 @@
   env.S3_BUCKET = "lindaflor";
   env.PORT = "4200";
   env.APP_ENV = "development";
+  env.APP_ORIGIN = "http://localhost:4200";
   env.GOOGLE_CLIENT_ID = "fake-client.apps.googleusercontent.com";
   env.GOOGLE_CLIENT_SECRET = "GOCSPX-fake";
+  env.TOKEN_PEPPER = "dev-pepper-change-me";
+  env.LOG_SAMPLE_RATE = "1";
+  env.LOG_SLOW_THRESHOLD_MS = "1000";
 
   languages.rust = {
     enable = true;
@@ -195,7 +200,10 @@
     set -euo pipefail
     export PATH="''${DEVENV_ROOT}/.devenv/state/cargo-install/bin:''${PATH}"
     echo "Applying migrations..."
-    migrate_log=$(sqlx migrate run 2>&1)
+    if ! migrate_log=$(sqlx migrate run 2>&1); then
+      printf '%s\n' "$migrate_log"
+      exit 1
+    fi
     if [ -n "$migrate_log" ]; then
       printf '%s\n' "$migrate_log"
     fi
@@ -217,7 +225,10 @@
     cache="''${DEVENV_ROOT}/.sqlx"
     mkdir -p "$cache"
     if PGCONNECT_TIMEOUT=2 psql "$DATABASE_URL" -c 'SELECT 1' >/dev/null 2>&1; then
-      migrate_log=$(sqlx migrate run 2>&1)
+      if ! migrate_log=$(sqlx migrate run 2>&1); then
+        printf '%s\n' "$migrate_log"
+        exit 1
+      fi
       if [ -n "$migrate_log" ]; then
         printf '%s\n' "$migrate_log"
       fi
@@ -261,7 +272,10 @@
   scripts.prepare-sqlx = {
     exec = ''
       set -euo pipefail
-      migrate_log=$(sqlx migrate run 2>&1)
+      if ! migrate_log=$(sqlx migrate run 2>&1); then
+        printf '%s\n' "$migrate_log"
+        exit 1
+      fi
       if [ -n "$migrate_log" ]; then
         printf '%s\n' "$migrate_log"
       fi

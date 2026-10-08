@@ -1,9 +1,8 @@
-mod common;
-
-use common::{
+use http::StatusCode;
+use test_support::{
   json_get, json_post, pool_and_router, sign_in, sign_up, unique_email,
 };
-use http::StatusCode;
+use uuid::Uuid;
 
 #[tokio::test]
 async fn sign_up_sign_in_get_session_sign_out() {
@@ -56,4 +55,43 @@ async fn sign_in_wrong_password_is_unauthorized() {
 
   let bad = sign_in(&router, &email, "not-the-password").await;
   assert_eq!(bad.status, StatusCode::UNAUTHORIZED, "{:?}", bad.json);
+}
+
+#[tokio::test]
+async fn expired_temp_ban_does_not_block_sign_in_or_session() {
+  let (pool, router) = pool_and_router().await;
+  let email = unique_email("core-ban-expiry");
+  let password = "password123";
+
+  let signed_up = sign_up(&router, "Core Ban Expiry", &email, password).await;
+  assert_eq!(signed_up.status, StatusCode::OK);
+  let cookie = signed_up.next_cookie.clone().expect("cookie");
+  let user_id =
+    Uuid::parse_str(signed_up.json["user"]["id"].as_str().unwrap()).unwrap();
+
+  sqlx::query(
+    "UPDATE users
+     SET banned = true, ban_reason = 'temp',
+         ban_expires = now() - interval '1 hour'
+     WHERE id = $1",
+  )
+  .bind(user_id)
+  .execute(&pool)
+  .await
+  .unwrap();
+
+  let session = json_get(&router, "/api/auth/get-session", Some(&cookie)).await;
+  assert_eq!(
+    session.json["user"]["email"], email,
+    "expired temp ban must lift for current_user, got {:?}",
+    session.json
+  );
+
+  let again = sign_in(&router, &email, password).await;
+  assert_eq!(
+    again.status,
+    StatusCode::OK,
+    "expired temp ban must not block sign-in, got {:?}",
+    again.json
+  );
 }

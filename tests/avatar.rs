@@ -1,10 +1,8 @@
-mod common;
-
-use common::{pool_and_router, unique_email};
 use lindaflor::app::utils::resolve_storage_url;
 use lindaflor::auth::avatar::{remove_avatar, update_avatar};
 use lindaflor::storage::ObjectStore;
 use sqlx::PgPool;
+use test_support::{pool_and_router, unique_email};
 use uuid::Uuid;
 
 const MSG_TYPE: &str = "Apenas imagens JPG, PNG ou WebP são permitidas";

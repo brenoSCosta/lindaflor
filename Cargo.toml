@@ -5,7 +5,7 @@ edition = "2024"
 default-run = "lindaflor"
 
 [dependencies]
-topcoat = { version = "0.9", features = ["tailwind", "ui", "icon-iconify", "multipart"] }
+topcoat = { version = "0.9", features = ["tailwind", "ui", "icon-iconify", "multipart", "tower"] }
 tokio = { version = "1", features = ["full"] }
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "migrate", "time", "uuid"] }
 redis = { version = "0.28", features = ["tokio-comp"] }
@@ -28,6 +28,9 @@ time = "0.3.55"
 totp-rs = { version = "6", default-features = false, features = ["std", "otpauth", "gen_secret"] }
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls", "form"] }
+governor = "0.10.4"
+tower = "0.5"
+tower-http = { version = "0.7", features = ["set-header"] }
 
 [build-dependencies]
 topcoat = { version = "0.9", default-features = false, features = ["tailwind", "icon-iconify"] }
@@ -36,6 +39,7 @@ topcoat = { version = "0.9", default-features = false, features = ["tailwind", "
 postgresql_embedded = { version = "0.21", features = ["tokio"] }
 http-body-util = "0.1"
 bytes = "1"
+test-support = { path = "crates/test-support" }
 
 # Faster incremental links for `topcoat dev` (see Topcoat getting started).
 [profile.dev]

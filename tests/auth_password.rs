@@ -1,10 +1,8 @@
-mod common;
-
-use common::{
+use http::StatusCode;
+use test_support::{
   json_post, pool_and_router, sign_in, sign_up, unique_email,
   verification_token,
 };
-use http::StatusCode;
 
 #[tokio::test]
 async fn request_and_reset_password() {
@@ -25,6 +23,32 @@ async fn request_and_reset_password() {
   .await;
   assert_eq!(req.status, StatusCode::OK);
   assert_eq!(req.json["status"], true);
+
+  let stored = sqlx::query(
+    r#"
+        SELECT value, value_hash
+        FROM verifications
+        WHERE identifier LIKE $1
+        ORDER BY created_at DESC
+        LIMIT 1
+        "#,
+  )
+  .bind(format!("reset-password:{email}%"))
+  .fetch_one(&pool)
+  .await
+  .expect("reset token row");
+  let stored_value: String = sqlx::Row::get(&stored, "value");
+  let stored_hash: Option<String> = sqlx::Row::get(&stored, "value_hash");
+  assert!(
+    stored_value.is_empty(),
+    "reset token must not be stored plaintext"
+  );
+  assert!(
+    stored_hash
+      .as_deref()
+      .is_some_and(|h| h.len() == 64 && h != stored_value),
+    "value_hash must be a digest, not the raw secret"
+  );
 
   let token = verification_token(&pool, "reset-password:").await;
 

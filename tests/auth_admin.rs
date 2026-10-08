@@ -1,7 +1,7 @@
-mod common;
-
-use common::{json_get, json_post, pool_and_router, sign_up, unique_email};
 use http::StatusCode;
+use test_support::{
+  json_get, json_post, pool_and_router, sign_up, unique_email,
+};
 use uuid::Uuid;
 
 #[tokio::test]
@@ -120,7 +120,7 @@ async fn sign_in(
   router: &topcoat::router::Router,
   email: &str,
   password: &str,
-) -> common::JsonResponse {
+) -> test_support::JsonResponse {
   json_post(
     router,
     "/api/auth/sign-in/email",

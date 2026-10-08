@@ -13,6 +13,7 @@ use topcoat::{
     route,
   },
   runtime::{Event, expr, procedure, signal},
+  session,
   view::{View, component, view},
 };
 use uuid::Uuid;
@@ -22,9 +23,12 @@ use crate::app::utils::{object_store, resolve_storage_url};
 use crate::auth::CREDENTIAL_PROVIDER_ID;
 use crate::auth::avatar::{self as auth_avatar};
 use crate::auth::google::GOOGLE_PROVIDER_ID;
+use crate::auth::password::verify_password;
 use crate::auth::service::{
   self, LinkedAccount, ListedSession, portuguese_error_message,
 };
+use crate::auth::totp::verify_code;
+use crate::auth::user::User;
 use crate::components::avatar::{
   AvatarSize, avatar, avatar_fallback, avatar_image,
 };
@@ -1022,6 +1026,8 @@ async fn linked_accounts_tab(
 async fn danger_tab(cx: &Cx) -> Result<impl View> {
   let confirm_email = signal(cx, String::new);
   let confirm_email_touched = signal(cx, || false);
+  let delete_password = signal(cx, String::new);
+  let delete_code = signal(cx, String::new);
   let confirm_email_error = expr!({
     if !confirm_email_touched.get() {
       "".to_owned()
@@ -1047,7 +1053,7 @@ async fn danger_tab(cx: &Cx) -> Result<impl View> {
           card_header(
               card_title("Zona de perigo")
               card_description(
-                  "Exclua permanentemente sua conta e todos os dados associados. Isso não pode ser desfeito."
+                  "Exclua permanentemente sua conta e todos os dados associados. Isso não pode ser desfeito. Por segurança, confirme seu e-mail e sua senha atual (ou o código do autenticador, se você usa 2FA)."
               )
           )
           card_content(
@@ -1080,6 +1086,31 @@ async fn danger_tab(cx: &Cx) -> Result<impl View> {
                       field_error(
                           message: confirm_email_error,
                           attrs: attributes! { id="confirm_email-error" }
+                      )
+                  )
+                  field(
+                      field_label(attrs: attributes! { for="delete_password" }, "Senha atual")
+                      input(
+                          value: delete_password,
+                          attrs: attributes! {
+                              id="delete_password"
+                              name="password"
+                              type="password"
+                              autocomplete="current-password"
+                          }
+                      )
+                  )
+                  field(
+                      field_label(attrs: attributes! { for="delete_code" }, "Código do autenticador (se você usa 2FA)")
+                      input(
+                          value: delete_code,
+                          attrs: attributes! {
+                              id="delete_code"
+                              name="code"
+                              type="text"
+                              inputmode="numeric"
+                              autocomplete="one-time-code"
+                          }
                       )
                   )
                   button(
@@ -1164,6 +1195,171 @@ async fn unlink_account_proc(
 
 fn settings_tab_url(cx: &Cx, tab: &str) -> String {
   href!(page).query([("tab", tab)]).resolve(cx)
+}
+
+/// How recently the user must have signed in for immediate account deletion.
+///
+/// Requiring a fresh session limits the damage of a stolen long-lived cookie:
+/// an attacker who only holds the cookie still needs the password (or TOTP).
+const DELETE_FRESH_LOGIN_SECS: i64 = 30 * 60;
+
+/// Same-origin gate for immediate account deletion (production only).
+///
+/// Session cookies are `SameSite=Lax` and Topcoat's `OriginPolicy` (when
+/// `APP_ORIGIN` is set) already guards cross-origin mutations; this keeps an
+/// explicit same-origin requirement for the destructive settings POST as
+/// defense-in-depth. Browsers attach `Origin` (and usually `Referer`) to the
+/// form POST; require one of them to match this request's host. Skipped in
+/// dev/test where non-browser clients post without these headers.
+fn check_delete_origin(cx: &Cx) -> Result<(), String> {
+  let env = crate::config::app_env();
+  if matches!(env.as_str(), "development" | "dev" | "test") {
+    return Ok(());
+  }
+  let headers = topcoat::router::request::headers(cx);
+  let host = headers
+    .get("host")
+    .and_then(|v| v.to_str().ok())
+    .map(|h| h.trim().to_ascii_lowercase())
+    .unwrap_or_default();
+  // `Origin: https://host[:port]` or `Referer: https://host[:port]/path`.
+  let authority_of = |value: &str| -> Option<String> {
+    let after_scheme = value.trim().split("://").nth(1).unwrap_or(value);
+    let authority = after_scheme.split('/').next()?.trim().to_ascii_lowercase();
+    if authority.is_empty() {
+      None
+    } else {
+      Some(authority)
+    }
+  };
+  let same_origin = ["origin", "referer"].iter().any(|name| {
+    headers
+      .get(*name)
+      .and_then(|v| v.to_str().ok())
+      .and_then(authority_of)
+      .is_some_and(|a| !host.is_empty() && a == host)
+  });
+  if same_origin {
+    Ok(())
+  } else {
+    Err("Origem da requisição inválida para esta ação.".to_string())
+  }
+}
+
+/// Step-up authorization for immediate account deletion.
+///
+/// Enforces, in order (see PRODUCTION_READINESS §1.4):
+/// 1. Same-origin request in production ([`check_delete_origin`]).
+/// 2. Fresh session: the session must have started within
+///    [`DELETE_FRESH_LOGIN_SECS`] (re-login otherwise).
+/// 3. Proof of knowledge: the current password when the account has a
+///    credential login, or a TOTP code when 2FA is enrolled (either is
+///    accepted when both exist, mirroring `disable_two_factor`). Accounts
+///    with neither (OAuth-only) fall back to the e-mail confirmation alone
+///    so the confirm flow keeps working.
+///
+/// Returns a Portuguese message safe to show in the settings toast.
+async fn authorize_immediate_delete(
+  pool: &PgPool,
+  user: &User,
+  session_id: Uuid,
+  password: &str,
+  code: &str,
+) -> Result<(), String> {
+  let session = sqlx::query!(
+    r#"SELECT created_at FROM sessions WHERE id = $1"#,
+    session_id,
+  )
+  .fetch_optional(pool)
+  .await
+  .map_err(|_| "Não foi possível verificar a sessão.".to_string())?;
+  let Some(session) = session else {
+    return Err("Sessão inválida. Entre novamente.".to_string());
+  };
+  let age = time::OffsetDateTime::now_utc() - session.created_at.assume_utc();
+  if age > time::Duration::seconds(DELETE_FRESH_LOGIN_SECS) {
+    return Err(
+      "Sessão expirada para esta ação. Entre novamente e tente outra vez."
+        .to_string(),
+    );
+  }
+
+  let account = sqlx::query!(
+    r#"
+        SELECT password
+        FROM accounts
+        WHERE user_id = $1 AND provider_id = $2
+        "#,
+    user.id,
+    CREDENTIAL_PROVIDER_ID,
+  )
+  .fetch_optional(pool)
+  .await
+  .map_err(|_| "Não foi possível verificar a conta.".to_string())?;
+  let has_password = account
+    .and_then(|a| a.password)
+    .is_some_and(|h| !h.is_empty());
+
+  let tf = sqlx::query!(
+    r#"SELECT secret, verified FROM two_factor WHERE user_id = $1"#,
+    user.id,
+  )
+  .fetch_optional(pool)
+  .await
+  .map_err(|_| "Não foi possível verificar a conta.".to_string())?;
+  let totp_secret = tf.filter(|row| row.verified).map(|row| row.secret);
+
+  if !has_password && totp_secret.is_none() {
+    // OAuth-only account without 2FA: nothing else to check; the e-mail
+    // confirmation handled by `delete_user_confirmed` is the only factor.
+    return Ok(());
+  }
+
+  let password = password.trim();
+  let password_ok = if has_password && !password.is_empty() {
+    let stored = sqlx::query!(
+      r#"
+            SELECT password
+            FROM accounts
+            WHERE user_id = $1 AND provider_id = $2
+            "#,
+      user.id,
+      CREDENTIAL_PROVIDER_ID,
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|_| "Não foi possível verificar a conta.".to_string())?;
+    match stored.and_then(|row| row.password) {
+      Some(hash) => verify_password(password, &hash)
+        .map_err(|_| "Não foi possível verificar a senha.".to_string())?,
+      None => false,
+    }
+  } else {
+    false
+  };
+  if password_ok {
+    return Ok(());
+  }
+
+  let code = code.trim();
+  if let Some(secret) = totp_secret.as_deref()
+    && !code.is_empty()
+  {
+    let ok = verify_code(secret, code)
+      .map_err(|_| "Não foi possível verificar o código.".to_string())?;
+    if ok {
+      return Ok(());
+    }
+    return Err("Código do autenticador inválido.".to_string());
+  }
+
+  if has_password && !password.is_empty() {
+    return Err("Senha incorreta.".to_string());
+  }
+  Err(
+    "Informe sua senha atual ou o código do autenticador para excluir a conta."
+      .to_string(),
+  )
 }
 
 #[route(POST "/settings")]
@@ -1275,7 +1471,7 @@ pub async fn settings_post(
     },
     "confirm_2fa" => {
       let code = body.code.as_deref().unwrap_or("");
-      match service::confirm_enable_two_factor(pool, &su.user, code).await {
+      match service::confirm_enable_two_factor(cx, pool, &su.user, code).await {
         Ok(()) => ok_redirect(),
         Err(err) => {
           set_toast(cx, Toast::error(portuguese_error_message(&err)));
@@ -1298,10 +1494,16 @@ pub async fn settings_post(
     "link_google" => {
       let callback =
         href!(page).query([("tab", "linked-accounts")]).resolve(cx);
+      let Some(session_hash) = session::token_hash(cx).await? else {
+        return err_redirect("Sessão expirada. Entre novamente.");
+      };
+      let session_binding =
+        crate::auth::session_store::token_hash_hex(&session_hash);
       match service::start_link_google(
         pool,
         su.user.id,
         Some(callback.as_str()),
+        &session_binding,
       )
       .await
       {
@@ -1326,6 +1528,22 @@ pub async fn settings_post(
     }
     "delete_user" => {
       let confirm = body.confirm_email.as_deref().unwrap_or("");
+      let password = body.password.as_deref().unwrap_or("");
+      let code = body.code.as_deref().unwrap_or("");
+      if let Err(msg) = check_delete_origin(cx) {
+        return err_redirect(&msg);
+      }
+      if let Err(msg) = authorize_immediate_delete(
+        pool,
+        &su.user,
+        su.session_id,
+        password,
+        code,
+      )
+      .await
+      {
+        return err_redirect(&msg);
+      }
       match service::delete_user_confirmed(cx, pool, &su.user, confirm).await {
         Ok(()) => toast_redirect(cx, href!(crate::app::page).resolve(cx)),
         Err(err) => err_redirect(&portuguese_error_message(&err)),

@@ -6,7 +6,7 @@ use sqlx::postgres::PgPoolOptions;
 use tokio::sync::OnceCell;
 use uuid::Uuid;
 
-#[path = "embedded_postgres.rs"]
+#[path = "../crates/test-support/src/embedded_postgres.rs"]
 mod embedded_postgres;
 
 struct TestDb {
@@ -58,7 +58,7 @@ pub async fn fresh_pool() -> PgPool {
   let _ = pool().await;
   let url = DB.get().expect("test db").database_url.clone();
   PgPoolOptions::new()
-    .max_connections(8)
+    .max_connections(3)
     .acquire_timeout(Duration::from_secs(30))
     .connect(&url)
     .await

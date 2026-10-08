@@ -130,13 +130,26 @@ pub fn consume_backup_code(stored: &str, presented: &str) -> Option<String> {
       .join(","),
   )
 }
-
 fn normalize_backup_code(code: &str) -> String {
   code
     .chars()
     .filter(|c| c.is_ascii_alphanumeric())
     .map(|c| c.to_ascii_uppercase())
     .collect()
+}
+
+/// Valkey/in-memory single-use key claiming one TOTP code for one user
+/// (`skew=1` without a replay cache accepts the
+/// same code twice inside the window).
+///
+/// The key embeds only the *normalized* code plus the user id — never the
+/// TOTP secret. Enforcement lives in `crate::valkey::totp_reserve`, which
+/// claims the key with `SET NX EX 90s` (90s covers the prev/current/next
+/// 30s steps). Callers must reserve *after* `verify_code` returns true
+/// (and after the pending-token binding check) so a wrong code does not
+/// occupy a usable slot; a code that verifies once cannot verify again.
+pub fn totp_reuse_key(user_id: &uuid::Uuid, code: &str) -> String {
+  format!("totp:used:{}:{}", user_id.as_simple(), code.trim())
 }
 
 #[cfg(test)]
@@ -203,5 +216,20 @@ mod tests {
       consume_backup_code("not-valid, ,no-dollar", "ABCD-1234").is_none()
     );
     assert!(consume_backup_code("", "ABCD-1234").is_none());
+  }
+
+  #[test]
+  fn reuse_key_is_user_and_code_scoped() {
+    let a = uuid::Uuid::now_v7();
+    let b = uuid::Uuid::now_v7();
+    assert_eq!(
+      totp_reuse_key(&a, " 123456 "),
+      format!("totp:used:{}:123456", a.as_simple())
+    );
+    // Different user, same code → different key.
+    assert_ne!(totp_reuse_key(&a, "123456"), totp_reuse_key(&b, "123456"));
+    // Different code, same user → different key.
+    assert_ne!(totp_reuse_key(&a, "123456"), totp_reuse_key(&a, "654321"));
+    assert!(totp_reuse_key(&a, "123456").starts_with("totp:used:"));
   }
 }

@@ -1,4 +1,5 @@
 use sqlx::PgPool;
+use time::PrimitiveDateTime;
 use topcoat::{
   Result,
   context::Cx,
@@ -6,7 +7,9 @@ use topcoat::{
   router::{href, page},
   view::{View, view},
 };
+use uuid::Uuid;
 
+use crate::app::auth_helpers::require_user;
 use crate::components::badge::{BadgeVariant, badge};
 use crate::components::button::button_variants;
 use crate::components::button::{ButtonSize, ButtonVariant};
@@ -14,6 +17,40 @@ use crate::components::container::container;
 use crate::components::table::{
   table, table_body, table_cell, table_head, table_header, table_row,
 };
+
+pub struct RecentOrder {
+  pub id: Uuid,
+  pub status: String,
+  pub total_cents: i32,
+  pub created_at: PrimitiveDateTime,
+}
+
+pub async fn load_recent_orders(
+  pool: &PgPool,
+  user_id: Uuid,
+) -> Result<Vec<RecentOrder>, sqlx::Error> {
+  let rows = sqlx::query!(
+    "SELECT id, status::text AS \"status!\", total_cents, created_at
+         FROM orders
+         WHERE user_id = $1
+         ORDER BY created_at DESC
+         LIMIT 5",
+    user_id,
+  )
+  .fetch_all(pool)
+  .await?;
+  Ok(
+    rows
+      .into_iter()
+      .map(|row| RecentOrder {
+        id: row.id,
+        status: row.status,
+        total_cents: row.total_cents,
+        created_at: row.created_at,
+      })
+      .collect(),
+  )
+}
 
 fn status_variant(status: &str) -> BadgeVariant {
   match status {
@@ -26,16 +63,12 @@ fn status_variant(status: &str) -> BadgeVariant {
 
 #[page]
 pub async fn page(cx: &Cx) -> Result<impl View> {
+  // Authenticated page: anonymous visitors are redirected to `/login`
+  // (see `require_user`) and never see order rows.
+  let actor = require_user(cx).await?;
   let pool = app_context::<PgPool>(cx);
 
-  let recent_orders = sqlx::query!(
-        "SELECT id, guest_email, status::text AS \"status!\", total_cents, created_at
-         FROM orders
-         ORDER BY created_at DESC
-         LIMIT 5"
-    )
-    .fetch_all(pool)
-    .await?;
+  let recent_orders = load_recent_orders(pool, actor.user.id).await?;
 
   Ok(view! {
       container(

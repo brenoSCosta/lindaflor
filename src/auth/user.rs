@@ -68,11 +68,32 @@ fn primitive_to_system_time(dt: PrimitiveDateTime) -> SystemTime {
   }
 }
 
+/// Whether `(banned, ban_expires)` counts as banned right now.
+///
+/// Single source of truth for ban enforcement:
+/// permanent bans (`ban_expires = NULL`) stay banned, temporary bans lift as
+/// soon as `ban_expires` passes. Use this everywhere a ban is checked
+/// (`current_user`, sign-in, impersonation, 2FA completion) so expired temp
+/// bans lift on every path instead of drifting apart.
+pub fn is_currently_banned(
+  banned: bool,
+  ban_expires: Option<PrimitiveDateTime>,
+) -> bool {
+  if !banned {
+    return false;
+  }
+  match ban_expires {
+    None => true,
+    Some(expires) => expires.assume_utc() > time::OffsetDateTime::now_utc(),
+  }
+}
+
 /// Resolve the signed-in user for this request, or `None` if unauthenticated.
 ///
 /// - Looks up the cookie token via [`session::token_hash`]
 /// - Loads the session + user from Postgres (hex TokenHash)
-/// - Rejects banned users (returns `None`)
+/// - Rejects currently-banned users (returns `None`; expired temp bans lift
+///   via [`is_currently_banned`])
 /// - Slides expiry about once per day ([`SESSION_UPDATE_AGE`])
 #[memoize(as_ref)]
 pub async fn current_user(cx: &Cx) -> Result<Option<SessionUser>> {
@@ -85,7 +106,7 @@ pub async fn current_user(cx: &Cx) -> Result<Option<SessionUser>> {
     return Ok(None);
   };
 
-  if row.banned {
+  if is_currently_banned(row.banned, row.ban_expires) {
     return Ok(None);
   }
 
@@ -105,7 +126,16 @@ pub async fn current_user(cx: &Cx) -> Result<Option<SessionUser>> {
     .await?;
   }
 
-  Ok(Some(SessionUser::from(row)))
+  let su = SessionUser::from(row);
+  crate::logging::request_store::set_request_user(
+    cx,
+    crate::logging::request_store::RequestUser {
+      user_id: su.user.id.to_string(),
+      session_id: su.session_id.to_string(),
+      role: su.user.role.clone(),
+    },
+  );
+  Ok(Some(su))
 }
 
 /// Owned session lookup for callers that cannot use the memoized `&Error` / `&Option`.
@@ -116,4 +146,32 @@ pub async fn current_user_owned(cx: &Cx) -> Result<Option<SessionUser>> {
       .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))?
       .clone(),
   )
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn primitive_hours_from_now(hours: i64) -> PrimitiveDateTime {
+    let odt = time::OffsetDateTime::now_utc() + time::Duration::hours(hours);
+    PrimitiveDateTime::new(odt.date(), odt.time())
+  }
+
+  #[test]
+  fn ban_expiry_boundary() {
+    // Never banned: no ban regardless of expiry value.
+    assert!(!is_currently_banned(false, None));
+    assert!(!is_currently_banned(
+      false,
+      Some(primitive_hours_from_now(1))
+    ));
+    // Permanent ban (no expiry) stays banned.
+    assert!(is_currently_banned(true, None));
+    // Future expiry is still banned; past expiry lifts the ban.
+    assert!(is_currently_banned(true, Some(primitive_hours_from_now(1))));
+    assert!(!is_currently_banned(
+      true,
+      Some(primitive_hours_from_now(-1))
+    ));
+  }
 }

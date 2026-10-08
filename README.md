@@ -84,19 +84,25 @@ pgweb is a local Postgres viewer started by `devenv up` at http://127.0.0.1:4205
 
 devenv exports the process environment. `DATABASE_URL` follows the Postgres port it allocated.
 
-| Variable       | Set by devenv                                         | Description |
-| -------------- | ----------------------------------------------------- | ----------- |
-| `PORT`         | `4200`                                                | HTTP listen port |
-| `DATABASE_URL` | `postgres://postgres:postgres@127.0.0.1:$PGPORT/topcoat` | PostgreSQL connection |
-| `VALKEY_URL`   | `redis://127.0.0.1:4202`                              | Valkey connection |
-| `APP_ENV`      | `development`                                         | `development` / `dev` enables OpenAPI docs |
-| `S3_ENDPOINT`  | `http://127.0.0.1:4203`                               | RustFS S3 API endpoint |
-| `S3_REGION`    | `us-east-1`                                           | S3 region |
-| `S3_ACCESS_KEY_ID` | `rustfsadmin`                                     | RustFS access key |
-| `S3_SECRET_ACCESS_KEY` | `rustfsadmin`                                 | RustFS secret key |
-| `S3_BUCKET`    | `lindaflor`                                           | Object bucket |
+| Variable                  | Set by devenv                                             | Description |
+| ------------------------- | --------------------------------------------------------- | ----------- |
+| `PORT`                    | `4200`                                                    | HTTP listen port |
+| `DATABASE_URL`            | `postgres://postgres:postgres@127.0.0.1:$PGPORT/topcoat`  | PostgreSQL connection |
+| `VALKEY_URL`              | `redis://127.0.0.1:4202`                                  | Valkey connection |
+| `APP_ENV`                 | `development`                                             | `development` / `dev` enables OpenAPI docs; `production` (the default if unset) requires `APP_ORIGIN` |
+| `APP_ORIGIN`              | `http://localhost:4200`                                   | Origin policy check (CSRF checks). |
+| `S3_ENDPOINT`             | `http://127.0.0.1:4203`                                   | RustFS S3 API endpoint |
+| `S3_REGION`               | `us-east-1`                                               | S3 region |
+| `S3_ACCESS_KEY_ID`        | `rustfsadmin`                                             | RustFS access key |
+| `S3_SECRET_ACCESS_KEY`    | `rustfsadmin`                                             | RustFS secret key |
+| `S3_BUCKET`               | `lindaflor`                                               | Object bucket |
+| `TOKEN_PEPPER`            | `dev-pepper-change-me`                                    | Pepper for one-time tokens |
+| `LOG_SAMPLE_RATE`         | `1`                                                       | Sample rate for logging |
+| `LOG_SLOW_THRESHOLD_MS`   | `1000`                                                    | Slow request threshold in milliseconds |
 
 Avatars are stored in RustFS (S3 API). The console is http://127.0.0.1:4204.
+
+The app is same-origin only: there is no CORS layer and no `Access-Control-*` headers. Cross-origin browser POSTs (and other mutations) are rejected with 403 by Topcoat `OriginPolicy`. There is no public cross-origin API.
 
 ## Development
 

@@ -51,6 +51,16 @@ use crate::auth::service;
 use crate::auth::session_config;
 use crate::components::button::{ButtonSize, ButtonVariant, button_variants};
 use crate::components::toast::{ToasterOptions, take_toasts, toaster};
+use crate::logging::layer::RequestLoggingLayer;
+use crate::rate_limit::{
+  DEFAULT_BACKUP_CODE_PER_MIN, DEFAULT_GLOBAL_PER_MIN,
+  DEFAULT_PASSWORD_RESET_PER_MIN, DEFAULT_PEDIDO_PAGE_PER_MIN,
+  DEFAULT_PEDIDO_POLL_PER_MIN, DEFAULT_SIGN_IN_PER_MIN,
+  DEFAULT_SIGN_UP_PER_MIN, DEFAULT_TOTP_PER_MIN, DEFAULT_VERIFY_EMAIL_PER_MIN,
+  RateLimitLayer, SCOPE_BACKUP_CODE, SCOPE_PASSWORD_RESET, SCOPE_PEDIDO_PAGE,
+  SCOPE_PEDIDO_POLL, SCOPE_SIGN_IN, SCOPE_SIGN_UP, SCOPE_TOTP,
+  SCOPE_VERIFY_EMAIL,
+};
 use crate::theme::{THEME_INIT_SCRIPT, THEME_TOGGLE_SCRIPT, read_theme};
 
 use self::store::product_card::product_card;
@@ -72,11 +82,19 @@ pub fn router(
     .app_context(valkey)
     .app_context(storage);
 
+  // Same-origin only: no CorsLayer, so no Access-Control-* headers are
+  // emitted and there is no public cross-origin API. Browser mutations are
+  // governed by OriginPolicy (plus SameSite=Lax cookies). OriginLayer is
+  // the router's outermost check: non-GET|HEAD|OPTIONS and WebSocket
+  // upgrades; sec-fetch-site, else Origin==Host. No exempt_paths /
+  // dangerous_disable. Production boot requires APP_ORIGIN; when present
+  // it is also trusted (and used as base_url).
+  let mut origin_policy = OriginPolicy::new();
   if let Some(origin) = crate::auth::google::app_origin() {
-    builder = builder
-      .base_url(origin.as_str())
-      .origin_policy(OriginPolicy::new().trust_origins([origin]));
+    builder = builder.base_url(origin.as_str());
+    origin_policy = origin_policy.trust_origins([origin]);
   }
+  builder = builder.origin_policy(origin_policy);
 
   let bundle = topcoat::asset::AssetBundle::load().unwrap_or_else(|err| {
         panic!(
@@ -86,15 +104,78 @@ pub fn router(
     });
   builder = builder.assets(bundle);
 
-  builder
+  // Native header fallback is outermost among application layers so 429s
+  // from RateLimit still inherit queued response_headers. OriginLayer
+  // remains outside this stack (Topcoat). Tower SetResponseHeader is
+  // registered last (innermost) and is primary on Ok responses.
+  builder = crate::security_headers::apply_security_headers_fallback(builder);
+
+  builder = builder
     .layer(BodyLimit::max(3 * 1024 * 1024).at("/settings/avatar"))
     // Product create/edit carry product fields plus up to 8 images @ 2MB each.
     .layer(BodyLimit::max(20 * 1024 * 1024).at("/admin/produtos/create"))
     .layer(BodyLimit::max(20 * 1024 * 1024).at("/admin/produtos/update"))
-    .runtime()
-    .build()
+    .layer(RateLimitLayer::global(DEFAULT_GLOBAL_PER_MIN))
+    .layer(RateLimitLayer::scoped(
+      "/api/auth/sign-in",
+      SCOPE_SIGN_IN,
+      DEFAULT_SIGN_IN_PER_MIN,
+    ))
+    .layer(RateLimitLayer::scoped(
+      "/api/auth/sign-up",
+      SCOPE_SIGN_UP,
+      DEFAULT_SIGN_UP_PER_MIN,
+    ))
+    .layer(RateLimitLayer::scoped(
+      "/api/auth/request-password-reset",
+      SCOPE_PASSWORD_RESET,
+      DEFAULT_PASSWORD_RESET_PER_MIN,
+    ))
+    .layer(RateLimitLayer::scoped(
+      "/api/auth/reset-password",
+      SCOPE_PASSWORD_RESET,
+      DEFAULT_PASSWORD_RESET_PER_MIN,
+    ))
+    .layer(RateLimitLayer::scoped(
+      "/api/auth/send-verification-email",
+      SCOPE_VERIFY_EMAIL,
+      DEFAULT_VERIFY_EMAIL_PER_MIN,
+    ))
+    .layer(RateLimitLayer::scoped(
+      "/api/auth/verify-email",
+      SCOPE_VERIFY_EMAIL,
+      DEFAULT_VERIFY_EMAIL_PER_MIN,
+    ))
+    .layer(RateLimitLayer::scoped(
+      "/api/auth/two-factor/verify-totp",
+      SCOPE_TOTP,
+      DEFAULT_TOTP_PER_MIN,
+    ))
+    .layer(RateLimitLayer::scoped(
+      "/api/auth/two-factor/verify-backup-code",
+      SCOPE_BACKUP_CODE,
+      DEFAULT_BACKUP_CODE_PER_MIN,
+    ))
+    .layer(RateLimitLayer::scoped(
+      "/pedido/status-proc",
+      SCOPE_PEDIDO_POLL,
+      DEFAULT_PEDIDO_POLL_PER_MIN,
+    ))
+    .layer(
+      RateLimitLayer::scoped(
+        "/pedido",
+        SCOPE_PEDIDO_PAGE,
+        DEFAULT_PEDIDO_PAGE_PER_MIN,
+      )
+      // `/pedido/status-proc` has its own tighter scope; skip it here so
+      // poll requests consume exactly one budget (true override).
+      .with_skips(&["/pedido/status-proc"]),
+    )
+    .layer(RequestLoggingLayer::from_env());
+  builder =
+    crate::security_headers::apply_security_header_tower_layers(builder);
+  builder.runtime().build()
 }
-
 #[layout]
 async fn root(cx: &Cx, slot: Slot<'_>) -> Result<impl View> {
   let theme_class = if read_theme(cx).is_dark() { "dark" } else { "" };

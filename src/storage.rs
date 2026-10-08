@@ -702,7 +702,10 @@ mod tests {
       Some(bucket),
     ) = (endpoint, region, access_key_id, secret_access_key, bucket)
     else {
-      return;
+      panic!(
+        "live_s3_roundtrip needs S3_ENDPOINT, S3_REGION, S3_ACCESS_KEY_ID, \
+         S3_SECRET_ACCESS_KEY and S3_BUCKET set (run RustFS locally or point at S3)"
+      );
     };
     let config = crate::config::S3Config {
       endpoint,

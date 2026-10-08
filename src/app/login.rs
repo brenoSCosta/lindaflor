@@ -327,6 +327,29 @@ pub async fn login_post(
   let email = body.email.as_deref().unwrap_or("");
   let password = body.password.as_deref().unwrap_or("");
 
+  let (scope, default) = if is_signup {
+    (
+      crate::rate_limit::SCOPE_SIGN_UP,
+      crate::rate_limit::DEFAULT_SIGN_UP_PER_MIN,
+    )
+  } else {
+    (
+      crate::rate_limit::SCOPE_SIGN_IN,
+      crate::rate_limit::DEFAULT_SIGN_IN_PER_MIN,
+    )
+  };
+  if !crate::rate_limit::check_ip_rate(
+    scope,
+    &crate::valkey::client_ip(cx),
+    crate::rate_limit::limit_for(scope, default),
+  ) {
+    return login_error_redirect(
+      cx,
+      is_signup,
+      "Muitas tentativas. Aguarde um momento e tente novamente.",
+    );
+  }
+
   if is_signup {
     let name = body.name.as_deref().unwrap_or("");
     match service::sign_up_email(cx, pool, name, email, password).await {
@@ -366,8 +389,13 @@ pub async fn login_google(
   Form(body): Form<GoogleLoginInput>,
 ) -> Result<Response> {
   let pool = app_context::<PgPool>(cx);
-  match service::start_google_oauth(pool, body.callback_url.as_deref(), None)
-    .await
+  match service::start_google_oauth(
+    pool,
+    body.callback_url.as_deref(),
+    None,
+    None,
+  )
+  .await
   {
     Ok(url) => toast_redirect(cx, url),
     Err(err) => {

@@ -1,12 +1,8 @@
-mod config;
-mod db;
-mod openapi;
-mod valkey;
-
 // Link library API + auth modules (routes register via inventory discover).
 use lindaflor::api;
 use lindaflor::auth;
 use lindaflor::auth::routes;
+use lindaflor::openapi;
 
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
@@ -21,22 +17,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let _ = auth::CREDENTIAL_PROVIDER_ID;
   routes::link_for_discover();
   let _ = api::health;
+  let _ = lindaflor::logging::metrics_route::metrics;
+  let _ = openapi::openapi_json;
+  let _ = openapi::scalar_docs;
+  let _ = openapi::swagger_docs;
 
-  let cfg = crate::config::Config::from_env()?;
-  let pool = crate::db::create_pool(&cfg.database_url).await?;
-  let valkey_conn = crate::valkey::create_client(&cfg.valkey_url).await?;
+  let cfg = lindaflor::config::Config::from_env()?;
+  let pool = lindaflor::db::create_pool(&cfg.database_url).await?;
+  let valkey_conn = lindaflor::valkey::create_client(&cfg.valkey_url).await?;
 
   let storage = match cfg.s3.clone() {
     Some(s3) => {
-      // `src/config.rs` is compiled into the binary and the library, so these
-      // are distinct types. Copy the fields into the library config.
-      let s3 = lindaflor::config::S3Config {
-        endpoint: s3.endpoint,
-        region: s3.region,
-        access_key_id: s3.access_key_id,
-        secret_access_key: s3.secret_access_key,
-        bucket: s3.bucket,
-      };
       let storage = lindaflor::storage::ObjectStore::s3(&s3);
       if let Err(err) = storage.ensure_bucket().await {
         tracing::warn!(error = %err, "object storage bucket is not ready");

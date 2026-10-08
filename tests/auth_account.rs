@@ -1,10 +1,8 @@
-mod common;
-
-use common::{
+use http::StatusCode;
+use test_support::{
   json_get, json_post, pool_and_router, sign_in, sign_up, unique_email,
   verification_token,
 };
-use http::StatusCode;
 use uuid::Uuid;
 
 #[tokio::test]
@@ -125,8 +123,43 @@ async fn delete_user_with_token() {
   assert_eq!(refuse.status, StatusCode::UNAUTHORIZED);
 }
 
+struct EnvRestore {
+  key: &'static str,
+  previous: Option<String>,
+}
+
+impl Drop for EnvRestore {
+  fn drop(&mut self) {
+    match self.previous.take() {
+      Some(value) => unsafe { std::env::set_var(self.key, value) },
+      None => unsafe { std::env::remove_var(self.key) },
+    }
+  }
+}
+
+fn set_env(key: &'static str, value: &str) -> EnvRestore {
+  let previous = std::env::var(key).ok();
+  unsafe { std::env::set_var(key, value) };
+  EnvRestore { key, previous }
+}
+
+fn remove_env(key: &'static str) -> EnvRestore {
+  let previous = std::env::var(key).ok();
+  unsafe { std::env::remove_var(key) };
+  EnvRestore { key, previous }
+}
+
+/// devenv (and other tests) may set Google OAuth env; serialize mutations.
+static GOOGLE_ENV_LOCK: tokio::sync::Mutex<()> =
+  tokio::sync::Mutex::const_new(());
+
 #[tokio::test]
 async fn link_social_unavailable_without_google_env() {
+  let _lock = GOOGLE_ENV_LOCK.lock().await;
+  let _id = remove_env("GOOGLE_CLIENT_ID");
+  let _secret = remove_env("GOOGLE_CLIENT_SECRET");
+  let _origin = remove_env("APP_ORIGIN");
+
   let (_pool, router) = pool_and_router().await;
   let email = unique_email("link");
   let signed_up = sign_up(&router, "Link User", &email, "password123").await;
@@ -146,4 +179,37 @@ async fn link_social_unavailable_without_google_env() {
     "{:?}",
     linked.json
   );
+}
+
+#[tokio::test]
+async fn google_callback_rejects_missing_pkce_verifier_before_network() {
+  let _lock = GOOGLE_ENV_LOCK.lock().await;
+  let _id =
+    set_env("GOOGLE_CLIENT_ID", "test-client.apps.googleusercontent.com");
+  let _secret = set_env("GOOGLE_CLIENT_SECRET", "test-secret");
+  let _origin = set_env("APP_ORIGIN", "http://127.0.0.1:4200");
+
+  let (pool, router) = pool_and_router().await;
+  let state = format!("pkce-missing-{}", Uuid::now_v7().simple());
+  let value = serde_json::json!({ "callback": "/dashboard" }).to_string();
+  sqlx::query!(
+    r#"
+        INSERT INTO verifications (id, identifier, value, expires_at, created_at, updated_at)
+        VALUES ($1, $2, $3, now() + interval '10 minutes', now(), now())
+        "#,
+    Uuid::now_v7(),
+    format!("oauth-google:{state}"),
+    value,
+  )
+  .execute(&pool)
+  .await
+  .expect("insert oauth state");
+
+  let result = json_get(
+    &router,
+    &format!("/api/auth/callback/google?code=fake-code&state={state}"),
+    None,
+  )
+  .await;
+  assert_eq!(result.status, StatusCode::BAD_REQUEST, "{:?}", result.json);
 }

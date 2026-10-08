@@ -23,8 +23,6 @@ use crate::components::card::{
 use crate::components::container::{ContainerVariant, container};
 use crate::components::field::{field, field_error, field_label};
 use crate::components::input::input;
-use crate::components::label::label;
-use crate::components::switch::switch;
 use crate::components::tabs::{tabs, tabs_content, tabs_list, tabs_trigger};
 use crate::components::toast::{Toast, set_toast, toast_redirect};
 use topcoat::view::attributes;
@@ -33,7 +31,6 @@ use topcoat::view::attributes;
 pub struct TwoFactorInput {
   code: Option<String>,
   backup_code: Option<String>,
-  trust_device: Option<String>,
 }
 
 #[query_params(error = bad_request)]
@@ -176,10 +173,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                                 attrs: attributes! { id="backup_code-error" }
                                             )
                                         )
-                                        <div class="flex items-center gap-2">
-                                            switch(attrs: attributes! { type="checkbox" name="trust_device" id="trust_device" value="true" })
-                                            label(attrs: attributes! { for="trust_device" }, "Confiar neste dispositivo por 30 dias")
-                                        </div>
                                         button(
                                             blocked: backup_blocked,
                                             attrs: attributes! { type="submit" },
@@ -221,10 +214,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                                 attrs: attributes! { id="code-error" }
                                             )
                                         )
-                                        <div class="flex items-center gap-2">
-                                            switch(attrs: attributes! { type="checkbox" name="trust_device" id="trust_device" value="true" })
-                                            label(attrs: attributes! { for="trust_device" }, "Confiar neste dispositivo por 30 dias")
-                                        </div>
                                         button(
                                             blocked: code_blocked,
                                             attrs: attributes! { type="submit" },
@@ -272,7 +261,6 @@ pub async fn two_factor_post(
   let is_backup = topcoat::router::request::uri(cx)
     .query()
     .is_some_and(|q| q.split('&').any(|p| p == "method=backup"));
-  let _ = body.trust_device; // trust device not persisted yet
 
   let result = if is_backup {
     let code = body.backup_code.as_deref().unwrap_or("");

@@ -678,7 +678,7 @@ fn validate_pay_fields(form_data: &CheckoutInput) -> Result<(), String> {
     return Err("Informe o nome completo.".to_string());
   }
   let digits = phone_digit_count(&form_data.phone);
-  if digits < 10 || digits > 11 {
+  if !(10..=11).contains(&digits) {
     return Err("Informe um WhatsApp válido (DDD + número).".to_string());
   }
   if form_data.street.trim().is_empty() {
@@ -733,12 +733,14 @@ async fn create_order(
   let outcome = create_order_in_tx(
     &mut tx,
     &settings,
-    order_id,
-    access_token,
-    cart_id,
-    form_data,
-    user_id,
-    &zip_digits,
+    CreateOrderParams {
+      order_id,
+      access_token,
+      cart_id,
+      form_data,
+      user_id,
+      zip_digits: &zip_digits,
+    },
   )
   .await;
   match outcome {
@@ -756,16 +758,28 @@ async fn create_order(
   }
 }
 
-async fn create_order_in_tx(
-  tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-  settings: &crate::app::store::queries::StoreSettings,
+struct CreateOrderParams<'a> {
   order_id: Uuid,
   access_token: Uuid,
   cart_id: Uuid,
   form_data: CheckoutInput,
   user_id: Option<Uuid>,
-  zip_digits: &str,
+  zip_digits: &'a str,
+}
+
+async fn create_order_in_tx(
+  tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+  settings: &crate::app::store::queries::StoreSettings,
+  params: CreateOrderParams<'_>,
 ) -> Result<(), CheckoutError> {
+  let CreateOrderParams {
+    order_id,
+    access_token,
+    cart_id,
+    form_data,
+    user_id,
+    zip_digits,
+  } = params;
   release_expired_reservations_in_tx(tx).await?;
   let items = quote_cart_for_checkout(tx, cart_id)
     .await

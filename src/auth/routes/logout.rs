@@ -29,5 +29,6 @@ pub async fn sign_out(cx: &Cx) -> Result<Json<SignOutResponse>> {
   if let Some(hash) = session::stop(cx).await? {
     session_store::delete_by_token_hash(pool, &hash).await?;
   }
+  crate::app::store::cart::clear_cart_token(cx);
   Ok(Json(SignOutResponse { success: true }))
 }

@@ -10,6 +10,9 @@ use uuid::Uuid;
 use crate::auth::CREDENTIAL_PROVIDER_ID;
 use crate::auth::password::hash_password;
 use crate::auth::routes::dto::{normalize_email, random_token};
+use crate::auth::service::{
+  verification_token_hash, verification_token_hash_prefix,
+};
 use crate::auth::session_store;
 
 const MIN_PASSWORD_LEN: usize = 8;
@@ -61,6 +64,9 @@ pub async fn request_password_reset(
 
     if let Some(user) = user {
       let token = random_token();
+      let token_hash = verification_token_hash(&token);
+      let token_hash_prefix =
+        verification_token_hash_prefix(&token_hash).to_owned();
       let id = Uuid::now_v7();
       let identifier = format!("{RESET_IDENTIFIER_PREFIX}{email}");
       let expires_at = time::OffsetDateTime::now_utc()
@@ -68,14 +74,22 @@ pub async fn request_password_reset(
       let expires_at =
         time::PrimitiveDateTime::new(expires_at.date(), expires_at.time());
 
+      // Invalidate outstanding reset tokens so only the newest works.
+      sqlx::query!(
+        r#"DELETE FROM verifications WHERE identifier = $1"#,
+        identifier,
+      )
+      .execute(pool)
+      .await?;
+
       sqlx::query!(
                 r#"
-                INSERT INTO verifications (id, identifier, value, expires_at, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, now(), now())
+                INSERT INTO verifications (id, identifier, value, value_hash, expires_at, created_at, updated_at)
+                VALUES ($1, $2, '', $3, $4, now(), now())
                 "#,
                 id,
                 identifier,
-                token,
+                token_hash,
                 expires_at,
             )
             .execute(pool)
@@ -85,7 +99,7 @@ pub async fn request_password_reset(
           user_id = %user.id,
           email = %email,
           redirect_to = ?body.redirect_to,
-          reset_token = %token,
+          token_hash_prefix = %token_hash_prefix,
           "password reset token created (mail not wired yet)"
       );
     }
@@ -122,15 +136,16 @@ pub async fn reset_password(
 
   let pool = app_context::<PgPool>(cx);
 
+  let token_hash = verification_token_hash(body.token.trim());
   let verification = sqlx::query!(
     r#"
-        SELECT id, identifier, value, expires_at
+        SELECT id, identifier
         FROM verifications
-        WHERE value = $1
+        WHERE value_hash = $1
           AND identifier LIKE $2
           AND expires_at > now()
         "#,
-    body.token,
+    token_hash,
     format!("{RESET_IDENTIFIER_PREFIX}%"),
   )
   .fetch_optional(pool)
@@ -173,9 +188,13 @@ pub async fn reset_password(
     return Err(bad_request("no credential account for user").into());
   }
 
-  sqlx::query!("DELETE FROM verifications WHERE id = $1", verification.id)
-    .execute(pool)
-    .await?;
+  // Single-use: consume every outstanding reset token for this email.
+  sqlx::query!(
+    "DELETE FROM verifications WHERE identifier = $1",
+    verification.identifier
+  )
+  .execute(pool)
+  .await?;
 
   // Revoke all sessions on password reset.
   session_store::delete_all_for_user(pool, user.id).await?;

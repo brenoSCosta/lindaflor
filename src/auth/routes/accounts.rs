@@ -9,6 +9,7 @@ use topcoat::{
     error::{bad_request, unauthorized},
     route,
   },
+  session,
 };
 
 use crate::auth::CREDENTIAL_PROVIDER_ID;
@@ -16,7 +17,10 @@ use crate::auth::google::{
   GOOGLE_PROVIDER_ID, GoogleOAuthConfig, safe_callback_path,
 };
 use crate::auth::routes::dto::{format_primitive, random_token};
-use crate::auth::routes::oauth::{OAUTH_STATE_TTL_SECS, store_oauth_state};
+use crate::auth::routes::oauth::{
+  NewOAuthState, OAUTH_STATE_TTL_SECS, google_authorize_url,
+  pkce_s256_challenge, store_oauth_state_full,
+};
 use crate::auth::routes::sign_in::{
   SignInSocialResponse, SocialNotImplementedBody,
 };
@@ -154,18 +158,41 @@ pub async fn link_social(
   };
 
   let callback_path = safe_callback_path(body.callback_url.as_deref());
+
+  // Bind the OAuth state to the session that starts the link flow.
+  // The hex session-token hash is stored server-side only (never embedded
+  // in `state`); the callback rejects any session that does not match.
+  let session_binding = session::token_hash(cx)
+    .await?
+    .map(|hash| crate::auth::session_store::token_hash_hex(&hash));
+  let Some(session_binding) = session_binding else {
+    return Err(unauthorized().into());
+  };
+
+  // PKCE (S256 `code_challenge`) + OIDC `nonce`. The verifier stays
+  // server-side in the state row; only the challenge travels in the URL.
+  let code_verifier = random_token();
+  let nonce = random_token();
+  let code_challenge = pkce_s256_challenge(&code_verifier);
+
   let state = random_token();
   let pool = app_context::<PgPool>(cx);
-  store_oauth_state(
+  store_oauth_state_full(
     pool,
-    &state,
-    &callback_path,
-    OAUTH_STATE_TTL_SECS,
-    Some(su.user.id),
+    NewOAuthState {
+      state: &state,
+      callback_path: &callback_path,
+      ttl_secs: OAUTH_STATE_TTL_SECS,
+      link_user_id: Some(su.user.id),
+      session_binding: Some(&session_binding),
+      code_verifier: Some(&code_verifier),
+      nonce: Some(&nonce),
+    },
   )
   .await?;
 
-  let url = config.authorize_url(&state);
+  let url =
+    google_authorize_url(&config, &state, Some(&code_challenge), Some(&nonce));
   Ok((
     StatusCode::OK,
     Json(serde_json::to_value(SignInSocialResponse { url })?),

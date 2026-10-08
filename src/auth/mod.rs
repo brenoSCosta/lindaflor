@@ -10,7 +10,9 @@ pub mod user;
 
 pub use password::{hash_password, verify_password};
 pub use session_config::session_config;
-pub use user::{SessionUser, User, current_user, current_user_owned};
+pub use user::{
+  SessionUser, User, current_user, current_user_owned, is_currently_banned,
+};
 
 /// Credential provider id (email/password accounts).
 pub const CREDENTIAL_PROVIDER_ID: &str = "credential";

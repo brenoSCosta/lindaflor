@@ -598,7 +598,7 @@ mod tests {
 
   #[tokio::test]
   async fn save_and_delete_roundtrip() {
-    let pool = crate::test_support::pool().await;
+    let pool = crate::test_support::fresh_pool().await;
     let store = ObjectStore::memory();
     let product_id = Uuid::now_v7();
     sqlx::query(

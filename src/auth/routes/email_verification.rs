@@ -12,9 +12,12 @@ use topcoat::{
 use uuid::Uuid;
 
 use crate::auth::routes::dto::{normalize_email, random_token};
+use crate::auth::service::{
+  verification_token_hash, verification_token_hash_prefix,
+};
 use crate::auth::user::current_user;
 
-const VERIFY_TOKEN_TTL_SECS: i64 = 60 * 60;
+const VERIFY_TOKEN_TTL_SECS: i64 = 24 * 60 * 60;
 const VERIFY_IDENTIFIER_PREFIX: &str = "email-verification:";
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
@@ -86,6 +89,9 @@ pub async fn send_verification_email(
     && !user.email_verified
   {
     let token = random_token();
+    let token_hash = verification_token_hash(&token);
+    let token_hash_prefix =
+      verification_token_hash_prefix(&token_hash).to_owned();
     let id = Uuid::now_v7();
     let identifier = format!("{VERIFY_IDENTIFIER_PREFIX}{email}");
     let expires_at = time::OffsetDateTime::now_utc()
@@ -93,14 +99,22 @@ pub async fn send_verification_email(
     let expires_at =
       time::PrimitiveDateTime::new(expires_at.date(), expires_at.time());
 
+    // Only the newest verification token stays valid.
+    sqlx::query!(
+      r#"DELETE FROM verifications WHERE identifier = $1"#,
+      identifier,
+    )
+    .execute(pool)
+    .await?;
+
     sqlx::query!(
                 r#"
-                INSERT INTO verifications (id, identifier, value, expires_at, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, now(), now())
+                INSERT INTO verifications (id, identifier, value, value_hash, expires_at, created_at, updated_at)
+                VALUES ($1, $2, '', $3, $4, now(), now())
                 "#,
                 id,
                 identifier,
-                token,
+                token_hash,
                 expires_at,
             )
             .execute(pool)
@@ -110,7 +124,7 @@ pub async fn send_verification_email(
         user_id = %user.id,
         email = %email,
         callback_url = ?body.callback_url,
-        verification_token = %token,
+        token_hash_prefix = %token_hash_prefix,
         "email verification token created (mail not wired yet)"
     );
   }
@@ -165,15 +179,17 @@ pub async fn verify_email_post(
 async fn consume_verification_token(cx: &Cx, token: &str) -> Result<()> {
   let pool = app_context::<PgPool>(cx);
 
+  // Token-only confirm (no session) so mail links work logged-out.
+  let token_hash = verification_token_hash(token.trim());
   let verification = sqlx::query!(
     r#"
         SELECT id, identifier
         FROM verifications
-        WHERE value = $1
+        WHERE value_hash = $1
           AND identifier LIKE $2
           AND expires_at > now()
         "#,
-    token,
+    token_hash,
     format!("{VERIFY_IDENTIFIER_PREFIX}%"),
   )
   .fetch_optional(pool)

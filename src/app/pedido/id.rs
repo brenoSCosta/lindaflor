@@ -11,7 +11,6 @@ use uuid::Uuid;
 
 use crate::auth::user::current_user_owned;
 
-use crate::components::badge::{BadgeVariant, badge};
 use crate::components::button::{ButtonSize, ButtonVariant, button_variants};
 use crate::components::card::{
   card, card_content, card_footer, card_header, card_title,
@@ -162,14 +161,6 @@ fn status_label(status: &str) -> &'static str {
     "delivered" => "Entregue",
     "cancelled" => "Cancelado",
     _ => "Desconhecido",
-  }
-}
-
-fn status_badge_variant(status: &str) -> BadgeVariant {
-  match status {
-    "pending_payment" => BadgeVariant::Secondary,
-    "cancelled" => BadgeVariant::Destructive,
-    _ => BadgeVariant::Primary,
   }
 }
 

@@ -18,12 +18,13 @@ use uuid::Uuid;
 use crate::auth::CREDENTIAL_PROVIDER_ID;
 use crate::auth::password::verify_password;
 use crate::auth::routes::dto::{SessionPayload, client_meta, random_token};
+use crate::auth::service::verification_token_hash;
 use crate::auth::session_store;
 use crate::auth::totp::{
   consume_backup_code, generate_backup_codes, generate_secret,
   hash_backup_codes, verify_code,
 };
-use crate::auth::user::{SessionUser, User, current_user};
+use crate::auth::user::{SessionUser, User, current_user, is_currently_banned};
 
 pub const PENDING_2FA_PREFIX: &str = "2fa-pending:";
 pub const PENDING_2FA_TTL_SECS: i64 = 10 * 60;
@@ -79,11 +80,14 @@ async fn load_user(pool: &PgPool, user_id: Uuid) -> Result<User> {
 }
 
 /// Create a short-lived pending-2FA verification; returns the opaque token.
+/// Binds the token to this request's IP/UA.
 pub async fn create_pending_2fa(
+  cx: &Cx,
   pool: &PgPool,
   user_id: Uuid,
 ) -> Result<String> {
   let token = random_token();
+  let token_hash = verification_token_hash(&token);
   let id = Uuid::now_v7();
   let identifier = format!("{PENDING_2FA_PREFIX}{user_id}");
   let expires_at = now_plus(PENDING_2FA_TTL_SECS);
@@ -98,33 +102,89 @@ pub async fn create_pending_2fa(
 
   sqlx::query!(
         r#"
-        INSERT INTO verifications (id, identifier, value, expires_at, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, now(), now())
+        INSERT INTO verifications (id, identifier, value, value_hash, expires_at, created_at, updated_at)
+        VALUES ($1, $2, '', $3, $4, now(), now())
         "#,
         id,
         identifier,
-        token,
+        token_hash,
         expires_at,
     )
     .execute(pool)
     .await?;
 
+  crate::valkey::pending_bind_eager(
+    crate::valkey::conn_from(cx),
+    &token,
+    &user_id,
+    &crate::valkey::client_ip(cx),
+    &crate::valkey::client_ua(cx),
+  )
+  .await;
+
   Ok(token)
+}
+
+/// Attempt cap + IP/UA binding for a pending-2FA token. Call *before*
+/// `verify_code`. Over [`crate::valkey::PENDING_MAX_ATTEMPTS`] the DB row
+/// is deleted so the token cannot be retried.
+pub async fn guard_pending_2fa(
+  cx: &Cx,
+  pool: &PgPool,
+  token: &str,
+  user_id: Uuid,
+  verification_id: Uuid,
+) -> Result<()> {
+  let conn = crate::valkey::conn_from(cx);
+  let attempts = crate::valkey::pending_attempt(conn.clone(), token).await;
+  if attempts > crate::valkey::PENDING_MAX_ATTEMPTS {
+    sqlx::query!("DELETE FROM verifications WHERE id = $1", verification_id)
+      .execute(pool)
+      .await?;
+    crate::valkey::pending_clear(conn, token).await;
+    return Err(unauthorized().into());
+  }
+  match crate::valkey::pending_check_binding(
+    crate::valkey::conn_from(cx),
+    token,
+    &user_id,
+    &crate::valkey::client_ip(cx),
+    &crate::valkey::client_ua(cx),
+  )
+  .await
+  {
+    crate::valkey::PendingBindingOutcome::Mismatch => {
+      Err(unauthorized().into())
+    }
+    crate::valkey::PendingBindingOutcome::Matched
+    | crate::valkey::PendingBindingOutcome::NewlyBound => Ok(()),
+  }
+}
+
+async fn reject_totp_replay(cx: &Cx, user_id: Uuid, code: &str) -> Result<()> {
+  if crate::valkey::totp_reserve(crate::valkey::conn_from(cx), &user_id, code)
+    .await
+  {
+    Ok(())
+  } else {
+    Err(unauthorized().into())
+  }
 }
 
 async fn resolve_pending_user_id(
   pool: &PgPool,
   token: &str,
 ) -> Result<(Uuid, Uuid)> {
+  let token_hash = verification_token_hash(token.trim());
   let verification = sqlx::query!(
     r#"
-        SELECT id, identifier, value, expires_at
+        SELECT id, identifier
         FROM verifications
-        WHERE value = $1
+        WHERE value_hash = $1
           AND identifier LIKE $2
           AND expires_at > now()
         "#,
-    token,
+    token_hash,
     format!("{PENDING_2FA_PREFIX}%"),
   )
   .fetch_optional(pool)
@@ -322,16 +382,20 @@ pub async fn verify_totp(
     if !tf.verified {
       return Err(unauthorized().into());
     }
+    guard_pending_2fa(cx, pool, token.trim(), user_id, verification_id).await?;
     if !verify_code(&tf.secret, &code).map_err(bad_request)? {
       return Err(unauthorized().into());
     }
+    reject_totp_replay(cx, user_id, &code).await?;
 
     sqlx::query!("DELETE FROM verifications WHERE id = $1", verification_id)
       .execute(pool)
       .await?;
+    crate::valkey::pending_clear(crate::valkey::conn_from(cx), token.trim())
+      .await;
 
     let user = load_user(pool, user_id).await?;
-    if user.banned {
+    if is_currently_banned(user.banned, user.ban_expires) {
       return Err(unauthorized().into());
     }
     let payload = start_session_for_user(cx, pool, user).await?;
@@ -362,6 +426,7 @@ pub async fn verify_totp(
   if !verify_code(&tf.secret, &code).map_err(bad_request)? {
     return Err(unauthorized().into());
   }
+  reject_totp_replay(cx, su.user.id, &code).await?;
 
   sqlx::query!(
     r#"UPDATE two_factor SET verified = true WHERE id = $1"#,
@@ -423,7 +488,11 @@ pub async fn disable(
     .await?;
     match tf {
       Some(tf) if tf.verified => {
-        verify_code(&tf.secret, code).map_err(bad_request)?
+        let ok = verify_code(&tf.secret, code).map_err(bad_request)?;
+        if ok {
+          reject_totp_replay(cx, su.user.id, code).await?;
+        }
+        ok
       }
       _ => false,
     }
@@ -484,6 +553,7 @@ pub async fn verify_backup_code(
     if !tf.verified {
       return Err(unauthorized().into());
     }
+    guard_pending_2fa(cx, pool, token.trim(), user_id, verification_id).await?;
 
     let stored =
       consume_backup_code(&tf.backup_codes, &code).ok_or_else(unauthorized)?;
@@ -498,9 +568,11 @@ pub async fn verify_backup_code(
     sqlx::query!("DELETE FROM verifications WHERE id = $1", verification_id)
       .execute(pool)
       .await?;
+    crate::valkey::pending_clear(crate::valkey::conn_from(cx), token.trim())
+      .await;
 
     let user = load_user(pool, user_id).await?;
-    if user.banned {
+    if is_currently_banned(user.banned, user.ban_expires) {
       return Err(unauthorized().into());
     }
     let payload = start_session_for_user(cx, pool, user).await?;

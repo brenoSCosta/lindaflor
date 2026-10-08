@@ -130,6 +130,18 @@ pub fn write_cart_token(cx: &Cx, token: Uuid) {
     .add(Cookie::new(CART_COOKIE, token.to_string()));
 }
 
+/// Expire the cart cookie (e.g. on logout) so the header badge falls back
+/// to the guest state instead of stalling on the previous owner's count.
+/// The user's cart rows stay in the DB and are re-attached on next login.
+pub fn clear_cart_token(cx: &Cx) {
+  cookies(cx)
+    .override_same_site(SameSite::Lax)
+    .override_http_only(true)
+    .override_secure(!is_development())
+    .override_path("/")
+    .remove(Cookie::new(CART_COOKIE, ""));
+}
+
 fn read_cookie_value(cx: &Cx) -> Option<String> {
   cookies(cx)
     .get(CART_COOKIE)

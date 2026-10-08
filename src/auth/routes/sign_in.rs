@@ -22,7 +22,7 @@ use crate::auth::routes::dto::{
 };
 use crate::auth::routes::two_factor::create_pending_2fa;
 use crate::auth::session_store;
-use crate::auth::user::{SessionUser, User};
+use crate::auth::user::{SessionUser, User, is_currently_banned};
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -49,22 +49,6 @@ fn system_time_to_primitive(st: SystemTime) -> PrimitiveDateTime {
   PrimitiveDateTime::new(odt.date(), odt.time())
 }
 
-fn is_currently_banned(
-  banned: bool,
-  ban_expires: Option<PrimitiveDateTime>,
-) -> bool {
-  if !banned {
-    return false;
-  }
-  match ban_expires {
-    None => true,
-    Some(expires) => {
-      let now = time::OffsetDateTime::now_utc();
-      expires.assume_utc() > now
-    }
-  }
-}
-
 #[utoipa::path(
     post,
     path = "/api/auth/sign-in/email",
@@ -86,6 +70,12 @@ pub async fn sign_in_email(
   }
 
   let pool = app_context::<PgPool>(cx);
+  let ip = crate::valkey::client_ip(cx);
+  let conn = crate::valkey::conn_from(cx);
+
+  if crate::valkey::is_auth_locked_out(conn.clone(), &ip, &email).await {
+    return Err(crate::rate_limit::rate_limit_error());
+  }
 
   let row = sqlx::query!(
     r#"
@@ -112,23 +102,28 @@ pub async fn sign_in_email(
   .await?;
 
   let Some(row) = row else {
+    crate::valkey::record_auth_fail(conn, &ip, &email).await;
     return Err(unauthorized().into());
   };
 
   let Some(stored_hash) = row.password.as_deref() else {
+    crate::valkey::record_auth_fail(conn, &ip, &email).await;
     return Err(unauthorized().into());
   };
 
   if !verify_password(&body.password, stored_hash)? {
+    crate::valkey::record_auth_fail(conn, &ip, &email).await;
     return Err(unauthorized().into());
   }
+
+  crate::valkey::clear_auth_fails(conn, &ip, &email).await;
 
   if is_currently_banned(row.banned, row.ban_expires) {
     return Err(unauthorized().into());
   }
 
   if row.two_factor_enabled {
-    let token = create_pending_2fa(pool, row.id).await?;
+    let token = create_pending_2fa(cx, pool, row.id).await?;
     return Ok((
       StatusCode::FORBIDDEN,
       Json(serde_json::to_value(TwoFactorRequiredBody {
@@ -250,17 +245,31 @@ pub async fn sign_in_social(
   let callback_path =
     crate::auth::google::safe_callback_path(body.callback_url.as_deref());
   let state = random_token();
+  let code_verifier = random_token();
+  let nonce = random_token();
+  let code_challenge =
+    crate::auth::routes::oauth::pkce_s256_challenge(&code_verifier);
   let pool = app_context::<PgPool>(cx);
-  crate::auth::routes::oauth::store_oauth_state(
+  crate::auth::routes::oauth::store_oauth_state_full(
     pool,
-    &state,
-    &callback_path,
-    crate::auth::routes::oauth::OAUTH_STATE_TTL_SECS,
-    None,
+    crate::auth::routes::oauth::NewOAuthState {
+      state: &state,
+      callback_path: &callback_path,
+      ttl_secs: crate::auth::routes::oauth::OAUTH_STATE_TTL_SECS,
+      link_user_id: None,
+      session_binding: None,
+      code_verifier: Some(&code_verifier),
+      nonce: Some(&nonce),
+    },
   )
   .await?;
 
-  let url = config.authorize_url(&state);
+  let url = crate::auth::routes::oauth::google_authorize_url(
+    &config,
+    &state,
+    Some(&code_challenge),
+    Some(&nonce),
+  );
   Ok((
     StatusCode::OK,
     Json(serde_json::to_value(SignInSocialResponse { url })?),

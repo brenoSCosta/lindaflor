@@ -17,26 +17,80 @@ use crate::auth::password::{hash_password, verify_password};
 use crate::auth::routes::dto::{
   client_meta, format_primitive, normalize_email, random_token,
 };
-use crate::auth::routes::oauth::{OAUTH_STATE_TTL_SECS, store_oauth_state};
-use crate::auth::routes::two_factor::{PENDING_2FA_PREFIX, create_pending_2fa};
+use crate::auth::routes::oauth::{
+  NewOAuthState, OAUTH_STATE_TTL_SECS, google_authorize_url,
+  pkce_s256_challenge, store_oauth_state_full,
+};
+use crate::auth::routes::two_factor::{
+  PENDING_2FA_PREFIX, create_pending_2fa, guard_pending_2fa,
+};
 use crate::auth::session_store::{self, token_hash_hex};
 use crate::auth::totp::{
   consume_backup_code, generate_backup_codes, generate_secret,
   hash_backup_codes, verify_code,
 };
-use crate::auth::user::{SessionUser, User};
+use crate::auth::user::{SessionUser, User, is_currently_banned};
 
 pub const MIN_PASSWORD_LEN: usize = 8;
 pub const PENDING_2FA_COOKIE: &str = "lindaflor_pending_2fa";
+pub const PENDING_2FA_COOKIE_HOST: &str = "__Host-lindaflor_pending_2fa";
+
+fn pending_2fa_cookie_secure() -> bool {
+  !matches!(crate::config::app_env().as_str(), "development" | "dev")
+}
+
+fn pending_2fa_cookie_name() -> &'static str {
+  if pending_2fa_cookie_secure() {
+    PENDING_2FA_COOKIE_HOST
+  } else {
+    PENDING_2FA_COOKIE
+  }
+}
 
 const RESET_TOKEN_TTL_SECS: i64 = 60 * 60;
 const RESET_IDENTIFIER_PREFIX: &str = "reset-password:";
-const VERIFY_TOKEN_TTL_SECS: i64 = 60 * 60;
+const VERIFY_TOKEN_TTL_SECS: i64 = 24 * 60 * 60;
 const VERIFY_IDENTIFIER_PREFIX: &str = "email-verification:";
-const CHANGE_EMAIL_TOKEN_TTL_SECS: i64 = 60 * 60;
+const CHANGE_EMAIL_TOKEN_TTL_SECS: i64 = 30 * 60;
 const CHANGE_EMAIL_IDENTIFIER_PREFIX: &str = "change-email:";
-const DELETE_TOKEN_TTL_SECS: i64 = 60 * 60;
+const DELETE_TOKEN_TTL_SECS: i64 = 30 * 60;
 const DELETE_IDENTIFIER_PREFIX: &str = "delete-user:";
+
+/// Hash a one-time verification token for storage and comparison.
+///
+/// HMAC-SHA256 keyed with the server pepper (`TOKEN_PEPPER`); plain SHA-256 when no pepper is configured
+/// (dev/test). Callers must compare hashes — raw tokens never touch the DB
+/// or the logs.
+pub fn verification_token_hash(token: &str) -> String {
+  verification_token_hash_with_pepper(token, &crate::config::token_pepper())
+}
+
+/// Pure helper (explicit pepper) so tests stay deterministic without
+/// mutating process-global env vars.
+pub fn verification_token_hash_with_pepper(
+  token: &str,
+  pepper: &str,
+) -> String {
+  if pepper.is_empty() {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    hex::encode(hasher.finalize())
+  } else {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+    let mut mac = Hmac::<Sha256>::new_from_slice(pepper.as_bytes())
+      .expect("HMAC accepts any key length");
+    mac.update(token.as_bytes());
+    hex::encode(mac.finalize().into_bytes())
+  }
+}
+
+/// First 8 chars of a token hash — the only token-derived value allowed in
+/// logs.
+pub fn verification_token_hash_prefix(hash: &str) -> &str {
+  hash.get(..8).unwrap_or(hash)
+}
 
 fn system_time_to_primitive(st: SystemTime) -> PrimitiveDateTime {
   let duration = st.duration_since(UNIX_EPOCH).unwrap_or_default();
@@ -49,22 +103,6 @@ fn system_time_to_primitive(st: SystemTime) -> PrimitiveDateTime {
 fn now_plus(secs: i64) -> PrimitiveDateTime {
   let odt = time::OffsetDateTime::now_utc() + time::Duration::seconds(secs);
   PrimitiveDateTime::new(odt.date(), odt.time())
-}
-
-fn is_currently_banned(
-  banned: bool,
-  ban_expires: Option<PrimitiveDateTime>,
-) -> bool {
-  if !banned {
-    return false;
-  }
-  match ban_expires {
-    None => true,
-    Some(expires) => {
-      let now = time::OffsetDateTime::now_utc();
-      expires.assume_utc() > now
-    }
-  }
 }
 
 pub fn is_admin(role: Option<&str>) -> bool {
@@ -132,25 +170,32 @@ pub async fn start_session_for_user(
 // --- Pending 2FA cookie (HTML login flow) ---
 
 pub fn set_pending_2fa_cookie(cx: &Cx, token: &str) {
-  let jar = cookies(cx);
-  jar.add(
-    Cookie::build((PENDING_2FA_COOKIE, token.to_owned()))
+  let secure = pending_2fa_cookie_secure();
+  let mut builder =
+    Cookie::build((pending_2fa_cookie_name(), token.to_owned()))
       .path("/")
       .http_only(true)
       .same_site(SameSite::Lax)
-      .max_age(topcoat::cookie::time::Duration::minutes(10))
-      .build(),
-  );
+      .max_age(topcoat::cookie::time::Duration::minutes(10));
+  if secure {
+    builder = builder.secure(true);
+  }
+  cookies(cx).add(builder.build());
 }
 
 pub fn clear_pending_2fa_cookie(cx: &Cx) {
-  let jar = cookies(cx);
-  jar.remove(Cookie::build((PENDING_2FA_COOKIE, "")).path("/").build());
+  let secure = pending_2fa_cookie_secure();
+  let mut builder = Cookie::build((pending_2fa_cookie_name(), "")).path("/");
+  builder = builder.http_only(true).same_site(SameSite::Lax);
+  if secure {
+    builder = builder.secure(true);
+  }
+  cookies(cx).remove(builder.build());
 }
 
 pub fn read_pending_2fa_cookie(cx: &Cx) -> Option<String> {
   cookies(cx)
-    .get(PENDING_2FA_COOKIE)
+    .get(pending_2fa_cookie_name())
     .map(|c| c.value().to_owned())
     .filter(|t| !t.is_empty())
 }
@@ -260,6 +305,12 @@ pub async fn sign_in_email(
     return Err(bad_request("email and password are required").into());
   }
 
+  let ip = crate::valkey::client_ip(cx);
+  let conn = crate::valkey::conn_from(cx);
+  if crate::valkey::is_auth_locked_out(conn.clone(), &ip, &email).await {
+    return Err(crate::rate_limit::rate_limit_error());
+  }
+
   let row = sqlx::query!(
     r#"
         SELECT
@@ -285,23 +336,28 @@ pub async fn sign_in_email(
   .await?;
 
   let Some(row) = row else {
+    crate::valkey::record_auth_fail(conn, &ip, &email).await;
     return Err(unauthorized().into());
   };
 
   let Some(stored_hash) = row.password.as_deref() else {
+    crate::valkey::record_auth_fail(conn, &ip, &email).await;
     return Err(unauthorized().into());
   };
 
   if !verify_password(password, stored_hash)? {
+    crate::valkey::record_auth_fail(conn, &ip, &email).await;
     return Err(unauthorized().into());
   }
+
+  crate::valkey::clear_auth_fails(conn, &ip, &email).await;
 
   if is_currently_banned(row.banned, row.ban_expires) {
     return Err(unauthorized().into());
   }
 
   if row.two_factor_enabled {
-    let token = create_pending_2fa(pool, row.id).await?;
+    let token = create_pending_2fa(cx, pool, row.id).await?;
     return Ok(SignInOutcome::TwoFactorRequired { token });
   }
 
@@ -331,23 +387,46 @@ pub async fn start_google_oauth(
   pool: &PgPool,
   callback_url: Option<&str>,
   link_user_id: Option<Uuid>,
+  session_binding: Option<&str>,
 ) -> Result<String> {
   let Some(config) = GoogleOAuthConfig::from_env() else {
     return Err(bad_request("Google sign-in is not configured").into());
   };
 
+  if link_user_id.is_some()
+    && session_binding
+      .map(str::trim)
+      .filter(|s| !s.is_empty())
+      .is_none()
+  {
+    return Err(bad_request("OAuth link requires an active session").into());
+  }
+
   let callback_path = safe_callback_path(callback_url);
   let state = random_token();
-  store_oauth_state(
+  let code_verifier = random_token();
+  let nonce = random_token();
+  let code_challenge = pkce_s256_challenge(&code_verifier);
+  store_oauth_state_full(
     pool,
-    &state,
-    &callback_path,
-    OAUTH_STATE_TTL_SECS,
-    link_user_id,
+    NewOAuthState {
+      state: &state,
+      callback_path: &callback_path,
+      ttl_secs: OAUTH_STATE_TTL_SECS,
+      link_user_id,
+      session_binding,
+      code_verifier: Some(&code_verifier),
+      nonce: Some(&nonce),
+    },
   )
   .await?;
 
-  Ok(config.authorize_url(&state))
+  Ok(google_authorize_url(
+    &config,
+    &state,
+    Some(&code_challenge),
+    Some(&nonce),
+  ))
 }
 
 // --- Password reset ---
@@ -369,18 +448,29 @@ pub async fn request_password_reset(
 
   if let Some(user) = user {
     let token = random_token();
+    let token_hash = verification_token_hash(&token);
+    let token_hash_prefix =
+      verification_token_hash_prefix(&token_hash).to_owned();
     let id = Uuid::now_v7();
     let identifier = format!("{RESET_IDENTIFIER_PREFIX}{email}");
     let expires_at = now_plus(RESET_TOKEN_TTL_SECS);
 
+    // Invalidate outstanding reset tokens so only the newest works.
+    sqlx::query!(
+      r#"DELETE FROM verifications WHERE identifier = $1"#,
+      identifier,
+    )
+    .execute(pool)
+    .await?;
+
     sqlx::query!(
             r#"
-            INSERT INTO verifications (id, identifier, value, expires_at, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, now(), now())
+            INSERT INTO verifications (id, identifier, value, value_hash, expires_at, created_at, updated_at)
+            VALUES ($1, $2, '', $3, $4, now(), now())
             "#,
             id,
             identifier,
-            token,
+            token_hash,
             expires_at,
         )
         .execute(pool)
@@ -390,7 +480,7 @@ pub async fn request_password_reset(
         user_id = %user.id,
         email = %email,
         redirect_to = ?redirect_to,
-        reset_token = %token,
+        token_hash_prefix = %token_hash_prefix,
         "password reset token created (mail not wired yet)"
     );
   }
@@ -415,15 +505,16 @@ pub async fn reset_password(
     );
   }
 
+  let token_hash = verification_token_hash(token.trim());
   let verification = sqlx::query!(
     r#"
-        SELECT id, identifier, value, expires_at
+        SELECT id, identifier
         FROM verifications
-        WHERE value = $1
+        WHERE value_hash = $1
           AND identifier LIKE $2
           AND expires_at > now()
         "#,
-    token,
+    token_hash,
     format!("{RESET_IDENTIFIER_PREFIX}%"),
   )
   .fetch_optional(pool)
@@ -466,9 +557,13 @@ pub async fn reset_password(
     return Err(bad_request("no credential account for user").into());
   }
 
-  sqlx::query!("DELETE FROM verifications WHERE id = $1", verification.id)
-    .execute(pool)
-    .await?;
+  // Single-use: consume every outstanding reset token for this email.
+  sqlx::query!(
+    "DELETE FROM verifications WHERE identifier = $1",
+    verification.identifier
+  )
+  .execute(pool)
+  .await?;
 
   session_store::delete_all_for_user(pool, user.id).await?;
   Ok(())
@@ -497,18 +592,29 @@ pub async fn send_verification_email(
     && !user.email_verified
   {
     let token = random_token();
+    let token_hash = verification_token_hash(&token);
+    let token_hash_prefix =
+      verification_token_hash_prefix(&token_hash).to_owned();
     let id = Uuid::now_v7();
     let identifier = format!("{VERIFY_IDENTIFIER_PREFIX}{email}");
     let expires_at = now_plus(VERIFY_TOKEN_TTL_SECS);
 
+    // Only the newest verification token stays valid.
+    sqlx::query!(
+      r#"DELETE FROM verifications WHERE identifier = $1"#,
+      identifier,
+    )
+    .execute(pool)
+    .await?;
+
     sqlx::query!(
                 r#"
-                INSERT INTO verifications (id, identifier, value, expires_at, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, now(), now())
+                INSERT INTO verifications (id, identifier, value, value_hash, expires_at, created_at, updated_at)
+                VALUES ($1, $2, '', $3, $4, now(), now())
                 "#,
                 id,
                 identifier,
-                token,
+                token_hash,
                 expires_at,
             )
             .execute(pool)
@@ -518,7 +624,7 @@ pub async fn send_verification_email(
         user_id = %user.id,
         email = %email,
         callback_url = ?callback_url,
-        verification_token = %token,
+        token_hash_prefix = %token_hash_prefix,
         "email verification token created (mail not wired yet)"
     );
   }
@@ -534,15 +640,16 @@ pub async fn consume_email_verification_token(
     return Err(bad_request("token is required").into());
   }
 
+  let token_hash = verification_token_hash(token.trim());
   let verification = sqlx::query!(
     r#"
         SELECT id, identifier
         FROM verifications
-        WHERE value = $1
+        WHERE value_hash = $1
           AND identifier LIKE $2
           AND expires_at > now()
         "#,
-    token,
+    token_hash,
     format!("{VERIFY_IDENTIFIER_PREFIX}%"),
   )
   .fetch_optional(pool)
@@ -586,15 +693,16 @@ async fn resolve_pending_user_id(
   pool: &PgPool,
   token: &str,
 ) -> Result<(Uuid, Uuid)> {
+  let token_hash = verification_token_hash(token.trim());
   let verification = sqlx::query!(
     r#"
-        SELECT id, identifier, value, expires_at
+        SELECT id, identifier
         FROM verifications
-        WHERE value = $1
+        WHERE value_hash = $1
           AND identifier LIKE $2
           AND expires_at > now()
         "#,
-    token,
+    token_hash,
     format!("{PENDING_2FA_PREFIX}%"),
   )
   .fetch_optional(pool)
@@ -633,16 +741,28 @@ pub async fn complete_2fa_with_totp(
   if !tf.verified {
     return Err(unauthorized().into());
   }
+  guard_pending_2fa(cx, pool, pending_token.trim(), user_id, verification_id)
+    .await?;
   if !verify_code(&tf.secret, code).map_err(bad_request)? {
+    return Err(unauthorized().into());
+  }
+  if !crate::valkey::totp_reserve(crate::valkey::conn_from(cx), &user_id, code)
+    .await
+  {
     return Err(unauthorized().into());
   }
 
   sqlx::query!("DELETE FROM verifications WHERE id = $1", verification_id)
     .execute(pool)
     .await?;
+  crate::valkey::pending_clear(
+    crate::valkey::conn_from(cx),
+    pending_token.trim(),
+  )
+  .await;
 
   let user = load_user(pool, user_id).await?;
-  if user.banned {
+  if is_currently_banned(user.banned, user.ban_expires) {
     return Err(unauthorized().into());
   }
   start_session_for_user(cx, pool, user, None).await
@@ -672,6 +792,8 @@ pub async fn complete_2fa_with_backup(
   if !tf.verified {
     return Err(unauthorized().into());
   }
+  guard_pending_2fa(cx, pool, pending_token.trim(), user_id, verification_id)
+    .await?;
 
   let stored =
     consume_backup_code(&tf.backup_codes, code).ok_or_else(unauthorized)?;
@@ -686,9 +808,14 @@ pub async fn complete_2fa_with_backup(
   sqlx::query!("DELETE FROM verifications WHERE id = $1", verification_id)
     .execute(pool)
     .await?;
+  crate::valkey::pending_clear(
+    crate::valkey::conn_from(cx),
+    pending_token.trim(),
+  )
+  .await;
 
   let user = load_user(pool, user_id).await?;
-  if user.banned {
+  if is_currently_banned(user.banned, user.ban_expires) {
     return Err(unauthorized().into());
   }
   start_session_for_user(cx, pool, user, None).await
@@ -818,6 +945,9 @@ pub async fn request_change_email(
   .await?;
 
   let token = random_token();
+  let token_hash = verification_token_hash(&token);
+  let token_hash_prefix =
+    verification_token_hash_prefix(&token_hash).to_owned();
   let id = Uuid::now_v7();
   let identifier =
     format!("{CHANGE_EMAIL_IDENTIFIER_PREFIX}{user_id}:{new_email}");
@@ -825,25 +955,24 @@ pub async fn request_change_email(
 
   sqlx::query!(
         r#"
-        INSERT INTO verifications (id, identifier, value, expires_at, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, now(), now())
+        INSERT INTO verifications (id, identifier, value, value_hash, expires_at, created_at, updated_at)
+        VALUES ($1, $2, '', $3, $4, now(), now())
         "#,
         id,
         identifier,
-        token,
+        token_hash,
         expires_at,
     )
     .execute(pool)
     .await?;
 
-  let confirm_url = format!("/api/auth/change-email/confirm?token={token}");
   tracing::info!(
       user_id = %user_id,
       current_email = %current_email,
       new_email = %new_email,
       callback_url = ?callback_url,
-      change_email_token = %token,
-      confirm_url = %confirm_url,
+      token_hash_prefix = %token_hash_prefix,
+      confirm_path = "/api/auth/change-email/confirm",
       "change-email confirmation token created (mail not wired yet)"
   );
 
@@ -1026,14 +1155,23 @@ pub async fn start_link_google(
   pool: &PgPool,
   user_id: Uuid,
   callback_url: Option<&str>,
+  session_binding: &str,
 ) -> Result<String> {
-  start_google_oauth(pool, callback_url, Some(user_id)).await
+  start_google_oauth(pool, callback_url, Some(user_id), Some(session_binding))
+    .await
 }
 
 // --- Delete user ---
 
 /// HTML settings shortcut: confirm email matches, then delete immediately
 /// (mail confirmation is not wired yet).
+///
+/// Email match is the only check here. Callers MUST step-up first via
+/// `authorize_immediate_delete` (password or TOTP + same-origin + fresh
+/// session) in `src/app/settings.rs`. There is no API route to this
+/// function. Soft-delete / 24h grace is not implemented (would need a
+/// schema change); the HTML path instead requires a session younger than
+/// 30 minutes.
 pub async fn delete_user_confirmed(
   cx: &Cx,
   pool: &PgPool,
@@ -1061,26 +1199,27 @@ pub async fn request_delete_user(
   password: Option<&str>,
   callback_url: Option<&str>,
 ) -> Result<()> {
-  if let Some(password) = password.filter(|p| !p.is_empty()) {
-    let account = sqlx::query!(
-      r#"
-            SELECT password
-            FROM accounts
-            WHERE user_id = $1 AND provider_id = $2
-            "#,
-      user.id,
-      CREDENTIAL_PROVIDER_ID,
-    )
-    .fetch_optional(pool)
-    .await?;
+  // Password re-check is mandatory on the request path whenever the
+  // account has a credential password. OAuth-only accounts (no stored hash)
+  // fall back to the authenticated session; TOTP re-check for those lives
+  // at the HTTP route layer (`delete_user.rs`), which also accepts a code.
+  let account = sqlx::query!(
+    r#"
+          SELECT password
+          FROM accounts
+          WHERE user_id = $1 AND provider_id = $2
+          "#,
+    user.id,
+    CREDENTIAL_PROVIDER_ID,
+  )
+  .fetch_optional(pool)
+  .await?;
 
-    let Some(account) = account else {
+  if let Some(stored) = account.and_then(|a| a.password).as_deref() {
+    let Some(password) = password.filter(|p| !p.is_empty()) else {
       return Err(unauthorized().into());
     };
-    let Some(hash) = account.password.as_deref() else {
-      return Err(unauthorized().into());
-    };
-    if !verify_password(password, hash)? {
+    if !verify_password(password, stored)? {
       return Err(unauthorized().into());
     }
   }
@@ -1094,29 +1233,31 @@ pub async fn request_delete_user(
   .await?;
 
   let token = random_token();
+  let token_hash = verification_token_hash(&token);
+  let token_hash_prefix =
+    verification_token_hash_prefix(&token_hash).to_owned();
   let id = Uuid::now_v7();
   let expires_at = now_plus(DELETE_TOKEN_TTL_SECS);
 
   sqlx::query!(
         r#"
-        INSERT INTO verifications (id, identifier, value, expires_at, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, now(), now())
+        INSERT INTO verifications (id, identifier, value, value_hash, expires_at, created_at, updated_at)
+        VALUES ($1, $2, '', $3, $4, now(), now())
         "#,
         id,
         identifier,
-        token,
+        token_hash,
         expires_at,
     )
     .execute(pool)
     .await?;
 
-  let delete_url = format!("/api/auth/delete-user?token={token}");
   tracing::info!(
       user_id = %user.id,
       email = %user.email,
       callback_url = ?callback_url,
-      delete_token = %token,
-      delete_url = %delete_url,
+      token_hash_prefix = %token_hash_prefix,
+      confirm_path = "/api/auth/delete-user",
       "delete-user verification token created (mail not wired yet)"
   );
 
@@ -1172,6 +1313,7 @@ pub async fn enable_two_factor(
 }
 
 pub async fn confirm_enable_two_factor(
+  cx: &Cx,
   pool: &PgPool,
   user: &User,
   code: &str,
@@ -1201,6 +1343,11 @@ pub async fn confirm_enable_two_factor(
     );
   }
   if !verify_code(&tf.secret, code).map_err(bad_request)? {
+    return Err(unauthorized().into());
+  }
+  if !crate::valkey::totp_reserve(crate::valkey::conn_from(cx), &user.id, code)
+    .await
+  {
     return Err(unauthorized().into());
   }
 
@@ -1652,6 +1799,8 @@ pub fn portuguese_error_message(err: &topcoat::Error) -> String {
     "O novo e-mail deve ser diferente do atual.".into()
   } else if msg.contains("not configured") {
     "Login com Google não está configurado.".into()
+  } else if msg.contains("too many") || msg.contains("429") {
+    "Muitas tentativas. Aguarde um momento e tente novamente.".into()
   } else if msg.contains("unauthorized") || msg.contains("forbidden") {
     "Credenciais inválidas.".into()
   } else if msg.contains("name") && msg.contains("required") {
@@ -1660,5 +1809,179 @@ pub fn portuguese_error_message(err: &topcoat::Error) -> String {
     "Informe um e-mail válido.".into()
   } else {
     "Não foi possível concluir a operação. Tente novamente.".into()
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::auth::password::hash_password;
+  use crate::test_support::fresh_pool;
+  use sqlx::Row;
+
+  fn unique_email(prefix: &str) -> String {
+    format!("{prefix}-{}@example.com", Uuid::now_v7().simple())
+  }
+
+  async fn insert_credential_user(
+    pool: &PgPool,
+    email: &str,
+    password: &str,
+  ) -> Uuid {
+    let user_id = Uuid::now_v7();
+    let account_id = Uuid::now_v7();
+    let password_hash = hash_password(password).unwrap();
+    sqlx::query!(
+      r#"
+        INSERT INTO users (id, name, email, email_verified, role, created_at, updated_at)
+        VALUES ($1, $2, $3, false, 'user', now(), now())
+        "#,
+      user_id,
+      "Hash Test",
+      email,
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query!(
+      r#"
+        INSERT INTO accounts (id, account_id, provider_id, user_id, password, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, now(), now())
+        "#,
+      account_id,
+      user_id.to_string(),
+      CREDENTIAL_PROVIDER_ID,
+      user_id,
+      password_hash,
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    user_id
+  }
+
+  #[test]
+  fn hash_prefix_is_eight_hex_and_not_raw() {
+    let raw = "super-secret-reset-token";
+    let hash = verification_token_hash(raw);
+    let prefix = verification_token_hash_prefix(&hash);
+    assert_eq!(prefix.len(), 8);
+    assert!(prefix.chars().all(|c| c.is_ascii_hexdigit()));
+    assert_ne!(hash, raw);
+    assert!(!hash.contains(raw));
+    let log_line = format!("token_hash_prefix={prefix}");
+    assert!(
+      !log_line.contains(raw),
+      "log line must not contain the raw secret"
+    );
+  }
+
+  #[test]
+  fn peppered_hash_differs_from_plain_sha256() {
+    let raw = "token-with-pepper";
+    let plain = verification_token_hash_with_pepper(raw, "");
+    let hmac = verification_token_hash_with_pepper(raw, "server-pepper");
+    assert_ne!(plain, hmac);
+    assert_ne!(plain, raw);
+    assert_eq!(plain.len(), 64);
+    assert_eq!(hmac.len(), 64);
+  }
+
+  #[tokio::test]
+  async fn hashed_reset_lookup_stores_empty_value() {
+    let pool = fresh_pool().await;
+    let email = unique_email("hash-reset");
+    insert_credential_user(&pool, &email, "password123").await;
+
+    request_password_reset(&pool, &email, None).await.unwrap();
+
+    let identifier = format!("{RESET_IDENTIFIER_PREFIX}{email}");
+    let row = sqlx::query(
+      "SELECT value, value_hash FROM verifications WHERE identifier = $1",
+    )
+    .bind(&identifier)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let value: String = row.get("value");
+    let value_hash: Option<String> = row.get("value_hash");
+    assert!(value.is_empty(), "value column must be empty at rest");
+    let stored_hash = value_hash.expect("value_hash");
+    assert_eq!(stored_hash.len(), 64);
+
+    let raw = "known-raw-reset-secret";
+    let hash = verification_token_hash(raw);
+    sqlx::query(
+      "UPDATE verifications SET value_hash = $1 WHERE identifier = $2",
+    )
+    .bind(&hash)
+    .bind(&identifier)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    reset_password(&pool, raw, "newpassword99").await.unwrap();
+
+    let leftover: i64 = sqlx::query_scalar(
+      "SELECT count(*) FROM verifications WHERE identifier = $1",
+    )
+    .bind(&identifier)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(leftover, 0);
+  }
+
+  #[tokio::test]
+  async fn expired_reset_token_is_rejected() {
+    let pool = fresh_pool().await;
+    let email = unique_email("hash-expired");
+    insert_credential_user(&pool, &email, "password123").await;
+
+    let raw = "expired-raw-reset-secret";
+    let hash = verification_token_hash(raw);
+    let identifier = format!("{RESET_IDENTIFIER_PREFIX}{email}");
+    sqlx::query!(
+      r#"
+            INSERT INTO verifications (id, identifier, value, value_hash, expires_at, created_at, updated_at)
+            VALUES ($1, $2, '', $3, $4, now(), now())
+            "#,
+      Uuid::now_v7(),
+      identifier,
+      hash,
+      now_plus(-60),
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let err = reset_password(&pool, raw, "newpassword99")
+      .await
+      .expect_err("expired token");
+    let msg = err.to_string().to_ascii_lowercase();
+    assert!(
+      msg.contains("invalid or expired") || msg.contains("bad request"),
+      "unexpected error: {msg}"
+    );
+  }
+
+  #[tokio::test]
+  async fn request_reset_deletes_prior_tokens() {
+    let pool = fresh_pool().await;
+    let email = unique_email("hash-dedupe");
+    insert_credential_user(&pool, &email, "password123").await;
+    let identifier = format!("{RESET_IDENTIFIER_PREFIX}{email}");
+
+    request_password_reset(&pool, &email, None).await.unwrap();
+    request_password_reset(&pool, &email, None).await.unwrap();
+
+    let count: i64 = sqlx::query_scalar(
+      "SELECT count(*) FROM verifications WHERE identifier = $1",
+    )
+    .bind(&identifier)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 1);
   }
 }

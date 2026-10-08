@@ -1,4 +1,7 @@
-#![allow(dead_code)]
+//! Shared integration-test helpers (HTTP + auth + embedded Postgres).
+//!
+//! Compiled once as a library, so helpers used by only some test binaries
+//! do not trigger per-binary `dead_code` warnings.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,13 +13,12 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use tokio::sync::OnceCell;
 use topcoat::cookie::RouterBuilderCookieExt;
-use topcoat::router::{Body, Router, RouterBuilderDiscoverExt};
+use topcoat::router::{Body, OriginPolicy, Router, RouterBuilderDiscoverExt};
 use topcoat::session::RouterBuilderSessionExt;
 use uuid::Uuid;
 
 pub const SESSION_COOKIE: &str = "session";
 
-#[path = "../../src/embedded_postgres.rs"]
 mod embedded_postgres;
 
 pub struct TestEnv {
@@ -33,11 +35,16 @@ pub async fn env() -> Arc<TestEnv> {
     .get_or_init(|| async {
       // Must be set before session_config() / router build.
       unsafe { std::env::set_var("APP_ENV", "development") };
+      install_test_rate_limit_env();
 
       // Force inventory discover to see library routes.
       let _ = lindaflor::auth::CREDENTIAL_PROVIDER_ID;
       lindaflor::auth::routes::link_for_discover();
       let _ = lindaflor::api::health;
+      let _ = lindaflor::logging::metrics_route::metrics;
+      let _ = lindaflor::app::dashboard::page;
+      let _ = lindaflor::app::login::page;
+      let _ = lindaflor::app::app_sidebar::logout_page;
 
       let postgres = embedded_postgres::start().await;
       let database_name = format!("lindaflor_test_{}", Uuid::now_v7().simple());
@@ -54,7 +61,8 @@ pub async fn env() -> Arc<TestEnv> {
         .connect(&database_url)
         .await
         .expect("connect pool");
-      sqlx::migrate!("./migrations")
+      // Relative to this crate's manifest dir.
+      sqlx::migrate!("../../migrations")
         .run(&pool)
         .await
         .expect("migrate");
@@ -82,22 +90,115 @@ pub async fn pool_and_router() -> (PgPool, Router) {
   (pool, router)
 }
 
-/// Fresh API-only router (avoids cross-test cookie/session residue on a shared Router).
-pub fn router(pool: &PgPool) -> Router {
-  build_auth_router(pool.clone())
+/// Generous per-IP budgets so existing tests that hammer auth do not 429.
+/// `limit_for` maps `auth:sign-in` → `RATE_LIMIT_AUTH_SIGN_IN_PER_MIN`.
+fn install_test_rate_limit_env() {
+  unsafe {
+    std::env::set_var("RATE_LIMIT_GLOBAL_PER_MIN", "10000");
+    std::env::set_var("RATE_LIMIT_AUTH_SIGN_IN_PER_MIN", "10000");
+    std::env::set_var("RATE_LIMIT_AUTH_SIGN_UP_PER_MIN", "10000");
+    std::env::set_var("RATE_LIMIT_AUTH_PASSWORD_RESET_PER_MIN", "10000");
+    std::env::set_var("RATE_LIMIT_AUTH_VERIFY_EMAIL_PER_MIN", "10000");
+    std::env::set_var("RATE_LIMIT_AUTH_VERIFY_TOTP_PER_MIN", "10000");
+    std::env::set_var("RATE_LIMIT_AUTH_VERIFY_BACKUP_CODE_PER_MIN", "10000");
+    std::env::set_var("RATE_LIMIT_PEDIDO_POLL_PER_MIN", "10000");
+    std::env::set_var("RATE_LIMIT_PEDIDO_PAGE_PER_MIN", "10000");
+  }
 }
 
 pub fn build_auth_router(pool: PgPool) -> Router {
   unsafe { std::env::set_var("APP_ENV", "development") };
+  install_test_rate_limit_env();
   let _ = lindaflor::auth::CREDENTIAL_PROVIDER_ID;
   lindaflor::auth::routes::link_for_discover();
   let _ = lindaflor::api::health;
+  let _ = lindaflor::logging::metrics_route::metrics;
+  let _ = lindaflor::app::dashboard::page;
+  let _ = lindaflor::app::login::page;
+  let _ = lindaflor::app::app_sidebar::logout_page;
 
-  Router::builder()
+  use lindaflor::rate_limit::{
+    DEFAULT_BACKUP_CODE_PER_MIN, DEFAULT_GLOBAL_PER_MIN,
+    DEFAULT_PASSWORD_RESET_PER_MIN, DEFAULT_PEDIDO_PAGE_PER_MIN,
+    DEFAULT_PEDIDO_POLL_PER_MIN, DEFAULT_SIGN_IN_PER_MIN,
+    DEFAULT_SIGN_UP_PER_MIN, DEFAULT_TOTP_PER_MIN,
+    DEFAULT_VERIFY_EMAIL_PER_MIN, RateLimitLayer, SCOPE_BACKUP_CODE,
+    SCOPE_PASSWORD_RESET, SCOPE_PEDIDO_PAGE, SCOPE_PEDIDO_POLL, SCOPE_SIGN_IN,
+    SCOPE_SIGN_UP, SCOPE_TOTP, SCOPE_VERIFY_EMAIL,
+  };
+
+  let mut origin_policy = OriginPolicy::new();
+  let mut builder = Router::builder()
     .discover()
     .cookies()
     .sessions(lindaflor::auth::session_config())
-    .app_context(pool)
+    .app_context(pool);
+  if let Some(origin) = lindaflor::auth::google::app_origin() {
+    builder = builder.base_url(origin.as_str());
+    origin_policy = origin_policy.trust_origins([origin]);
+  }
+  builder = builder.origin_policy(origin_policy);
+  // Mirror src/app.rs: fallback outermost among app layers, tower last.
+  builder =
+    lindaflor::security_headers::apply_security_headers_fallback(builder);
+  builder = builder
+    .layer(RateLimitLayer::global(DEFAULT_GLOBAL_PER_MIN))
+    .layer(RateLimitLayer::scoped(
+      "/api/auth/sign-in",
+      SCOPE_SIGN_IN,
+      DEFAULT_SIGN_IN_PER_MIN,
+    ))
+    .layer(RateLimitLayer::scoped(
+      "/api/auth/sign-up",
+      SCOPE_SIGN_UP,
+      DEFAULT_SIGN_UP_PER_MIN,
+    ))
+    .layer(RateLimitLayer::scoped(
+      "/api/auth/request-password-reset",
+      SCOPE_PASSWORD_RESET,
+      DEFAULT_PASSWORD_RESET_PER_MIN,
+    ))
+    .layer(RateLimitLayer::scoped(
+      "/api/auth/reset-password",
+      SCOPE_PASSWORD_RESET,
+      DEFAULT_PASSWORD_RESET_PER_MIN,
+    ))
+    .layer(RateLimitLayer::scoped(
+      "/api/auth/send-verification-email",
+      SCOPE_VERIFY_EMAIL,
+      DEFAULT_VERIFY_EMAIL_PER_MIN,
+    ))
+    .layer(RateLimitLayer::scoped(
+      "/api/auth/verify-email",
+      SCOPE_VERIFY_EMAIL,
+      DEFAULT_VERIFY_EMAIL_PER_MIN,
+    ))
+    .layer(RateLimitLayer::scoped(
+      "/api/auth/two-factor/verify-totp",
+      SCOPE_TOTP,
+      DEFAULT_TOTP_PER_MIN,
+    ))
+    .layer(RateLimitLayer::scoped(
+      "/api/auth/two-factor/verify-backup-code",
+      SCOPE_BACKUP_CODE,
+      DEFAULT_BACKUP_CODE_PER_MIN,
+    ))
+    .layer(RateLimitLayer::scoped(
+      "/pedido/status-proc",
+      SCOPE_PEDIDO_POLL,
+      DEFAULT_PEDIDO_POLL_PER_MIN,
+    ))
+    .layer(
+      RateLimitLayer::scoped(
+        "/pedido",
+        SCOPE_PEDIDO_PAGE,
+        DEFAULT_PEDIDO_PAGE_PER_MIN,
+      )
+      .with_skips(&["/pedido/status-proc"]),
+    )
+    .layer(lindaflor::logging::layer::RequestLoggingLayer::noop());
+  // APP_ENV is forced to development here, so HSTS stays off.
+  lindaflor::security_headers::apply_security_header_tower_layers(builder)
     .build()
 }
 
@@ -251,24 +352,48 @@ pub async fn sign_in(
   .await
 }
 
+/// After an API call that stored only `value_hash`, plant a known raw token
+/// on the newest matching row and return that secret.
+///
+/// `verifications.value` is empty at rest; never treat the stored hash as
+/// the one-time secret.
 pub async fn verification_token(
   pool: &PgPool,
   identifier_prefix: &str,
 ) -> String {
-  let row = sqlx::query!(
+  use sqlx::Row;
+
+  let token = lindaflor::auth::routes::dto::random_token();
+  let token_hash = lindaflor::auth::service::verification_token_hash(&token);
+  let like = format!("{identifier_prefix}%");
+  let updated = sqlx::query(
     r#"
-        SELECT value
-        FROM verifications
-        WHERE identifier LIKE $1
-        ORDER BY created_at DESC
-        LIMIT 1
+        UPDATE verifications
+        SET value = '', value_hash = $1, updated_at = now()
+        WHERE id = (
+          SELECT id FROM verifications
+          WHERE identifier LIKE $2
+          ORDER BY created_at DESC
+          LIMIT 1
+        )
+        RETURNING value, value_hash
         "#,
-    format!("{identifier_prefix}%"),
   )
-  .fetch_one(pool)
+  .bind(&token_hash)
+  .bind(&like)
+  .fetch_optional(pool)
   .await
+  .expect("plant verification token")
   .expect("verification token row");
-  row.value
+
+  let stored_value: String = updated.get("value");
+  let stored_hash: Option<String> = updated.get("value_hash");
+  assert!(
+    stored_value.is_empty(),
+    "raw token must not be stored in value"
+  );
+  assert_eq!(stored_hash.as_deref(), Some(token_hash.as_str()));
+  token
 }
 
 pub fn totp_code(secret_b32: &str) -> String {

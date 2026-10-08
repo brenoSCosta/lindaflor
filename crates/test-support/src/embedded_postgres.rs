@@ -117,6 +117,7 @@ fn build_settings() -> Settings {
   let port = free_port();
   let mut builder = SettingsBuilder::new()
     .port(port)
+    .config("max_connections", "200")
     .timeout(Some(Duration::from_secs(30)));
 
   if let Some(installation_dir) = pg_installation_dir_from_path() {

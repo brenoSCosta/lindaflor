@@ -37,21 +37,39 @@ impl GoogleOAuthConfig {
 
   /// Build the Google authorize URL the client should navigate to.
   pub fn authorize_url(&self, state: &str) -> String {
+    self.authorize_url_with(state, None, None)
+  }
+
+  /// Authorize URL with optional PKCE S256 `code_challenge` and OIDC `nonce`.
+  ///
+  /// Callers must store the matching `code_verifier` (and `nonce`) server-side;
+  /// only the challenge/nonce travel on this URL.
+  pub fn authorize_url_with(
+    &self,
+    state: &str,
+    code_challenge: Option<&str>,
+    nonce: Option<&str>,
+  ) -> String {
     let redirect_uri = self.redirect_uri();
-    reqwest::Url::parse_with_params(
-      GOOGLE_AUTH_URL,
-      [
-        ("client_id", self.client_id.as_str()),
-        ("redirect_uri", redirect_uri.as_str()),
-        ("response_type", "code"),
-        ("scope", OAUTH_SCOPES),
-        ("state", state),
-        ("access_type", "online"),
-        ("prompt", "select_account"),
-      ],
-    )
-    .expect("Google auth URL is valid")
-    .to_string()
+    let mut pairs: Vec<(&str, &str)> = vec![
+      ("client_id", self.client_id.as_str()),
+      ("redirect_uri", redirect_uri.as_str()),
+      ("response_type", "code"),
+      ("scope", OAUTH_SCOPES),
+      ("state", state),
+      ("access_type", "online"),
+      ("prompt", "select_account"),
+    ];
+    if let Some(challenge) = code_challenge {
+      pairs.push(("code_challenge", challenge));
+      pairs.push(("code_challenge_method", "S256"));
+    }
+    if let Some(nonce) = nonce {
+      pairs.push(("nonce", nonce));
+    }
+    reqwest::Url::parse_with_params(GOOGLE_AUTH_URL, &pairs)
+      .expect("Google auth URL is valid")
+      .to_string()
   }
 }
 
@@ -62,9 +80,12 @@ fn env_nonempty(key: &str) -> Option<String> {
     .filter(|v| !v.is_empty())
 }
 
-/// Public origin for OAuth callback construction.
+/// Optional public origin (`APP_ORIGIN`) for OAuth callbacks and
+/// `OriginPolicy::trust_origins`. Invalid values are treated as unset;
+/// production boot still fails via [`crate::config::require_app_origin`].
 pub fn app_origin() -> Option<String> {
-  env_nonempty("APP_ORIGIN").map(|s| s.trim_end_matches('/').to_string())
+  env_nonempty("APP_ORIGIN")
+    .and_then(|raw| crate::config::normalize_app_origin(&raw).ok())
 }
 
 #[derive(Debug, Error)]
@@ -179,6 +200,29 @@ mod tests {
             "redirect_uri=http%3A%2F%2Flocalhost%3A4200%2Fapi%2Fauth%2Fcallback%2Fgoogle"
         ));
     assert!(url.contains("scope=openid+email+profile"));
+    assert!(!url.contains("code_challenge"));
+    assert!(!url.contains("nonce="));
+  }
+
+  #[test]
+  fn authorize_url_with_pkce_and_nonce() {
+    let config = GoogleOAuthConfig {
+      client_id: "fake-client.apps.googleusercontent.com".into(),
+      client_secret: "GOCSPX-fake".into(),
+      app_origin: "http://localhost:4200".into(),
+    };
+    let url = config.authorize_url_with(
+      "csrf-state-1",
+      Some("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"),
+      Some("nonce-hex"),
+    );
+    assert!(
+      url
+        .contains("code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")
+    );
+    assert!(url.contains("code_challenge_method=S256"));
+    assert!(url.contains("nonce=nonce-hex"));
+    assert!(url.contains("state=csrf-state-1"));
   }
 
   #[test]

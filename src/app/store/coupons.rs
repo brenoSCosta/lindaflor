@@ -376,12 +376,15 @@ mod tests {
     user_id: Option<Uuid>,
   ) -> Uuid {
     let id = Uuid::now_v7();
-    sqlx::query("INSERT INTO orders (id, user_id) VALUES ($1, $2)")
-      .bind(id)
-      .bind(user_id)
-      .execute(&mut **tx)
-      .await
-      .expect("insert order");
+    sqlx::query(
+      "INSERT INTO orders (id, user_id, access_token) VALUES ($1, $2, $3)",
+    )
+    .bind(id)
+    .bind(user_id)
+    .bind(Uuid::now_v7())
+    .execute(&mut **tx)
+    .await
+    .expect("insert order");
     id
   }
 
@@ -430,7 +433,7 @@ mod tests {
 
   #[tokio::test]
   async fn blank_code_returns_none() {
-    let pool = crate::test_support::pool().await;
+    let pool = crate::test_support::fresh_pool().await;
     let mut tx = pool.begin().await.expect("begin tx");
 
     let result = resolve_coupon(&mut tx, "   ", 5_000, None, false).await;
@@ -441,7 +444,7 @@ mod tests {
 
   #[tokio::test]
   async fn unknown_or_inactive_code_is_invalid() {
-    let pool = crate::test_support::pool().await;
+    let pool = crate::test_support::fresh_pool().await;
     let mut tx = pool.begin().await.expect("begin tx");
 
     let unknown = unwrap_invalid(
@@ -463,7 +466,7 @@ mod tests {
 
   #[tokio::test]
   async fn future_start_and_past_expiry_messages() {
-    let pool = crate::test_support::pool().await;
+    let pool = crate::test_support::fresh_pool().await;
     let mut tx = pool.begin().await.expect("begin tx");
     let now = time::OffsetDateTime::now_utc();
 
@@ -490,7 +493,7 @@ mod tests {
 
   #[tokio::test]
   async fn subtotal_under_minimum_mentions_price() {
-    let pool = crate::test_support::pool().await;
+    let pool = crate::test_support::fresh_pool().await;
     let mut tx = pool.begin().await.expect("begin tx");
 
     let code = unique_code("min");
@@ -513,7 +516,7 @@ mod tests {
 
   #[tokio::test]
   async fn fixed_and_percent_return_stored_code_and_discount() {
-    let pool = crate::test_support::pool().await;
+    let pool = crate::test_support::fresh_pool().await;
     let mut tx = pool.begin().await.expect("begin tx");
     let subtotal = 10_000;
 
@@ -565,7 +568,7 @@ mod tests {
 
   #[tokio::test]
   async fn assignments_open_for_guest_and_restricted_to_member() {
-    let pool = crate::test_support::pool().await;
+    let pool = crate::test_support::fresh_pool().await;
     let mut tx = pool.begin().await.expect("begin tx");
 
     let open_code = unique_code("open");
@@ -613,7 +616,7 @@ mod tests {
 
   #[tokio::test]
   async fn global_cap_unique_unlimited_and_null() {
-    let pool = crate::test_support::pool().await;
+    let pool = crate::test_support::fresh_pool().await;
     let mut tx = pool.begin().await.expect("begin tx");
 
     let once_code = unique_code("once");
@@ -661,7 +664,7 @@ mod tests {
 
   #[tokio::test]
   async fn per_user_cap_applies_only_when_user_id_is_some() {
-    let pool = crate::test_support::pool().await;
+    let pool = crate::test_support::fresh_pool().await;
     let mut tx = pool.begin().await.expect("begin tx");
 
     let code = unique_code("personal");
@@ -693,7 +696,7 @@ mod tests {
 
   #[tokio::test]
   async fn for_update_resolves_inside_transaction() {
-    let pool = crate::test_support::pool().await;
+    let pool = crate::test_support::fresh_pool().await;
     let mut tx = pool.begin().await.expect("begin tx");
 
     let code = unique_code("lock");

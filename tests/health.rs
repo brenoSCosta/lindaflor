@@ -1,7 +1,5 @@
-mod common;
-
-use common::{json_get, pool_and_router};
 use http::StatusCode;
+use test_support::{json_get, pool_and_router};
 
 #[tokio::test]
 async fn health_check_returns_ok() {

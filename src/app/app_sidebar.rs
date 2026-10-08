@@ -108,6 +108,7 @@ pub async fn logout_page(
   if let Some(hash) = topcoat::session::stop(cx).await? {
     let _ = crate::auth::session_store::delete_by_token_hash(pool, &hash).await;
   }
+  crate::app::store::cart::clear_cart_token(cx);
   let redirect = body
     .and_then(|Form(b)| b.redirect)
     .filter(|p| p.starts_with('/') && !p.starts_with("//"))

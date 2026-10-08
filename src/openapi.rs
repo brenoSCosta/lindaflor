@@ -8,9 +8,8 @@ use topcoat::{
 };
 use utoipa::OpenApi;
 
-use crate::config::openapi_docs_enabled;
-use lindaflor::api::{self, HealthResponse};
-use lindaflor::auth::routes::{
+use crate::api::{self, HealthResponse};
+use crate::auth::routes::{
   AccountJson, AccountsOkStatus, AdminOkStatus, AdminSessionJson,
   AdminUpdateUserBody, AdminUserResponse, AuthSessionJson, AuthUserJson,
   BackupCodesResponse, BanUserBody, ChangeEmailBody, ChangeEmailOkStatus,
@@ -29,6 +28,7 @@ use lindaflor::auth::routes::{
   email_verification, logout, oauth, password_reset, session, sessions,
   sign_in, sign_up, two_factor, update_user,
 };
+use crate::config::openapi_docs_enabled;
 
 fn require_openapi_docs() -> Result<()> {
   if openapi_docs_enabled() {
