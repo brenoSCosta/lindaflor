@@ -11,7 +11,7 @@ use test_support::pool_and_router;
 use topcoat::router::{Body, Router};
 
 use lindaflor::security_headers::{
-  CONTENT_SECURITY_POLICY_VALUE, STRICT_TRANSPORT_SECURITY_VALUE,
+  CONTENT_SECURITY_POLICY_VALUE_DEV, STRICT_TRANSPORT_SECURITY_VALUE,
 };
 
 async fn send(
@@ -59,9 +59,12 @@ async fn security_headers_present_on_ok() {
     get_header(&response, header::REFERRER_POLICY),
     Some("strict-origin-when-cross-origin")
   );
+  // `pool_and_router` forces APP_ENV=development, so the dev CSP (with the
+  // `http://127.0.0.1:*` allowance for `topcoat dev`'s ephemeral dev.js)
+  // is expected here; prod CSP is covered by unit tests.
   assert_eq!(
     get_header(&response, header::CONTENT_SECURITY_POLICY),
-    Some(CONTENT_SECURITY_POLICY_VALUE)
+    Some(CONTENT_SECURITY_POLICY_VALUE_DEV)
   );
   assert_eq!(
     get_header(&response, header::STRICT_TRANSPORT_SECURITY),
@@ -87,7 +90,7 @@ async fn security_headers_present_on_404_and_handler_error() {
   );
   assert_eq!(
     get_header(&not_found, header::CONTENT_SECURITY_POLICY),
-    Some(CONTENT_SECURITY_POLICY_VALUE)
+    Some(CONTENT_SECURITY_POLICY_VALUE_DEV)
   );
   assert_eq!(
     get_header(&not_found, header::STRICT_TRANSPORT_SECURITY),
@@ -105,7 +108,7 @@ async fn security_headers_present_on_404_and_handler_error() {
   );
   assert_eq!(
     get_header(&unauthorized, header::CONTENT_SECURITY_POLICY),
-    Some(CONTENT_SECURITY_POLICY_VALUE)
+    Some(CONTENT_SECURITY_POLICY_VALUE_DEV)
   );
 }
 
@@ -218,7 +221,7 @@ async fn security_headers_present_on_429() {
   );
   assert_eq!(
     get_header(&limited, header::CONTENT_SECURITY_POLICY),
-    Some(CONTENT_SECURITY_POLICY_VALUE)
+    Some(CONTENT_SECURITY_POLICY_VALUE_DEV)
   );
   assert_eq!(
     get_header(&limited, header::STRICT_TRANSPORT_SECURITY),

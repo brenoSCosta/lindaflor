@@ -30,9 +30,15 @@ const LABEL: StaticClass = class!(
 #[component]
 pub async fn label(
   #[default] mut attrs: Attributes,
+  #[default] required: bool,
   #[default] child: Child<'_>,
 ) -> Result<impl View> {
   Ok(view! {
-      <label class=(class!(LABEL, attrs.remove("class"))) (attrs)>(child)</label>
+      <label class=(class!(LABEL, attrs.remove("class"))) (attrs)>
+          (child)
+          if required {
+              <span class="text-red-500">"*"</span>
+          }
+      </label>
   })
 }

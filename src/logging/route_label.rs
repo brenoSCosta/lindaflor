@@ -53,6 +53,7 @@ const KNOWN_TEMPLATES: &[&str] = &[
   "/reset-password",
   "/settings",
   "/settings/avatar",
+  "/signup",
   "/stop-impersonating",
   "/termos",
   "/theme",

@@ -23,11 +23,28 @@ use tower_http::set_header::{SetResponseHeader, SetResponseHeaderLayer};
 /// scripts, Tailwind stylesheet, toasts (inline scripts/styles) plus the
 /// dev-docs CDN (Scalar/Swagger, dev-only routes).
 ///
+/// `'unsafe-eval'` is required: Topcoat compiles live expressions with
+/// `new Function` in the browser. Without it, field bindings never hydrate.
+///
 /// `img-src` includes `http:` so local object storage (RustFS at
 /// `http://127.0.0.1:4203`) can serve avatars and product images. Google
 /// profile photos are `https:`. On an HTTPS origin the browser still
 /// blocks mixed-content `http:` images, so production S3 must be HTTPS.
-pub const CONTENT_SECURITY_POLICY_VALUE: &str = "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: blob: http: https:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+pub const CONTENT_SECURITY_POLICY_VALUE: &str = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: blob: http: https:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+
+/// Dev-only CSP. `topcoat::dev::script()` (see `src/app.rs` root layout)
+/// injects `<script src="{TOPCOAT_DEV_URL}/dev.js">` when running under
+/// `topcoat dev`, where `TOPCOAT_DEV_URL` is `http://127.0.0.1:<ephemeral-port>`
+/// (e.g. `http://127.0.0.1:59039`). The port changes every `topcoat dev`
+/// run, so `script-src`/`style-src`/`connect-src` allow any local port via
+/// `http://127.0.0.1:*` and `http://localhost:*` (CSP port wildcards).
+/// This also covers RustFS on `:4203`. CDN hosts are kept so the dev-only
+/// Scalar/Swagger routes (`/api/docs`, `/api/swagger`) keep working.
+/// `connect-src` keeps `ws:`/`wss:` for the dev reload WebSocket plus local
+/// `http:` for HMR fetches. `font-src`/`style-src` allow jsDelivr because
+/// `dev.js` loads its status-indicator font (Lexend Deca via fontsource)
+/// and stylesheet from there.
+pub const CONTENT_SECURITY_POLICY_VALUE_DEV: &str = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:* http://localhost:* https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' http://127.0.0.1:* http://localhost:* https://cdn.jsdelivr.net https://unpkg.com; img-src 'self' data: blob: http: https:; font-src 'self' data: https://cdn.jsdelivr.net https://unpkg.com; connect-src 'self' ws: wss: http://127.0.0.1:* http://localhost:*; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
 
 /// Prod-only `Strict-Transport-Security` (two years, subdomains).
 pub const STRICT_TRANSPORT_SECURITY_VALUE: &str =
@@ -41,9 +58,23 @@ pub fn referrer_policy_value() -> HeaderValue {
   HeaderValue::from_static("strict-origin-when-cross-origin")
 }
 
+/// Local/test only: `topcoat dev` + test routers. Unknown envs (staging,
+/// preview, typos) stay on the prod CSP — same fail-closed list as HSTS.
+pub fn dev_csp_for_env(app_env: &str) -> bool {
+  matches!(app_env, "development" | "dev" | "test")
+}
+
+pub fn content_security_policy_value_for_env(app_env: &str) -> HeaderValue {
+  let value = if dev_csp_for_env(app_env) {
+    CONTENT_SECURITY_POLICY_VALUE_DEV
+  } else {
+    CONTENT_SECURITY_POLICY_VALUE
+  };
+  HeaderValue::from_str(value).expect("static CSP is a valid header value")
+}
+
 pub fn content_security_policy_value() -> HeaderValue {
-  HeaderValue::from_str(CONTENT_SECURITY_POLICY_VALUE)
-    .expect("static CSP is a valid header value")
+  content_security_policy_value_for_env(crate::config::app_env().as_str())
 }
 
 pub fn strict_transport_security_value() -> HeaderValue {
@@ -71,8 +102,10 @@ pub fn set_response_header_layer(
   TowerLayer::new(SetResponseHeaderLayer::overriding(name, value))
 }
 
-/// Always-on tower layers: `X-Content-Type-Options`, `Referrer-Policy`, CSP.
-pub fn always_tower_layers() -> Vec<SecurityHeaderTowerLayer> {
+/// Always-on tower layers for an explicit env (pure; no env read).
+pub fn always_tower_layers_for_env(
+  app_env: &str,
+) -> Vec<SecurityHeaderTowerLayer> {
   vec![
     set_response_header_layer(
       header::X_CONTENT_TYPE_OPTIONS,
@@ -81,15 +114,20 @@ pub fn always_tower_layers() -> Vec<SecurityHeaderTowerLayer> {
     set_response_header_layer(header::REFERRER_POLICY, referrer_policy_value()),
     set_response_header_layer(
       header::CONTENT_SECURITY_POLICY,
-      content_security_policy_value(),
+      content_security_policy_value_for_env(app_env),
     ),
   ]
+}
+
+/// Always-on tower layers: `X-Content-Type-Options`, `Referrer-Policy`, CSP.
+pub fn always_tower_layers() -> Vec<SecurityHeaderTowerLayer> {
+  always_tower_layers_for_env(crate::config::app_env().as_str())
 }
 
 /// Tower layers for an explicit env name (pure; no env read). Used by
 /// [`tower_layers`] and unit tests.
 pub fn tower_layers_for_env(app_env: &str) -> Vec<SecurityHeaderTowerLayer> {
-  let mut layers = always_tower_layers();
+  let mut layers = always_tower_layers_for_env(app_env);
   if hsts_enabled_for_env(app_env) {
     layers.push(set_response_header_layer(
       header::STRICT_TRANSPORT_SECURITY,
@@ -176,14 +214,21 @@ mod tests {
     assert_eq!(content_type_options_value(), "nosniff");
     assert_eq!(referrer_policy_value(), "strict-origin-when-cross-origin");
     assert_eq!(
-      content_security_policy_value().to_str().unwrap(),
+      content_security_policy_value_for_env("production")
+        .to_str()
+        .unwrap(),
       CONTENT_SECURITY_POLICY_VALUE
     );
-    assert!(content_security_policy_value().to_str().unwrap().contains(
-      "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://unpkg.com"
-    ));
     assert!(
-      content_security_policy_value()
+      content_security_policy_value_for_env("production")
+        .to_str()
+        .unwrap()
+        .contains(
+          "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com"
+        )
+    );
+    assert!(
+      content_security_policy_value_for_env("production")
         .to_str()
         .unwrap()
         .contains("img-src 'self' data: blob: http: https:"),
@@ -193,6 +238,64 @@ mod tests {
       strict_transport_security_value(),
       "max-age=63072000; includeSubDomains"
     );
+  }
+
+  #[test]
+  fn dev_csp_allows_topcoat_dev_server() {
+    // `topcoat dev` serves dev.js from an ephemeral port
+    // (TOPCOAT_DEV_URL=http://127.0.0.1:<random>), so the dev CSP must
+    // allow any local port — a pinned port (e.g. :4203) blocks dev.js.
+    for env in ["development", "dev", "test"] {
+      let csp = content_security_policy_value_for_env(env)
+        .to_str()
+        .unwrap()
+        .to_owned();
+      assert!(dev_csp_for_env(env), "{env} must enable the local CSP");
+      assert_eq!(
+        csp, CONTENT_SECURITY_POLICY_VALUE_DEV,
+        "{env} must use dev CSP"
+      );
+      assert!(
+        csp.contains("http://127.0.0.1:*"),
+        "{env} CSP must allow ephemeral topcoat dev port, got: {csp}"
+      );
+      assert!(
+        csp.contains("http://localhost:*"),
+        "{env} CSP must allow localhost dev port, got: {csp}"
+      );
+      assert!(
+        csp.contains("https://cdn.jsdelivr.net"),
+        "{env} CSP must keep dev-docs CDN (Scalar), got: {csp}"
+      );
+      assert!(
+        csp.contains("https://unpkg.com"),
+        "{env} CSP must keep dev-docs CDN (Swagger), got: {csp}"
+      );
+      assert!(
+        csp.contains("font-src 'self' data: https://cdn.jsdelivr.net"),
+        "{env} CSP font-src must allow dev.js status font (Lexend Deca via fontsource), got: {csp}"
+      );
+    }
+  }
+
+  #[test]
+  fn csp_gate_is_fail_closed_like_hsts() {
+    for env in ["production", "staging", "prod", "preview"] {
+      let csp = content_security_policy_value_for_env(env)
+        .to_str()
+        .unwrap()
+        .to_owned();
+      assert!(!dev_csp_for_env(env), "{env} must not enable the local CSP");
+      assert_eq!(
+        csp, CONTENT_SECURITY_POLICY_VALUE,
+        "{env} must use prod CSP"
+      );
+      assert!(
+        !csp.contains("http://127.0.0.1:*")
+          && !csp.contains("http://localhost:*"),
+        "{env} must not allow localhost script/connect wildcards, got: {csp}"
+      );
+    }
   }
 
   #[test]

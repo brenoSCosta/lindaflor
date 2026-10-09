@@ -166,6 +166,7 @@ pub async fn field_content(
 #[component]
 pub async fn field_label(
   #[default] mut attrs: Attributes,
+  #[default] required: bool,
   #[default] child: Child<'_>,
 ) -> Result<impl View> {
   Ok(view! {
@@ -180,6 +181,7 @@ pub async fn field_label(
               ))
               (attrs)
           },
+          required: required,
           (child)
       )
   })

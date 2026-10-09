@@ -463,9 +463,10 @@ pub async fn storefront_shell(
   let logged_in = optional_user(cx).await?.is_some();
   let pool = app_context::<PgPool>(cx);
   let cart_count = cart_item_count(cx, pool).await?.max(0) as usize;
+  let hide_footer = uri(cx).path() == "/login";
 
   Ok(view! {
-      <div class="min-h-screen bg-background text-foreground">
+      <div class="flex min-h-screen flex-col bg-background text-foreground">
           <div class="border-b border-border bg-background px-4 py-2 text-center text-[10px] tracking-widest text-muted-foreground uppercase">
               "Frete grátis acima de R$ 299 · Aracaju, SE"
           </div>
@@ -521,7 +522,8 @@ pub async fn storefront_shell(
                   </div>
               </div>
           </header>
-          <main>(child)</main>
+          <main class="flex flex-1 flex-col">(child)</main>
+          if !hide_footer {
           <footer class="border-t border-border bg-background">
               <div class="mx-auto grid max-w-7xl gap-10 px-4 py-16 md:grid-cols-4 md:px-8">
                   <div class="space-y-3 md:col-span-2">
@@ -552,6 +554,7 @@ pub async fn storefront_shell(
                   "© 2026 Linda Flor Moda Praia"
               </div>
           </footer>
+          }
       </div>
   })
 }

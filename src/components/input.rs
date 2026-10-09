@@ -22,8 +22,8 @@ const INPUT: StaticClass = class!(
 /// show the error border and focus ring.
 ///
 /// Bind `value` to sync the input with a string signal, `touched` to mark the field
-/// visited on blur, and `error` to drive `aria-invalid` from a live error message.
-/// Omit them for an uncontrolled input.
+/// visited on input or blur, and `error` to drive `aria-invalid` from a live error
+/// message. Omit them for an uncontrolled input.
 ///
 /// ```ignore
 /// view! {
@@ -36,7 +36,7 @@ pub async fn input(
   #[into]
   #[default]
   value: Option<Signal<String>>,
-  /// Marked `true` on blur. Combine with `error` for touched-only messages.
+  /// Marked `true` on input or blur. Combine with `error` for touched-only messages.
   #[into]
   #[default]
   touched: Option<Signal<bool>>,
@@ -46,15 +46,23 @@ pub async fn input(
   error: Expr<String>,
   #[default] mut attrs: Attributes,
 ) -> Result<impl View> {
+  let touched_on_blur = touched.clone();
   Ok(view! {
       <input
           class=(class!(INPUT, attrs.remove("class")))
           (attrs)
           if let Some(v) = value {
               :value=$(v.get())
-              @input=$(|e: Event| v.set(e.target.value))
+              if let Some(t) = touched {
+                  @input=$(|e: Event| {
+                      v.set(e.target.value);
+                      t.set(true);
+                  })
+              } else {
+                  @input=$(|e: Event| v.set(e.target.value))
+              }
           }
-          if let Some(t) = touched {
+          if let Some(t) = touched_on_blur {
               @blur=$(|_e: Event| t.set(true))
           }
           :aria-invalid=$(if error.is_empty() { "false" } else { "true" })
