@@ -510,6 +510,49 @@ pub async fn set_cart_quantity_proc(
   }
 }
 
+/// Sheet fast-path for the coupon form. Returns the domain outcome as data
+/// so the browser can show an inline error without re-rendering the shard:
+/// empty string applies/clears, non-empty is the message to show inline.
+/// Outer `Err` is a transport failure. Empty code clears the coupon.
+#[procedure("/carrinho/cupom")]
+pub async fn set_cart_coupon_proc(
+  cx: &Cx,
+  code: String,
+) -> topcoat::Result<String> {
+  use crate::app::store::coupons::{CouponReject, resolve_coupon};
+
+  let pool = app_context::<PgPool>(cx);
+  let user_id = current_user_owned(cx).await?.map(|session| session.user.id);
+  let cart = load_or_create_cart(cx, pool, user_id).await?;
+  let raw: String = code.trim().chars().take(64).collect();
+  if raw.is_empty() {
+    set_cart_coupon(pool, cart.id, None).await?;
+    return Ok(String::new());
+  }
+  let subtotal = {
+    let hydrated = hydrate_cart(pool, cart.id).await?;
+    cart_subtotal_cents(&hydrated.items)
+  };
+  let mut tx = pool.begin().await?;
+  let outcome = resolve_coupon(&mut tx, &raw, subtotal, user_id, false).await;
+  tx.rollback().await?;
+  match outcome {
+    Ok(Some(coupon)) => {
+      set_cart_coupon(pool, cart.id, Some(&coupon.code)).await?;
+      Ok(String::new())
+    }
+    Ok(None) => {
+      set_cart_coupon(pool, cart.id, None).await?;
+      Ok(String::new())
+    }
+    Err(CouponReject::Invalid(message)) => {
+      set_cart_coupon(pool, cart.id, None).await?;
+      Ok(message)
+    }
+    Err(CouponReject::Db(error)) => Err(error.into()),
+  }
+}
+
 /// Header badge: sum of stored quantities for the cookie token (no create).
 pub async fn cart_item_count(
   cx: &Cx,

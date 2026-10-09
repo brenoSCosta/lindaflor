@@ -300,6 +300,9 @@ pub async fn page(
                                             let _ = n.clone();
                                         }
                                     );
+                                    raw!(
+                                        "(() => { const opener = document.querySelector('[data-cart-open]'); if (opener) opener.click(); })();"
+                                    );
                                 })
                             >
                                 <input type="hidden" name="variant_id" value=(selected_variant_id_attr)>

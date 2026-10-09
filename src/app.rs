@@ -1,7 +1,6 @@
 pub mod admin;
 pub mod app_sidebar;
 pub mod auth_helpers;
-pub mod carrinho;
 pub mod check_email;
 pub mod checkout;
 pub mod colecoes;

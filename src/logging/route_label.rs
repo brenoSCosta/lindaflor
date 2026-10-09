@@ -31,7 +31,6 @@ const KNOWN_TEMPLATES: &[&str] = &[
   "/admin/usuarios/sessoes/revogar",
   "/admin/usuarios/sessoes/revogar-todas",
   "/api/health",
-  "/carrinho",
   "/check-email",
   "/check-email/resend",
   "/checkout",

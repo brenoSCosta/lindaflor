@@ -18,6 +18,7 @@ use topcoat::{
 
 use crate::app::auth_helpers::optional_user;
 use crate::app::store::cart::cart_item_count;
+use crate::app::store::cart_sheet::cart_sheet;
 use crate::app::utils::{object_store, resolve_storage_url};
 use crate::components::avatar::{
   AvatarSize, avatar, avatar_fallback, avatar_image,
@@ -29,6 +30,7 @@ use crate::components::dropdown_menu::{
   dropdown_menu, dropdown_menu_label, dropdown_menu_separator,
   dropdown_menu_trigger,
 };
+use crate::components::sheet::{sheet, sheet_content};
 use crate::components::sidebar::{
   SidebarCollapsible, SidebarMenuButtonSize, SidebarMenuButtonVariant, sidebar,
   sidebar_content, sidebar_footer, sidebar_group, sidebar_group_content,
@@ -464,6 +466,7 @@ pub async fn storefront_shell(
   let pool = app_context::<PgPool>(cx);
   let cart_count = cart_item_count(cx, pool).await?.max(0) as usize;
   let hide_footer = uri(cx).path() == "/login";
+  let cart_open = signal(cx, || false);
 
   Ok(view! {
       <div class="flex min-h-screen flex-col bg-background text-foreground">
@@ -502,11 +505,14 @@ pub async fn storefront_shell(
                               icon(data: iconify_icon!("lucide:user"))
                           </a>
                       }
-                      <a
-                          href=(href!(crate::app::carrinho::page))
+                      <button
+                          type="button"
+                          id="cart-open-btn"
+                          data-cart-open=""
                           class=(class!(button_variants(ButtonVariant::Ghost, ButtonSize::Icon), "relative"))
                           aria-label="Carrinho"
                           title="Carrinho"
+                          @click=$(|_e: Event| cart_open.set(true))
                       >
                           icon(
                               data: iconify_icon!("lucide:shopping-cart")
@@ -518,11 +524,32 @@ pub async fn storefront_shell(
                           >
                               (cart_count)
                           </span>
-                      </a>
+                      </button>
                   </div>
               </div>
           </header>
           <main class="flex flex-1 flex-col">(child)</main>
+          sheet(
+              open: $(cart_open.get()),
+              attrs: attributes! {
+                  id="cart-sheet"
+                  aria-label="Carrinho"
+                  @keydown=$(|e: Event| {
+                      if e.key == "Escape" {
+                          cart_open.set(false);
+                      }
+                  })
+                  @click=$(|e: Event| {
+                      if e.target.id == "cart-sheet" {
+                          cart_open.set(false);
+                      }
+                  })
+              },
+              sheet_content(
+                  attrs: attributes! { class="[&]:overflow-hidden" },
+                  cart_sheet(open: cart_open.clone())
+              )
+          )
           if !hide_footer {
           <footer class="border-t border-border bg-background">
               <div class="mx-auto grid max-w-7xl gap-10 px-4 py-16 md:grid-cols-4 md:px-8">
