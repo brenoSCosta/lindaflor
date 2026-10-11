@@ -72,7 +72,7 @@
     "SQLX_OFFLINE": "true"
   },
   "rust-analyzer.check.command": "check",
-  "rust-analyzer.check.extraArgs": ["--bin", "lindaflor"],
+  "rust-analyzer.check.extraArgs": ["--bin", "lindaflor", "--jobs", "2"],
   "files.associations": {
     "*.css": "tailwindcss"
   },

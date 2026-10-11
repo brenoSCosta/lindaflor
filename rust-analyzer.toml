@@ -10,7 +10,7 @@ SQLX_OFFLINE = "true"
 
 [check]
 command = "check"
-extraArgs = ["--bin", "lindaflor"]
+extraArgs = ["--bin", "lindaflor", "--jobs", "2"]
 
 [check.extraEnv]
 SQLX_OFFLINE = "true"
