@@ -1,4 +1,4 @@
-//! PRODUCTION_READINESS §3.4: security headers + same-origin enforcement.
+//! Security headers + same-origin enforcement.
 //!
 //! Uses raw `http::Request` (the `json_get`/`json_post` helpers cannot set
 //! headers). `pool_and_router` forces `APP_ENV=development`, so HSTS must be

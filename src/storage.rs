@@ -135,6 +135,35 @@ impl S3ObjectStore {
     }
   }
 
+  /// Read-only bucket probe for `/api/readyz` (`HEAD`, never creates).
+  async fn head_bucket(&self) -> Result<(), StorageError> {
+    let (amz_date, date_stamp) = amz_timestamps();
+    let payload_hash = sha256_hex(&[]);
+    let auth = self.authorization(
+      "HEAD",
+      &self.bucket_canonical_uri(),
+      "",
+      &payload_hash,
+      &amz_date,
+      &date_stamp,
+    )?;
+    let response = self
+      .http
+      .head(self.bucket_url())
+      .header("host", self.host())
+      .header("x-amz-content-sha256", payload_hash)
+      .header("x-amz-date", amz_date)
+      .header(reqwest::header::AUTHORIZATION, auth)
+      .send()
+      .await
+      .map_err(StorageError::from_aws)?;
+    if response.status().is_success() {
+      Ok(())
+    } else {
+      Err(status_error(response).await)
+    }
+  }
+
   async fn create_bucket(&self) -> Result<(), StorageError> {
     // AWS rejects a LocationConstraint in us-east-1; other regions require one.
     let is_us_east_1 = self.region.eq_ignore_ascii_case("us-east-1");
@@ -506,6 +535,15 @@ impl ObjectStore {
   pub async fn ensure_bucket(&self) -> Result<(), StorageError> {
     match self {
       Self::S3(store) => store.ensure_bucket().await,
+      Self::Memory(_) | Self::Unavailable => Ok(()),
+    }
+  }
+
+  /// Read-only readiness probe for `/api/readyz`: `HEAD` the bucket when
+  /// backed by S3 (never creates it); always `Ok` for Memory/Unavailable.
+  pub async fn health_check(&self) -> Result<(), StorageError> {
+    match self {
+      Self::S3(store) => store.head_bucket().await,
       Self::Memory(_) | Self::Unavailable => Ok(()),
     }
   }

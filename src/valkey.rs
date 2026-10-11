@@ -24,9 +24,40 @@ use sha2::{Digest, Sha256};
 pub async fn create_client(
   valkey_url: &str,
 ) -> Result<MultiplexedConnection, redis::RedisError> {
-  let client = redis::Client::open(valkey_url)?;
-  let conn = client.get_multiplexed_async_connection().await?;
-  Ok(conn)
+  // Bounded the connect and verify with timeouts and retry once, so a
+  // hung Valkey fails boot fast instead of hanging `main`.
+  const TIMEOUT: Duration = Duration::from_secs(2);
+  let mut attempt: u32 = 0;
+  loop {
+    attempt += 1;
+    let outcome = tokio::time::timeout(TIMEOUT, async {
+      let client = redis::Client::open(valkey_url)?;
+      let mut conn = client.get_multiplexed_async_connection().await?;
+      redis::cmd("PING").query_async::<String>(&mut conn).await?;
+      Ok::<_, redis::RedisError>(conn)
+    })
+    .await;
+    match outcome {
+      Ok(Ok(conn)) => return Ok(conn),
+      Ok(Err(err)) if attempt < 3 => {
+        tracing::warn!(attempt, error = %err, "valkey not ready, retrying");
+        tokio::time::sleep(Duration::from_millis(200 * u64::from(attempt)))
+          .await;
+      }
+      Ok(Err(err)) => return Err(err),
+      Err(_) if attempt < 3 => {
+        tracing::warn!(attempt, "valkey connect/PING timed out, retrying");
+        tokio::time::sleep(Duration::from_millis(200 * u64::from(attempt)))
+          .await;
+      }
+      Err(_) => {
+        return Err(redis::RedisError::from(std::io::Error::new(
+          std::io::ErrorKind::TimedOut,
+          "valkey connect/PING timed out",
+        )));
+      }
+    }
+  }
 }
 
 /// Clone the shared Valkey connection for this request, if one is

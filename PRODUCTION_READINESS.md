@@ -201,19 +201,18 @@ Only `devenv.nix` dev stack exists. Not reproducibly deployable.
 - [ ] Add multi-stage `Dockerfile` (pinned `rust:1.98.1-slim` per `rust-toolchain.toml`): `cargo chef`-style cache, `sqlx migrate run` as separate migrate-job (not in web boot — see §3.5), `topcoat asset bundle`, non-root user, `HEALTHCHECK`.
 - [ ] Add `.dockerignore`, `docker-compose.prod.yml` (web + postgres + valkey + rustfs), `fly.toml` or `render.yaml` per target.
 - [ ] Add `.github/workflows/ci.yml`: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, `cargo audit`, `sqlx migrate info`, `cargo sqlx prepare --check`, asset-bundle smoke.
-- [ ] Pin prod toolchain outside devenv (`flake.nix` currently diverges: nixpkgs `rustc` unpinned vs `1.98.1`).
-
+- [x] Pin prod toolchain outside devenv (landed: `flake.nix` uses `rust-overlay` `stable."1.98.1"` with `rust-src/clippy/rustfmt`).
 ### 3.2 Secrets leak via `Debug` + weak defaults — `src/config.rs:3,13`, `devenv.nix:34,42-48`, `README.md:53-54`
 ```rust
 #[derive(Clone, Debug)] pub struct S3Config { ... secret_access_key ... }
 #[derive(Clone, Debug)] pub struct Config { ... database_url ... }
 ```
 Any `{:?}` log/panic leaks DB password + S3 secret. Dev creds hardcoded (`DATABASE_URL` `postgres:postgres` at `devenv.nix:34`, `rustfsadmin`/`rustfsadmin` at `:42-43`, `GOCSPX-fake` at `:48`); seed default `SEED_ADMIN_PASSWORD=admin123` (`README.md:54`, `src/bin/seed/seeders/admin.rs:11-12`).
-- [ ] Fix: manual `Debug` impls redacting secrets (`"***"`); forbid `dotenvy` in prod image; support `*_FILE` (Docker secrets); fail boot if `SEED_*` weak defaults present when `APP_ENV=production`; never run `cargo run --bin seed` in prod (one-shot admin-create with random password instead).
+- [x] Fix: manual `Debug` impls redacting secrets (`"***"`); forbid `dotenvy` in prod image; support `*_FILE` (Docker secrets); fail boot if `SEED_*` weak defaults present when `APP_ENV=production`; never run `cargo run --bin seed` in prod (one-shot admin-create with random password instead).
 
 ### 3.3 Health is static, no readiness, no shutdown — `src/api.rs:21-23`, `src/main.rs:53`, `src/db.rs:4`, `src/valkey.rs:6`
 `GET /api/health` returns `{"status":"ok"}` even during DB/Valkey/S3 outage. No `livez/readyz` split; `tests/health.rs:7` only asserts static `ok`. `topcoat::serve` with no `shutdown(signal)` truncates in-flight on SIGTERM. No `pool.close()`, no Valkey teardown. `get_multiplexed_async_connection` with no PING/timeout/retry.
-- [ ] Fix: `/api/health` (liveness, cheap) + `/api/readyz` (`SELECT 1`, `PING`, `HeadBucket`, 2s timeouts, 503 when degraded). `tokio::signal::ctrl_c + SIGTERM` graceful drain (30s), then `pool.close().await`. Extend `tests/health.rs` to cover degraded-backend 503.
+- [x] Fix: `/api/health` (liveness, cheap) + `/api/readyz` (`SELECT 1`, `PING`, `HeadBucket`, 2s timeouts, 503 when degraded). `tokio::signal::ctrl_c + SIGTERM` graceful drain (30s), then `pool.close().await`. Extend `tests/health.rs` to cover degraded-backend 503.
 
 ### 3.7 Request logs + Prometheus primitives — `src/logging/**`, `src/app.rs`, `src/main.rs`
 No request correlation, no structured access log, no scrapeable metrics. `tracing_subscriber::fmt` is human app logs only (and must stay that way — do not mix JSON access lines into it). Grafana / Loki / Alloy / Prometheus scrape stack is **out of scope** until after launch (P2); ship the same primitives sepro uses in `@sepro/logging` first.
@@ -235,7 +234,8 @@ Landed: prod boot requires valid `APP_ORIGIN`; `OriginPolicy` always Verify (tru
 
 ### 3.5 Migrations on every boot, tiny pool — `src/db.rs:5-8`
 `sqlx::migrate!().run()` on boot: OK single-instance, unsafe multi-replica race; blocks serve on DB down. `max_connections(5)` hardcoded, no timeouts (`test_support.rs:34` uses 16 — divergence).
-- [ ] Fix: migrate-job pattern (init container / `sqlx migrate run` pre-deploy; web boots without applying migrations, or abort if pending); pool from env (`PG_MAX_CONN`, default 20 prod) + `acquire_timeout(5s)`, `idle_timeout(10m)`; pre-migrate backup step; no down-migrations in prod (forward-fix + PITR).
+- [x] Fix (landed): migrate-job pattern (`MIGRATE_ON_BOOT`, default on outside prod / off in prod, abort on pending/dirty/checksum mismatch); pool from env (`PG_MAX_CONN`, default 20 prod) + `acquire_timeout(5s)`, `idle_timeout(10m)`; no down-migrations in prod (forward-fix + PITR, enforced by `embedded_migrations_are_forward_only` test).
+- [ ] Remaining: pre-migrate backup step + `scripts/migrate.sh` / init-container wiring; document RPO/RTO.
 
 ### 3.6 No backups / DR — `migrations/`, `devenv.nix:87`, `dump.rdb` in root
 No `pg_dump`/`pg_basebackup`/PITR, no Valkey `BGSAVE` schedule, no S3 versioning/lifecycle. `dump.rdb` (89B) is local persistence, not a backup.

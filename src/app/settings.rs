@@ -1248,7 +1248,7 @@ fn check_delete_origin(cx: &Cx) -> Result<(), String> {
 
 /// Step-up authorization for immediate account deletion.
 ///
-/// Enforces, in order (see PRODUCTION_READINESS §1.4):
+/// Enforces, in order:
 /// 1. Same-origin request in production ([`check_delete_origin`]).
 /// 2. Fresh session: the session must have started within
 ///    [`DELETE_FRESH_LOGIN_SECS`] (re-login otherwise).

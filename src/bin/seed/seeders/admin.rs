@@ -8,8 +8,33 @@ use super::SeedError;
 pub async fn seed(pool: &PgPool) -> Result<(), SeedError> {
   let email = std::env::var("SEED_ADMIN_EMAIL")
     .unwrap_or_else(|_| "admin@lindaflor.com".to_string());
-  let password = std::env::var("SEED_ADMIN_PASSWORD")
-    .unwrap_or_else(|_| "admin123".to_string());
+  let password = match std::env::var("SEED_ADMIN_PASSWORD")
+    .ok()
+    .filter(|v| !v.is_empty())
+  {
+    Some(password) => password,
+    // Never materialize the documented dev default in production.
+    // Operators must set a strong SEED_ADMIN_PASSWORD per deploy (or use a
+    // one-shot admin-create that prints a random password once).
+    None if lindaflor::config::app_env() == "production" => {
+      return Err(SeedError::Env(
+        "SEED_ADMIN_PASSWORD must be set to a strong (12+ char) value when APP_ENV=production".to_string(),
+      ));
+    }
+    None => "admin123".to_string(),
+  };
+  // Fail closed on weak defaults in production.
+  if let Err(err) =
+    lindaflor::config::reject_weak_seed_password_in_production(&password)
+  {
+    return Err(SeedError::Env(err.to_string()));
+  }
+  if password == "admin123" {
+    tracing::warn!(
+      "seeding admin with the documented dev default password; \
+       set SEED_ADMIN_PASSWORD for anything shared"
+    );
+  }
   let name = std::env::var("SEED_ADMIN_NAME")
     .unwrap_or_else(|_| "Admin User".to_string());
 

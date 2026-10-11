@@ -17,6 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let _ = auth::CREDENTIAL_PROVIDER_ID;
   routes::link_for_discover();
   let _ = api::health;
+  let _ = api::readyz;
   let _ = lindaflor::logging::metrics_route::metrics;
   let _ = openapi::openapi_json;
   let _ = openapi::scalar_docs;
@@ -41,8 +42,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let listener = TcpListener::bind((host.as_str(), cfg.port)).await?;
   tracing::info!("listening on http://{}", listener.local_addr()?);
 
+  // `topcoat::serve` already drains in-flight requests on Ctrl+C / SIGTERM
+  // (30s shutdown timeout). Close the pool afterwards so in-flight queries
+  // finish before the process exits.
+  let pool_for_shutdown = pool.clone();
   topcoat::serve(listener, lindaflor::app::router(pool, valkey_conn, storage))
     .await?;
+  pool_for_shutdown.close().await;
 
   Ok(())
 }

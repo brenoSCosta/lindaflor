@@ -1,4 +1,4 @@
-//! Security response headers (PRODUCTION_READINESS §3.4).
+//! Security response headers.
 //!
 //! [`tower_http::set_header::SetResponseHeaderLayer`] (via
 //! [`topcoat::router::tower::TowerLayer`]) is the primary mechanism: it

@@ -52,6 +52,19 @@ pub async fn pool() -> PgPool {
   .clone()
 }
 
+/// URL of a new empty database on the shared embedded server (no migrations).
+pub async fn empty_database_url() -> String {
+  let _ = pool().await;
+  let db = DB.get().expect("test db");
+  let name = format!("lindaflor_empty_{}", Uuid::now_v7().simple());
+  db._postgres
+    .server()
+    .create_database(&name)
+    .await
+    .expect("create empty database");
+  db._postgres.server().settings().url(&name)
+}
+
 /// Pool bound to the current Tokio runtime. Use in `#[tokio::test]` when the
 /// shared [`pool`] connections may have been created on a previous runtime.
 pub async fn fresh_pool() -> PgPool {

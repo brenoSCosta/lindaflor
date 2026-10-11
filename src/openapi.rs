@@ -47,6 +47,7 @@ fn require_openapi_docs() -> Result<()> {
     ),
     paths(
         api::health,
+        api::readyz,
         sign_up::sign_up_email,
         sign_in::sign_in_email,
         sign_in::sign_in_social,

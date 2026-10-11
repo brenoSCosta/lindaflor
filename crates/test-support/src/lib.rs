@@ -41,6 +41,7 @@ pub async fn env() -> Arc<TestEnv> {
       let _ = lindaflor::auth::CREDENTIAL_PROVIDER_ID;
       lindaflor::auth::routes::link_for_discover();
       let _ = lindaflor::api::health;
+      let _ = lindaflor::api::readyz;
       let _ = lindaflor::logging::metrics_route::metrics;
       let _ = lindaflor::app::dashboard::page;
       let _ = lindaflor::app::login::page;
@@ -112,6 +113,7 @@ pub fn build_auth_router(pool: PgPool) -> Router {
   let _ = lindaflor::auth::CREDENTIAL_PROVIDER_ID;
   lindaflor::auth::routes::link_for_discover();
   let _ = lindaflor::api::health;
+  let _ = lindaflor::api::readyz;
   let _ = lindaflor::logging::metrics_route::metrics;
   let _ = lindaflor::app::dashboard::page;
   let _ = lindaflor::app::login::page;

@@ -123,7 +123,7 @@ fn base64url_nopad(input: &[u8]) -> String {
   out
 }
 
-/// PKCE S256 `code_challenge` for a `code_verifier` (RFC 7636 §4.2).
+/// PKCE S256 `code_challenge` for a `code_verifier` (RFC 7636).
 pub fn pkce_s256_challenge(verifier: &str) -> String {
   use sha2::{Digest, Sha256};
   base64url_nopad(&Sha256::digest(verifier.as_bytes()))
@@ -825,7 +825,7 @@ mod tests {
 
   #[test]
   fn pkce_challenge_matches_rfc7636_vector() {
-    // RFC 7636 §4.2 test vector.
+    // RFC 7636.
     assert_eq!(
       pkce_s256_challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"

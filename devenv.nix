@@ -122,7 +122,7 @@
     exec start-postgres
   '';
 
-  processes.valkey = {
+   processes.valkey = {
     exec = ''
       # Valkey rewrites its cmdline to "valkey-server *:4202", so match the port.
       for pid in $(pgrep -x valkey-server || true); do
@@ -140,7 +140,11 @@
         fi
         sleep 0.1
       done
-      exec valkey-server --bind 127.0.0.1 --port 4202
+      mkdir -p "''${DEVENV_STATE:-.devenv/state}/valkey"
+      exec valkey-server --bind 127.0.0.1 --port 4202 \
+        --dir "''${DEVENV_STATE:-.devenv/state}/valkey" \
+        --appendonly yes --appendfsync everysec \
+        --save 900 1 --save 300 10 --save 60 10000
     '';
   };
 
