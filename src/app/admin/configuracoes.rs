@@ -1,13 +1,18 @@
+use serde::Deserialize;
 use sqlx::PgPool;
 use topcoat::{
   Result,
   context::Cx,
   context::app_context,
-  router::{href, page},
-  view::{View, attributes, view},
+  router::{content::Form, href, page, response::Response, route},
+  view::{View, ViewExt, attributes, view},
 };
+use uuid::Uuid;
 
 use crate::app::auth_helpers::require_admin;
+use crate::app::store::queries::{
+  DEFAULT_FREE_SHIPPING_THRESHOLD_CENTS, get_store_settings,
+};
 use crate::components::button::{ButtonVariant, button};
 use crate::components::card::{card, card_content};
 use crate::components::container::container;
@@ -15,23 +20,42 @@ use crate::components::input::input;
 use crate::components::label::label;
 use crate::components::select::select;
 use crate::components::textarea::textarea;
+use crate::components::toast::{Toast, set_toast, toast_redirect};
+
+const PIX_KEY_TYPES: [&str; 5] = ["cpf", "cnpj", "email", "phone", "random"];
+
+#[derive(Deserialize)]
+pub struct SettingsForm {
+  pix_key: String,
+  pix_key_type: String,
+  pix_merchant_name: String,
+  pix_merchant_city: String,
+  whatsapp_number: String,
+  whatsapp_message_template: String,
+  free_shipping_threshold: String,
+}
 
 #[page]
 pub async fn page(cx: &Cx) -> Result<impl View> {
   let _actor = require_admin(cx).await?;
   let pool = app_context::<PgPool>(cx);
 
-  let _settings = sqlx::query!(
-        "SELECT id, pix_key, pix_key_type::text as pix_key_type, whatsapp_number, whatsapp_message_template FROM store_settings LIMIT 1"
-    )
-    .fetch_optional(pool)
-    .await?;
+  let settings = get_store_settings(pool).await?;
+  let pix_key = settings.pix_key.unwrap_or_default();
+  let pix_key_type = settings.pix_key_type.unwrap_or_else(|| "phone".into());
+  let pix_merchant_name = settings.pix_merchant_name.unwrap_or_default();
+  let pix_merchant_city = settings.pix_merchant_city.unwrap_or_default();
+  let whatsapp_number = settings.whatsapp_number.unwrap_or_default();
+  let whatsapp_message_template =
+    settings.whatsapp_message_template.unwrap_or_default();
+  let threshold_text =
+    format_price_input(settings.free_shipping_threshold_cents);
 
   Ok(view! {
       container(
         <div class="flex flex-col gap-1.5">
           <h1 class="text-2xl font-semibold tracking-tight">"Configurações da loja"</h1>
-          <p class="text-muted-foreground">"Chave PIX estática e WhatsApp usados no checkout."</p>
+          <p class="text-muted-foreground">"Chave PIX, WhatsApp e frete grátis usados no checkout."</p>
         </div>
           card(
               card_content(
@@ -42,11 +66,11 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                               label(attrs: attributes! { for="pix_key_type" }, "Tipo da chave")
                               select(
                                   attrs: attributes! { name="pix_key_type" id="pix_key_type" },
-                                  <option value="cpf">"CPF"</option>
-                                  <option value="cnpj">"CNPJ"</option>
-                                  <option value="email">"E-mail"</option>
-                                  <option value="phone">"Telefone"</option>
-                                  <option value="random">"Chave aleatória"</option>
+                                  <option value="cpf" selected=(pix_key_type == "cpf")>"CPF"</option>
+                                  <option value="cnpj" selected=(pix_key_type == "cnpj")>"CNPJ"</option>
+                                  <option value="email" selected=(pix_key_type == "email")>"E-mail"</option>
+                                  <option value="phone" selected=(pix_key_type == "phone")>"Telefone"</option>
+                                  <option value="random" selected=(pix_key_type == "random")>"Chave aleatória"</option>
                               )
                           </div>
                           <div class="space-y-2">
@@ -55,6 +79,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                   type="text"
                                   name="pix_key"
                                   id="pix_key"
+                                  value=(pix_key)
                                   placeholder="CPF, CNPJ, e-mail, telefone ou chave aleatória"
                               })
                           </div>
@@ -65,6 +90,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                       type="text"
                                       name="pix_merchant_name"
                                       id="pix_merchant_name"
+                                      value=(pix_merchant_name)
                                       placeholder="Linda Flor"
                                       maxlength="25"
                                   })
@@ -76,6 +102,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                       type="text"
                                       name="pix_merchant_city"
                                       id="pix_merchant_city"
+                                      value=(pix_merchant_city)
                                       placeholder="Aracaju"
                                       maxlength="15"
                                   })
@@ -91,17 +118,35 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                   type="text"
                                   name="whatsapp_number"
                                   id="whatsapp_number"
+                                  value=(whatsapp_number)
                                   placeholder="5579998165115"
                               })
                           </div>
                           <div class="space-y-2">
                               label(attrs: attributes! { for="whatsapp_message_template" }, "Modelo da mensagem do cliente")
-                              textarea(attrs: attributes! {
-                                  name="whatsapp_message_template"
-                                  id="whatsapp_message_template"
-                                  rows="3"
+                              textarea(
+                                  attrs: attributes! {
+                                      name="whatsapp_message_template"
+                                      id="whatsapp_message_template"
+                                      rows="3"
+                                  },
+                                  (whatsapp_message_template)
+                              )
+                              <p class="text-xs text-muted-foreground">"Mensagem da página do pedido. Use {{order_id}} e {{total}}."</p>
+                          </div>
+                      </fieldset>
+                      <fieldset class="space-y-4 border-0">
+                          <legend class="mb-4 text-base font-semibold">"Frete grátis"</legend>
+                          <div class="space-y-2">
+                              label(attrs: attributes! { for="free_shipping_threshold" }, "Valor mínimo (R$)")
+                              input(attrs: attributes! {
+                                  type="text"
+                                  name="free_shipping_threshold"
+                                  id="free_shipping_threshold"
+                                  value=(threshold_text)
+                                  placeholder="299.00"
                               })
-                              <p class="text-xs text-muted-foreground">"Use {{order_id}} e {{total}} como placeholders."</p>
+                              <p class="text-xs text-muted-foreground">"Use 0 para frete grátis em todas as compras."</p>
                           </div>
                       </fieldset>
                       button(
@@ -113,5 +158,155 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
               )
           )
       )
-  })
+  }.boxed())
+}
+
+#[route(POST "/admin/configuracoes")]
+async fn save_settings(
+  cx: &Cx,
+  Form(form): Form<SettingsForm>,
+) -> Result<Response> {
+  let _actor = require_admin(cx).await?;
+  let pool = app_context::<PgPool>(cx);
+  let back = href!(page).resolve(cx);
+  let fail = |message: &str| {
+    set_toast(cx, Toast::error(message));
+    toast_redirect(cx, back.clone())
+  };
+
+  let pix_key_type = match validate_pix_key_type(&form.pix_key_type) {
+    Ok(value) => value,
+    Err(message) => return fail(message),
+  };
+  let pix_key = optional_text(&form.pix_key);
+  let pix_merchant_name = match optional_limited(
+    &form.pix_merchant_name,
+    25,
+    "Nome do recebedor deve ter no máximo 25 caracteres.",
+  ) {
+    Ok(value) => value,
+    Err(message) => return fail(message),
+  };
+  let pix_merchant_city = match optional_limited(
+    &form.pix_merchant_city,
+    15,
+    "Cidade deve ter no máximo 15 caracteres.",
+  ) {
+    Ok(value) => value,
+    Err(message) => return fail(message),
+  };
+  let whatsapp_number = optional_text(&form.whatsapp_number);
+  let whatsapp_message_template =
+    optional_text(&form.whatsapp_message_template);
+  let threshold = match parse_threshold_cents(&form.free_shipping_threshold) {
+    Ok(value) => value,
+    Err(message) => return fail(message),
+  };
+
+  let existing_id: Option<Uuid> = sqlx::query_scalar(
+    "SELECT id FROM store_settings ORDER BY created_at ASC LIMIT 1",
+  )
+  .fetch_optional(pool)
+  .await?;
+
+  if let Some(id) = existing_id {
+    sqlx::query(
+      "UPDATE store_settings SET
+            pix_key = $2,
+            pix_key_type = $3::pix_key_type,
+            pix_merchant_name = $4,
+            pix_merchant_city = $5,
+            whatsapp_number = $6,
+            whatsapp_message_template = $7,
+            free_shipping_threshold_cents = $8,
+            updated_at = now()
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(pix_key.as_deref())
+    .bind(pix_key_type.as_deref())
+    .bind(pix_merchant_name.as_deref())
+    .bind(pix_merchant_city.as_deref())
+    .bind(whatsapp_number.as_deref())
+    .bind(whatsapp_message_template.as_deref())
+    .bind(threshold)
+    .execute(pool)
+    .await?;
+  } else {
+    sqlx::query(
+      "INSERT INTO store_settings (
+            id, pix_key, pix_key_type, pix_merchant_name, pix_merchant_city,
+            whatsapp_number, whatsapp_message_template, free_shipping_threshold_cents,
+            created_at, updated_at
+         ) VALUES ($1, $2, $3::pix_key_type, $4, $5, $6, $7, $8, now(), now())",
+    )
+    .bind(Uuid::now_v7())
+    .bind(pix_key.as_deref())
+    .bind(pix_key_type.as_deref())
+    .bind(pix_merchant_name.as_deref())
+    .bind(pix_merchant_city.as_deref())
+    .bind(whatsapp_number.as_deref())
+    .bind(whatsapp_message_template.as_deref())
+    .bind(threshold)
+    .execute(pool)
+    .await?;
+  }
+
+  set_toast(cx, Toast::success("Configurações salvas com sucesso."));
+  toast_redirect(cx, back)
+}
+
+fn format_price_input(cents: i64) -> String {
+  format!("{:.2}", cents as f64 / 100.0)
+}
+
+fn optional_text(raw: &str) -> Option<String> {
+  let trimmed = raw.trim();
+  if trimmed.is_empty() {
+    None
+  } else {
+    Some(trimmed.to_string())
+  }
+}
+
+fn optional_limited(
+  raw: &str,
+  max: usize,
+  message: &'static str,
+) -> Result<Option<String>, &'static str> {
+  match optional_text(raw) {
+    Some(value) if value.chars().count() > max => Err(message),
+    other => Ok(other),
+  }
+}
+
+fn validate_pix_key_type(raw: &str) -> Result<Option<String>, &'static str> {
+  let trimmed = raw.trim();
+  if trimmed.is_empty() {
+    return Ok(None);
+  }
+  if PIX_KEY_TYPES.contains(&trimmed) {
+    Ok(Some(trimmed.to_string()))
+  } else {
+    Err("Tipo de chave PIX inválido.")
+  }
+}
+
+fn parse_threshold_cents(raw: &str) -> Result<i64, &'static str> {
+  let trimmed = raw.trim();
+  if trimmed.is_empty() {
+    return Ok(DEFAULT_FREE_SHIPPING_THRESHOLD_CENTS);
+  }
+  let normalized = if trimmed.contains(',') {
+    trimmed.replace('.', "").replace(',', ".")
+  } else {
+    trimmed.to_string()
+  };
+  let value: f64 = normalized
+    .parse()
+    .map_err(|_| "Valor inválido. Use 299.00.")?;
+  if !value.is_finite() || value < 0.0 || value > 9_999_999.0 {
+    return Err("Valor inválido. Use 299.00.");
+  }
+  Ok((value * 100.0).round() as i64)
 }

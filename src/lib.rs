@@ -12,7 +12,6 @@ pub mod openapi;
 pub mod rate_limit;
 pub mod security_headers;
 pub mod storage;
-pub mod theme;
 pub mod valkey;
 
 #[cfg(test)]

@@ -15,7 +15,7 @@ use crate::app::store::cart::{
 };
 use crate::app::store::queries::{
   DEFAULT_WHATSAPP_NUMBER, category_label, format_price, get_product_by_slug,
-  get_store_settings, render_whatsapp_template, size_label, whatsapp_link,
+  get_store_settings, size_label, whatsapp_link,
 };
 use crate::auth::user::current_user_owned;
 use crate::components::accordion::{
@@ -108,6 +108,14 @@ pub async fn page(
     };
 
   let settings = get_store_settings(pool).await?;
+  let shipping_copy = if settings.free_shipping_threshold_cents <= 0 {
+    "Frete grátis em todas as compras. Para Sergipe, prazo de 3 a 7 dias úteis. Demais estados, 7 a 15 dias úteis.".to_string()
+  } else {
+    format!(
+      "Frete grátis para compras acima de {}. Para Sergipe, prazo de 3 a 7 dias úteis. Demais estados, 7 a 15 dias úteis.",
+      format_price(settings.free_shipping_threshold_cents)
+    )
+  };
   let related = crate::app::store::queries::list_related_products(
     pool,
     product.id,
@@ -157,23 +165,18 @@ pub async fn page(
     .as_ref()
     .map(|v| format!("{} · {}", size_label(&v.size), v.color))
     .unwrap_or_default();
-  let whatsapp_fallback = format!(
-    "Olá! Tenho interesse no {}{}",
-    product.name,
-    if variant_label.is_empty() {
-      String::new()
-    } else {
-      format!(" ({})", variant_label)
-    }
-  );
-  let whatsapp_message = render_whatsapp_template(
-    settings.whatsapp_message_template.as_deref(),
-    &[
-      ("product", product.name.as_str()),
-      ("variant", variant_label.as_str()),
-    ],
-    &whatsapp_fallback,
-  );
+  let price_text = format_price(price);
+  let whatsapp_message = if variant_label.is_empty() {
+    format!(
+      "Olá! Tenho interesse no {} no valor de {}.",
+      product.name, price_text
+    )
+  } else {
+    format!(
+      "Olá! Tenho interesse no {} ({}) no valor de {}.",
+      product.name, variant_label, price_text
+    )
+  };
   let whatsapp_url = whatsapp_link(&whatsapp_number, &whatsapp_message);
 
   let product_name = product.name.clone();
@@ -343,7 +346,7 @@ pub async fn page(
                             attrs: attributes! { open=(true) },
                             accordion_trigger("Frete e entrega")
                             accordion_content(
-                                <p>"Frete grátis para compras acima de R$ 299. Para Sergipe, prazo de 3 a 7 dias úteis. Demais estados, 7 a 15 dias úteis."</p>
+                                <p>(shipping_copy)</p>
                             )
                         )
                         accordion_item(

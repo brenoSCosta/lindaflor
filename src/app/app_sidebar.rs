@@ -19,6 +19,7 @@ use topcoat::{
 use crate::app::auth_helpers::optional_user;
 use crate::app::store::cart::cart_item_count;
 use crate::app::store::cart_sheet::cart_sheet;
+use crate::app::store::queries::{format_price, get_store_settings};
 use crate::app::utils::{object_store, resolve_storage_url};
 use crate::components::avatar::{
   AvatarSize, avatar, avatar_fallback, avatar_image,
@@ -38,7 +39,6 @@ use crate::components::sidebar::{
   sidebar_menu_button, sidebar_menu_button_variants, sidebar_menu_item,
   sidebar_provider, sidebar_rail, sidebar_trigger,
 };
-use crate::theme::theme_toggle;
 
 pub const SIDEBAR_COOKIE: &str = "sidebar_state";
 
@@ -448,9 +448,6 @@ pub async fn app_shell(
                           (toggle_sidebar)
                       },
                   )
-                  <div class="ml-auto flex items-center gap-2">
-                      theme_toggle()
-                  </div>
               )
               <div class="flex-1">(child)</div>
           )
@@ -466,6 +463,15 @@ pub async fn storefront_shell(
 ) -> Result<impl View> {
   let logged_in = optional_user(cx).await?.is_some();
   let pool = app_context::<PgPool>(cx);
+  let settings = get_store_settings(pool).await?;
+  let shipping_banner = if settings.free_shipping_threshold_cents <= 0 {
+    "Frete grátis · Aracaju, SE".to_string()
+  } else {
+    format!(
+      "Frete grátis acima de {} · Aracaju, SE",
+      format_price(settings.free_shipping_threshold_cents)
+    )
+  };
   let cart_count = cart_item_count(cx, pool).await?.max(0) as usize;
   let hide_footer = uri(cx).path() == "/login";
   let cart_open = signal(cx, || false);
@@ -473,7 +479,7 @@ pub async fn storefront_shell(
   Ok(view! {
       <div class="flex min-h-screen flex-col bg-background text-foreground">
           <div class="border-b border-border bg-background px-4 py-2 text-center text-[10px] tracking-widest text-muted-foreground uppercase">
-              "Frete grátis acima de R$ 299 · Aracaju, SE"
+              (shipping_banner)
           </div>
           <header class="sticky top-0 z-50 border-b border-border bg-background backdrop-blur">
               <div class="mx-auto grid h-20 max-w-7xl grid-cols-[1fr_auto] items-center gap-4 px-4 md:grid-cols-[1fr_auto_1fr] md:px-8">
@@ -487,7 +493,6 @@ pub async fn storefront_shell(
                       <a href=(href!(crate::app::page).fragment("sobre")) class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">"Sobre"</a>
                   </nav>
                   <div class="flex items-center justify-end justify-self-end gap-2">
-                      theme_toggle()
                       if logged_in {
                           <a
                               href=(href!(crate::app::dashboard::page))

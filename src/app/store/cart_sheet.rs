@@ -23,7 +23,7 @@ use crate::app::store::cart::{
   remove_from_cart_proc, set_cart_coupon_proc, set_cart_quantity_proc,
 };
 use crate::app::store::coupons::{CouponReject, resolve_coupon};
-use crate::app::store::queries::format_price;
+use crate::app::store::queries::{format_price, get_store_settings};
 
 /// NOTE for the badge-patch `raw!` calls below: the JS must end with `;`.
 /// `raw!` output is spliced into the handler without a separator, so
@@ -77,8 +77,17 @@ pub async fn cart_sheet(cx: &Cx, open: Signal<bool>) -> Result<impl View> {
     .map(|coupon| coupon.discount_cents)
     .unwrap_or(0);
   let item_count: i32 = items.iter().map(|item| item.quantity).sum();
-  let free_shipping_threshold = 29900;
+  let settings = get_store_settings(pool).await?;
+  let free_shipping_threshold = settings.free_shipping_threshold_cents;
   let missing_for_free_shipping = (free_shipping_threshold - subtotal).max(0);
+  let free_shipping_hint = if free_shipping_threshold <= 0 {
+    "Frete grátis em todas as compras. Calculado no checkout.".to_string()
+  } else {
+    format!(
+      "Frete grátis para compras acima de {}. Calculado no checkout.",
+      format_price(free_shipping_threshold)
+    )
+  };
 
   // Server-tracked: bumping `version` re-renders this shard, and any
   // change to `open` (owned by the shell) re-renders it too — so items
@@ -373,7 +382,7 @@ pub async fn cart_sheet(cx: &Cx, open: Signal<bool>) -> Result<impl View> {
                       </div>
                   }
                   <p class="text-xs text-muted-foreground">
-                      "Frete grátis para compras acima de R$ 299. Calculado no checkout."
+                      (free_shipping_hint)
                   </p>
               </div>
 

@@ -19,8 +19,8 @@ use topcoat::router::{
 };
 use tower_http::set_header::{SetResponseHeader, SetResponseHeaderLayer};
 
-/// Enforcing Content-Security-Policy. Allows the Topcoat runtime, theme
-/// scripts, Tailwind stylesheet, toasts (inline scripts/styles) plus the
+/// Enforcing Content-Security-Policy. Allows the Topcoat runtime,
+/// Tailwind stylesheet, toasts (inline scripts/styles) plus the
 /// dev-docs CDN (Scalar/Swagger, dev-only routes).
 ///
 /// `'unsafe-eval'` is required: Topcoat compiles live expressions with

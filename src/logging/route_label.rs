@@ -56,7 +56,6 @@ const KNOWN_TEMPLATES: &[&str] = &[
   "/signup",
   "/stop-impersonating",
   "/termos",
-  "/theme",
   "/trocas-devolucoes",
   "/two-factor",
   "/verify-email",

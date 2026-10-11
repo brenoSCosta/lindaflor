@@ -416,7 +416,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                   <img
                       src=(hero_src)
                       alt=(hero_alt)
-                      class="absolute inset-0 h-full w-full object-cover dark:brightness-[0.9]"
+                      class="absolute inset-0 h-full w-full object-cover"
                   >
               </div>
           }
@@ -488,7 +488,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                   <img
                       src=(hero_src)
                       alt=(hero_alt)
-                      class="absolute inset-0 h-full w-full object-cover dark:brightness-[0.9]"
+                      class="absolute inset-0 h-full w-full object-cover"
                   >
               </div>
           }

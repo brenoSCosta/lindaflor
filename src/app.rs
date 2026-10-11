@@ -44,6 +44,10 @@ use topcoat::{
   view::{View, ViewExt, class, error_boundary, view},
 };
 
+use self::store::product_card::product_card;
+use self::store::queries::{
+  HOME_FEATURED_LIMIT, STOREFRONT_PAGE_SIZE, list_products,
+};
 use crate::app::app_sidebar::{app_shell, is_app_shell_path, storefront_shell};
 use crate::app::auth_helpers::optional_user;
 use crate::auth::service;
@@ -59,12 +63,6 @@ use crate::rate_limit::{
   RateLimitLayer, SCOPE_BACKUP_CODE, SCOPE_PASSWORD_RESET, SCOPE_PEDIDO_PAGE,
   SCOPE_PEDIDO_POLL, SCOPE_SIGN_IN, SCOPE_SIGN_UP, SCOPE_TOTP,
   SCOPE_VERIFY_EMAIL,
-};
-use crate::theme::{THEME_INIT_SCRIPT, THEME_TOGGLE_SCRIPT, read_theme};
-
-use self::store::product_card::product_card;
-use self::store::queries::{
-  HOME_FEATURED_LIMIT, STOREFRONT_PAGE_SIZE, list_products,
 };
 
 /// Client-side reveal + `#sobre` landing behavior (see `assets/sobre.js`).
@@ -180,7 +178,6 @@ pub fn router(
 }
 #[layout]
 async fn root(cx: &Cx, slot: Slot<'_>) -> Result<impl View> {
-  let theme_class = if read_theme(cx).is_dark() { "dark" } else { "" };
   let toasts = take_toasts(cx);
 
   let path = uri(cx).path().to_owned();
@@ -235,7 +232,7 @@ async fn root(cx: &Cx, slot: Slot<'_>) -> Result<impl View> {
 
   Ok(view! {
       <!DOCTYPE html>
-      <html lang="pt-BR" class=(theme_class)>
+      <html lang="pt-BR">
           <head>
               <meta charset="UTF-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -243,12 +240,10 @@ async fn root(cx: &Cx, slot: Slot<'_>) -> Result<impl View> {
               <link rel="stylesheet" href=(tailwind::stylesheet!())>
               topcoat::runtime::script()
               topcoat::dev::script()
-              <script src=(THEME_INIT_SCRIPT)></script>
-              <script src=(THEME_TOGGLE_SCRIPT)></script>
           </head>
           <body>
               if let Some(ref name) = impersonation_name {
-                  <div class="flex items-center justify-center gap-4 border-b border-amber-600/40 bg-amber-100 px-4 py-2 text-sm text-amber-950 dark:bg-amber-950/40 dark:text-amber-100">
+                  <div class="flex items-center justify-center gap-4 border-b border-amber-600/40 bg-amber-100 px-4 py-2 text-sm text-amber-950">
                       <span>
                           "Você está atuando como "
                           <strong>(name.as_str())</strong>
@@ -256,7 +251,7 @@ async fn root(cx: &Cx, slot: Slot<'_>) -> Result<impl View> {
                       <form method="post" action=(href!(stop_impersonating)) class="inline">
                           <button
                               type="submit"
-                              class="rounded border border-amber-700/50 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-950 hover:bg-white dark:bg-amber-900 dark:text-amber-50"
+                              class="rounded border border-amber-700/50 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-950 hover:bg-white"
                           >
                               "Encerrar"
                           </button>

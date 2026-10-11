@@ -35,7 +35,7 @@ use crate::app::store::coupons::{
 };
 use crate::app::store::inventory::{ReserveLine, reserve_for_order};
 use crate::app::store::order::expire_pending_reservations_in_tx;
-use crate::app::store::queries::format_price;
+use crate::app::store::queries::{format_price, get_store_settings};
 
 #[derive(Debug)]
 enum CheckoutError {
@@ -200,7 +200,13 @@ pub async fn page(
 
   let zip_digits: String = input_zip_digits(body.as_ref());
   let state = input_state(body.as_ref());
-  let shipping = calculate_shipping(subtotal, &state, &zip_digits);
+  let settings = get_store_settings(pool).await?;
+  let shipping = calculate_shipping(
+    subtotal,
+    &state,
+    &zip_digits,
+    settings.free_shipping_threshold_cents,
+  );
   let discount = resolved_coupon
     .as_ref()
     .map(|coupon| coupon.discount_cents)
@@ -819,7 +825,12 @@ async fn create_order_in_tx(
   let subtotal = cart_subtotal_cents(&items).ok_or_else(|| {
     CheckoutError::Form("Carrinho inválido. Atualize a página.".to_string())
   })?;
-  let shipping = calculate_shipping(subtotal, &form_data.state, zip_digits);
+  let shipping = calculate_shipping(
+    subtotal,
+    &form_data.state,
+    zip_digits,
+    settings.free_shipping_threshold_cents,
+  );
 
   let mut coupon_code = form_data.coupon_code.clone().unwrap_or_default();
   if coupon_code.trim().is_empty() {
@@ -987,13 +998,13 @@ fn calculate_shipping(
   subtotal_cents: i64,
   state: &str,
   zip_digits: &str,
+  free_shipping_threshold_cents: i64,
 ) -> (i64, bool) {
-  const FREE_SHIPPING_THRESHOLD_CENTS: i64 = 29_900;
   const SHIPPING_SE_CENTS: i64 = 1_990;
   const SHIPPING_DEFAULT_CENTS: i64 = 3_990;
   const SHIPPING_REMOTE_CENTS: i64 = 5_990;
 
-  if subtotal_cents >= FREE_SHIPPING_THRESHOLD_CENTS {
+  if subtotal_cents >= free_shipping_threshold_cents {
     return (0, true);
   }
 
@@ -1159,6 +1170,23 @@ fn input_coupon(
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn calculate_shipping_honors_threshold() {
+    assert_eq!(
+      calculate_shipping(10_000, "SE", "49000000", 29_900),
+      (1_990, false)
+    );
+    assert_eq!(
+      calculate_shipping(29_900, "SE", "49000000", 29_900),
+      (0, true)
+    );
+    assert_eq!(calculate_shipping(1, "SE", "49000000", 0), (0, true));
+    assert_eq!(
+      calculate_shipping(5_000, "SP", "01000000", 4_999),
+      (0, true)
+    );
+  }
   use crate::app::store::cart::set_cart_coupon;
   use crate::app::store::inventory::{
     convert_reservation, release_reservation,
@@ -1283,7 +1311,12 @@ mod tests {
     let cart_id = seed_cart(&pool, variant_id, 1).await;
     let subtotal = UNIT_PRICE_CENTS;
     let zip_digits = "49000000";
-    let (shipping_cents, _) = calculate_shipping(subtotal, "SE", zip_digits);
+    let (shipping_cents, _) = calculate_shipping(
+      subtotal,
+      "SE",
+      zip_digits,
+      crate::app::store::queries::DEFAULT_FREE_SHIPPING_THRESHOLD_CENTS,
+    );
     let expected_total = subtotal - DISCOUNT_CENTS + shipping_cents;
 
     let order_id = create_order(

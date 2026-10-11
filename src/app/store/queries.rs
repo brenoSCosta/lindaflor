@@ -61,9 +61,11 @@ pub struct StoreSettings {
   pub pix_key_type: Option<String>,
   pub pix_merchant_name: Option<String>,
   pub pix_merchant_city: Option<String>,
+  pub free_shipping_threshold_cents: i64,
 }
 
 pub const DEFAULT_WHATSAPP_NUMBER: &str = "5521992314267";
+pub const DEFAULT_FREE_SHIPPING_THRESHOLD_CENTS: i64 = 29_900;
 
 pub fn render_whatsapp_template(
   template: Option<&str>,
@@ -77,6 +79,9 @@ pub fn render_whatsapp_template(
   let mut rendered = template.to_string();
   for (key, value) in vars {
     rendered = rendered.replace(&format!("{{{{{}}}}}", key), value);
+  }
+  if rendered.contains("{{") {
+    return fallback.to_string();
   }
   rendered
 }
@@ -343,6 +348,26 @@ mod tests {
       .unwrap();
     assert!(total >= 3);
   }
+
+  #[test]
+  fn render_whatsapp_template_replaces_known_vars() {
+    let rendered = render_whatsapp_template(
+      Some("Pedido {{order_id}} — {{total}}"),
+      &[("order_id", "abc123"), ("total", "R$ 10,00")],
+      "fallback",
+    );
+    assert_eq!(rendered, "Pedido abc123 — R$ 10,00");
+  }
+
+  #[test]
+  fn render_whatsapp_template_falls_back_on_leftover_placeholders() {
+    let rendered = render_whatsapp_template(
+      Some("Fiz o pedido {{order_id}} no valor de {{total}}"),
+      &[("product", "Maiô")],
+      "Olá! Tenho interesse no Maiô.",
+    );
+    assert_eq!(rendered, "Olá! Tenho interesse no Maiô.");
+  }
 }
 
 pub async fn get_product_by_slug(
@@ -467,7 +492,7 @@ pub async fn get_store_settings(
   pool: &PgPool,
 ) -> Result<StoreSettings, sqlx::Error> {
   let row = sqlx::query!(
-        "SELECT whatsapp_number, whatsapp_message_template, pix_key, pix_key_type::text AS pix_key_type, pix_merchant_name, pix_merchant_city
+        "SELECT whatsapp_number, whatsapp_message_template, pix_key, pix_key_type::text AS pix_key_type, pix_merchant_name, pix_merchant_city, free_shipping_threshold_cents
          FROM store_settings ORDER BY created_at ASC LIMIT 1"
     )
     .fetch_optional(pool)
@@ -481,6 +506,7 @@ pub async fn get_store_settings(
       pix_key_type: r.pix_key_type,
       pix_merchant_name: r.pix_merchant_name,
       pix_merchant_city: r.pix_merchant_city,
+      free_shipping_threshold_cents: r.free_shipping_threshold_cents,
     },
     None => StoreSettings {
       whatsapp_number: None,
@@ -489,6 +515,7 @@ pub async fn get_store_settings(
       pix_key_type: None,
       pix_merchant_name: None,
       pix_merchant_city: None,
+      free_shipping_threshold_cents: DEFAULT_FREE_SHIPPING_THRESHOLD_CENTS,
     },
   })
 }

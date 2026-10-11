@@ -1,6 +1,5 @@
 @import "tailwindcss";
 @source "./src/**/*.rs";
-@custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --font-sans: "Geist", sans-serif;
@@ -79,40 +78,6 @@
   --sidebar-ring: oklch(0.723 0.014 214.4);
   --shadow-xs: 0 1px 2px oklch(0.24 0.02 260 / 12%);
   --shadow-sm: 0 1px 2px oklch(0.24 0.02 260 / 10%), 0 2px 8px -2px oklch(0.24 0.02 260 / 9%);
-}
-.dark {
-  --background: oklch(0.148 0.004 228.8);
-  --foreground: oklch(0.987 0.002 197.1);
-  --popover: oklch(0.218 0.008 223.9);
-  --popover-foreground: oklch(0.987 0.002 197.1);
-  --primary: oklch(0.437 0.078 188.216);
-  --primary-foreground: oklch(0.984 0.014 180.72);
-  --secondary: oklch(0.274 0.006 286.033);
-  --secondary-foreground: oklch(0.985 0 0);
-  --card: oklch(0.218 0.008 223.9);
-  --card-foreground: oklch(0.987 0.002 197.1);
-  --muted: oklch(0.275 0.011 216.9);
-  --muted-foreground: oklch(0.723 0.014 214.4);
-  --accent: oklch(0.275 0.011 216.9);
-  --accent-foreground: oklch(0.987 0.002 197.1);
-  --destructive: oklch(0.704 0.191 22.216);
-  --success: oklch(0.723 0.21 149);
-  --info: oklch(0.623 0.21 259);
-  --warning: oklch(0.795 0.18 86);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.56 0.021 213.5);
-  --sidebar: oklch(0.218 0.008 223.9);
-  --sidebar-foreground: oklch(0.987 0.002 197.1);
-  --sidebar-primary: oklch(0.704 0.14 182.503);
-  --sidebar-primary-foreground: oklch(0.277 0.046 192.524);
-  --sidebar-accent: oklch(0.275 0.011 216.9);
-  --sidebar-accent-foreground: oklch(0.987 0.002 197.1);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.56 0.021 213.5);
-  /* Light-mode shadows disappear on a dark background, so these are deeper. */
-  --shadow-xs: 0 1px 2px oklch(0 0 0 / 35%);
-  --shadow-sm: 0 1px 2px oklch(0 0 0 / 35%), 0 2px 8px -2px oklch(0 0 0 / 30%);
 }
 
 @layer base {
