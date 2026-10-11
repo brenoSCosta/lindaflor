@@ -67,6 +67,8 @@ fn parse_page(raw: &Option<String>) -> i64 {
 fn category_labels(cat: &str) -> &str {
   match cat {
     "biquini" => "Biquíni",
+    "top_biquini" => "Top de Biquíni",
+    "calcinha_biquini" => "Calcinha de Biquíni",
     "maio" => "Maiô",
     "saida_praia" => "Saída de Praia",
     "acessorio" => "Acessório",
@@ -333,8 +335,14 @@ pub(crate) fn first_text(
 }
 
 /// Shared validation for the product create/edit multipart forms.
-pub(crate) const VALID_CATEGORIES: [&str; 4] =
-  ["biquini", "maio", "saida_praia", "acessorio"];
+pub(crate) const VALID_CATEGORIES: [&str; 6] = [
+  "biquini",
+  "top_biquini",
+  "calcinha_biquini",
+  "maio",
+  "saida_praia",
+  "acessorio",
+];
 
 pub(crate) const VALID_SIZES: [&str; 5] = ["pp", "p", "m", "g", "gg"];
 
@@ -568,6 +576,9 @@ pub(crate) async fn resolve_summary_images(
   for mut product in products {
     let url = product.image_url.as_deref();
     product.image_url = resolve_storage_url(store, url).await;
+    let secondary_url = product.secondary_image_url.as_deref();
+    product.secondary_image_url =
+      resolve_storage_url(store, secondary_url).await;
     resolved.push(product);
   }
   resolved

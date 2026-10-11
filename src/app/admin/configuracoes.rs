@@ -30,6 +30,9 @@ pub struct SettingsForm {
   pix_key_type: String,
   pix_merchant_name: String,
   pix_merchant_city: String,
+  pix_discount_percent: String,
+  announcement_text: String,
+  first_purchase_coupon_code: String,
   whatsapp_number: String,
   whatsapp_message_template: String,
   free_shipping_threshold: String,
@@ -45,6 +48,10 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let pix_key_type = settings.pix_key_type.unwrap_or_else(|| "phone".into());
   let pix_merchant_name = settings.pix_merchant_name.unwrap_or_default();
   let pix_merchant_city = settings.pix_merchant_city.unwrap_or_default();
+  let pix_discount_percent = settings.pix_discount_percent.to_string();
+  let announcement_text = settings.announcement_text.unwrap_or_default();
+  let first_purchase_coupon_code =
+    settings.first_purchase_coupon_code.unwrap_or_default();
   let whatsapp_number = settings.whatsapp_number.unwrap_or_default();
   let whatsapp_message_template =
     settings.whatsapp_message_template.unwrap_or_default();
@@ -108,6 +115,42 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                   })
                                   <p class="text-xs text-muted-foreground">"Máx. 15 caracteres (Bacen)"</p>
                               </div>
+                          </div>
+                          <div class="space-y-2">
+                              label(attrs: attributes! { for="pix_discount_percent" }, "Desconto PIX (%)")
+                              input(attrs: attributes! {
+                                  type="number"
+                                  name="pix_discount_percent"
+                                  id="pix_discount_percent"
+                                  value=(pix_discount_percent)
+                                  min="0"
+                                  max="30"
+                                  placeholder="5"
+                              })
+                              <p class="text-xs text-muted-foreground">"Percentual de desconto para pagamentos PIX (0–30)"</p>
+                          </div>
+                          <div class="space-y-2">
+                              label(attrs: attributes! { for="announcement_text" }, "Barra de Anúncio")
+                              textarea(
+                                  attrs: attributes! {
+                                      name="announcement_text"
+                                      id="announcement_text"
+                                      rows="2"
+                                  },
+                                  (announcement_text)
+                              )
+                              <p class="text-xs text-muted-foreground">"Mensagem exibida no topo da loja (opcional)"</p>
+                          </div>
+                          <div class="space-y-2">
+                              label(attrs: attributes! { for="first_purchase_coupon_code" }, "Cupom Primeira Compra")
+                              input(attrs: attributes! {
+                                  type="text"
+                                  name="first_purchase_coupon_code"
+                                  id="first_purchase_coupon_code"
+                                  value=(first_purchase_coupon_code)
+                                  placeholder="BOAS_VINDAS10"
+                              })
+                              <p class="text-xs text-muted-foreground">"Código do cupom oferecido para primeira compra (opcional)"</p>
                           </div>
                       </fieldset>
                       <fieldset class="space-y-4 border-0">
@@ -195,6 +238,14 @@ async fn save_settings(
     Ok(value) => value,
     Err(message) => return fail(message),
   };
+  let pix_discount_percent =
+    match parse_pix_discount_percent(&form.pix_discount_percent) {
+      Ok(value) => value,
+      Err(message) => return fail(message),
+    };
+  let announcement_text = optional_text(&form.announcement_text);
+  let first_purchase_coupon_code =
+    optional_text(&form.first_purchase_coupon_code);
   let whatsapp_number = optional_text(&form.whatsapp_number);
   let whatsapp_message_template =
     optional_text(&form.whatsapp_message_template);
@@ -216,9 +267,12 @@ async fn save_settings(
             pix_key_type = $3::pix_key_type,
             pix_merchant_name = $4,
             pix_merchant_city = $5,
-            whatsapp_number = $6,
-            whatsapp_message_template = $7,
-            free_shipping_threshold_cents = $8,
+            pix_discount_percent = $6,
+            announcement_text = $7,
+            first_purchase_coupon_code = $8,
+            whatsapp_number = $9,
+            whatsapp_message_template = $10,
+            free_shipping_threshold_cents = $11,
             updated_at = now()
          WHERE id = $1",
     )
@@ -227,6 +281,9 @@ async fn save_settings(
     .bind(pix_key_type.as_deref())
     .bind(pix_merchant_name.as_deref())
     .bind(pix_merchant_city.as_deref())
+    .bind(pix_discount_percent as i16)
+    .bind(announcement_text.as_deref())
+    .bind(first_purchase_coupon_code.as_deref())
     .bind(whatsapp_number.as_deref())
     .bind(whatsapp_message_template.as_deref())
     .bind(threshold)
@@ -236,15 +293,19 @@ async fn save_settings(
     sqlx::query(
       "INSERT INTO store_settings (
             id, pix_key, pix_key_type, pix_merchant_name, pix_merchant_city,
+            pix_discount_percent, announcement_text, first_purchase_coupon_code,
             whatsapp_number, whatsapp_message_template, free_shipping_threshold_cents,
             created_at, updated_at
-         ) VALUES ($1, $2, $3::pix_key_type, $4, $5, $6, $7, $8, now(), now())",
+         ) VALUES ($1, $2, $3::pix_key_type, $4, $5, $6, $7, $8, $9, $10, $11, now(), now())",
     )
     .bind(Uuid::now_v7())
     .bind(pix_key.as_deref())
     .bind(pix_key_type.as_deref())
     .bind(pix_merchant_name.as_deref())
     .bind(pix_merchant_city.as_deref())
+    .bind(pix_discount_percent as i16)
+    .bind(announcement_text.as_deref())
+    .bind(first_purchase_coupon_code.as_deref())
     .bind(whatsapp_number.as_deref())
     .bind(whatsapp_message_template.as_deref())
     .bind(threshold)
@@ -309,4 +370,18 @@ fn parse_threshold_cents(raw: &str) -> Result<i64, &'static str> {
     return Err("Valor inválido. Use 299.00.");
   }
   Ok((value * 100.0).round() as i64)
+}
+
+fn parse_pix_discount_percent(raw: &str) -> Result<u32, &'static str> {
+  let trimmed = raw.trim();
+  if trimmed.is_empty() {
+    return Ok(5); // Default PIX discount
+  }
+  let value: u32 = trimmed
+    .parse()
+    .map_err(|_| "Desconto PIX inválido. Use um número entre 0 e 30.")?;
+  if value > 30 {
+    return Err("Desconto PIX deve estar entre 0 e 30%.");
+  }
+  Ok(value)
 }

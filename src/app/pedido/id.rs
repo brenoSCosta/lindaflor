@@ -49,6 +49,7 @@ struct OrderDetail {
   subtotal_cents: i64,
   shipping_cents: i64,
   discount_cents: i64,
+  pix_discount_cents: i64,
   total_cents: i64,
   shipping_address: Option<serde_json::Value>,
   payment_meta: Option<serde_json::Value>,
@@ -81,6 +82,7 @@ struct OrderRow {
   subtotal_cents: i64,
   shipping_cents: i64,
   discount_cents: i64,
+  pix_discount_cents: i64,
   total_cents: i64,
   shipping_address: Option<serde_json::Value>,
   payment_meta: Option<serde_json::Value>,
@@ -108,7 +110,7 @@ async fn get_order(
 ) -> Result<Option<OrderDetail>, sqlx::Error> {
   let order = sqlx::query_as::<_, OrderRow>(
     "SELECT id, status::text AS status, user_id, access_token, guest_email, subtotal_cents, shipping_cents,
-            discount_cents, total_cents, shipping_address, payment_meta, created_at::text AS created_at
+            discount_cents, pix_discount_cents, total_cents, shipping_address, payment_meta, created_at::text AS created_at
      FROM orders WHERE id = $1",
   )
   .bind(id)
@@ -136,6 +138,7 @@ async fn get_order(
     subtotal_cents: order.subtotal_cents,
     shipping_cents: order.shipping_cents,
     discount_cents: order.discount_cents,
+    pix_discount_cents: order.pix_discount_cents,
     total_cents: order.total_cents,
     shipping_address: order.shipping_address,
     payment_meta: order.payment_meta,
@@ -460,6 +463,12 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                     }
                                 </span>
                                 <span>"-" (format_price(order.discount_cents))</span>
+                            </div>
+                        }
+                        if order.pix_discount_cents > 0 {
+                            <div class="flex justify-between">
+                                <span class="text-muted-foreground">"Desconto PIX"</span>
+                                <span>"-" (format_price(order.pix_discount_cents))</span>
                             </div>
                         }
                         separator(attrs: attributes! { class="my-1" })

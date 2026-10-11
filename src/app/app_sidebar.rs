@@ -394,6 +394,15 @@ pub async fn app_shell(
                                       </div>
                                   </div>
                                   dropdown_menu_separator()
+                                  <a href=(href!(crate::app::favoritos::page)) class=(class!(USER_MENU_ITEM, "hover:bg-foreground/5"))>
+                                      icon(data: iconify_icon!("lucide:heart"))
+                                      "Favoritos"
+                                  </a>
+                                  <a href=(href!(crate::app::conta::pedidos::page)) class=(class!(USER_MENU_ITEM, "hover:bg-foreground/5"))>
+                                      icon(data: iconify_icon!("lucide:shopping-bag"))
+                                      "Pedidos"
+                                  </a>
+                                  dropdown_menu_separator()
                                   dropdown_menu_label("Configurações")
                                   <a href=(href!(crate::app::settings::page).query([("tab", "profile")])) class=(class!(USER_MENU_ITEM, "hover:bg-foreground/5"))>
                                       icon(data: iconify_icon!("lucide:users"))
@@ -491,6 +500,9 @@ pub async fn storefront_shell(
                       <a href=(href!(crate::app::produtos::page)) class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">"Catálogo"</a>
                       <a href=(href!(crate::app::colecoes::page)) class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">"Coleções"</a>
                       <a href=(href!(crate::app::page).fragment("sobre")) class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">"Sobre"</a>
+                      if logged_in {
+                          <a href=(href!(crate::app::favoritos::page)) class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">"Favoritos"</a>
+                      }
                   </nav>
                   <div class="flex items-center justify-end justify-self-end gap-2">
                       if logged_in {

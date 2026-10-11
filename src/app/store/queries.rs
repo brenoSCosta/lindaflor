@@ -8,10 +8,13 @@ pub struct ProductSummary {
   pub slug: String,
 
   pub price_in_cents: i64,
+  pub compare_at_price_in_cents: Option<i64>,
   pub category: String,
 
   pub image_url: Option<String>,
+  pub secondary_image_url: Option<String>,
   pub available_total: i32,
+  pub colors: Vec<(String, Option<String>)>,
 }
 
 #[derive(Clone)]
@@ -62,6 +65,9 @@ pub struct StoreSettings {
   pub pix_merchant_name: Option<String>,
   pub pix_merchant_city: Option<String>,
   pub free_shipping_threshold_cents: i64,
+  pub pix_discount_percent: u32,
+  pub announcement_text: Option<String>,
+  pub first_purchase_coupon_code: Option<String>,
 }
 
 pub const DEFAULT_WHATSAPP_NUMBER: &str = "5521992314267";
@@ -124,6 +130,8 @@ pub fn format_price(cents: impl Into<i64>) -> String {
 pub fn category_label(category: &str) -> &'static str {
   match category {
     "biquini" => "Biquíni",
+    "top_biquini" => "Top de biquíni",
+    "calcinha_biquini" => "Calcinha de biquíni",
     "maio" => "Maiô",
     "saida_praia" => "Saída de praia",
     "acessorio" => "Acessório",
@@ -182,6 +190,47 @@ fn append_product_filters(
   }
 }
 
+pub struct CatalogFilters {
+  pub sizes: Vec<String>,
+  pub colors: Vec<String>,
+  pub price_min_cents: Option<i64>,
+  pub price_max_cents: Option<i64>,
+  pub available_only: bool,
+  pub sale_only: bool,
+}
+
+/// Appends the faceted filters; binds must follow in the same order
+/// (price min, price max, colors, sizes).
+fn append_catalog_filters(
+  sql: &mut String,
+  param_index: &mut i32,
+  filters: &CatalogFilters,
+) {
+  if filters.price_min_cents.is_some() {
+    sql.push_str(&format!(" AND p.price_in_cents >= ${param_index}"));
+    *param_index += 1;
+  }
+  if filters.price_max_cents.is_some() {
+    sql.push_str(&format!(" AND p.price_in_cents <= ${param_index}"));
+    *param_index += 1;
+  }
+  if !filters.colors.is_empty() {
+    sql.push_str(&format!(
+      " AND EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = p.id AND pv.color = ANY(${param_index}::text[]))"
+    ));
+    *param_index += 1;
+  }
+  if !filters.sizes.is_empty() {
+    sql.push_str(&format!(
+      " AND EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = p.id AND pv.size::text = ANY(${param_index}::text[]))"
+    ));
+    *param_index += 1;
+  }
+  if filters.sale_only {
+    sql.push_str(" AND p.compare_at_price_in_cents IS NOT NULL");
+  }
+}
+
 fn bind_product_filters<'q>(
   mut query: sqlx::query::QueryAs<
     'q,
@@ -210,6 +259,214 @@ fn bind_product_filters<'q>(
   query
 }
 
+const PRODUCT_SUMMARY_COLUMNS: &str = "p.id, p.name, p.slug, p.price_in_cents, p.compare_at_price_in_cents, p.category::text AS category,
+            (SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.sort_order ASC LIMIT 1) AS image_url,
+            (SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.sort_order ASC LIMIT 1 OFFSET 1) AS secondary_image_url,
+            COALESCE((SELECT SUM(GREATEST(i.quantity - i.reserved, 0))::int
+                FROM inventory i
+                INNER JOIN warehouses w ON w.id = i.warehouse_id
+                WHERE i.variant_id IN (SELECT pv.id FROM product_variants pv WHERE pv.product_id = p.id)
+                  AND w.active = true), 0) AS available_total,
+            COALESCE(
+              (SELECT json_agg(json_build_array(pv.color, pv.color_hex) ORDER BY pv.color ASC)
+               FROM (SELECT DISTINCT ON (pv.color) pv.color, pv.color_hex
+                     FROM product_variants pv
+                     WHERE pv.product_id = p.id
+                     ORDER BY pv.color ASC, pv.color_hex ASC) pv),
+              '[]'::json
+            )::text AS colors_json";
+
+/// Active products in a user's wishlist, most recently added first.
+pub async fn list_wishlist_products(
+  pool: &PgPool,
+  user_id: Uuid,
+) -> Result<Vec<ProductSummary>, sqlx::Error> {
+  let sql = format!(
+    "SELECT {PRODUCT_SUMMARY_COLUMNS}
+     FROM wishlist_items wl
+     INNER JOIN products p ON p.id = wl.product_id
+     WHERE wl.user_id = $1 AND p.active = true
+     ORDER BY wl.created_at DESC"
+  );
+  let rows = sqlx::query_as::<_, ProductSummaryRow>(&sql)
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+  Ok(rows.into_iter().map(ProductSummary::from).collect())
+}
+
+pub async fn list_products_with_filters(
+  pool: &PgPool,
+  category: Option<&str>,
+  search: Option<&str>,
+  featured_only: bool,
+  include_out_of_stock: bool,
+  collection_slug: Option<&str>,
+  filters: &CatalogFilters,
+  sort: &str,
+  limit: i64,
+  offset: i64,
+) -> Result<Vec<ProductSummary>, sqlx::Error> {
+  let mut sql = String::from(
+    "SELECT p.id, p.name, p.slug, p.price_in_cents, p.compare_at_price_in_cents, p.category::text AS category,
+            (SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.sort_order ASC LIMIT 1) AS image_url,
+            (SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.sort_order ASC LIMIT 1 OFFSET 1) AS secondary_image_url,
+            COALESCE((SELECT SUM(GREATEST(i.quantity - i.reserved, 0))::int
+                FROM inventory i
+                INNER JOIN warehouses w ON w.id = i.warehouse_id
+                WHERE i.variant_id IN (SELECT pv.id FROM product_variants pv WHERE pv.product_id = p.id)
+                  AND w.active = true), 0) AS available_total,
+            COALESCE(
+              (SELECT json_agg(json_build_array(pv.color, pv.color_hex) ORDER BY pv.color ASC)
+               FROM (SELECT DISTINCT ON (pv.color) pv.color, pv.color_hex
+                     FROM product_variants pv
+                     WHERE pv.product_id = p.id
+                     ORDER BY pv.color ASC, pv.color_hex ASC) pv),
+              '[]'::json
+            )::text AS colors_json
+     FROM products p
+     WHERE p.active = true"
+  );
+
+  let mut param_index = 1;
+  append_product_filters(
+    &mut sql,
+    &mut param_index,
+    category.is_some(),
+    search.is_some(),
+    featured_only,
+    collection_slug.is_some(),
+    include_out_of_stock,
+  );
+
+  append_catalog_filters(&mut sql, &mut param_index, filters);
+
+  // Add sorting
+  match sort {
+    "relevantes" => {
+      // For now, relevance is same as featured + newest when no search
+      // In a real implementation, this could use full-text search ranking
+      sql.push_str(" ORDER BY p.featured DESC, p.created_at DESC");
+    }
+    "mais_vendidos" => {
+      sql.push_str(
+        " ORDER BY COALESCE((SELECT SUM(oi.quantity)::int FROM order_items oi
+                  INNER JOIN orders o ON o.id = oi.order_id
+                  WHERE oi.variant_id IN (SELECT pv.id FROM product_variants pv WHERE pv.product_id = p.id)
+                  AND o.status IN ('paid', 'processing', 'shipped', 'delivered')), 0) DESC,
+                  p.featured DESC, p.created_at DESC"
+      );
+    }
+    "maior_desconto" => {
+      sql.push_str(
+        " ORDER BY CASE WHEN p.compare_at_price_in_cents IS NOT NULL
+                  THEN CAST(p.compare_at_price_in_cents - p.price_in_cents AS FLOAT) / p.compare_at_price_in_cents
+                  ELSE 0 END DESC,
+                  p.featured DESC, p.created_at DESC"
+      );
+    }
+    "menor_preco" => {
+      sql.push_str(
+        " ORDER BY p.price_in_cents ASC, p.featured DESC, p.created_at DESC",
+      );
+    }
+    "maior_preco" => {
+      sql.push_str(
+        " ORDER BY p.price_in_cents DESC, p.featured DESC, p.created_at DESC",
+      );
+    }
+    "novos" => {
+      sql.push_str(" ORDER BY p.created_at DESC, p.featured DESC");
+    }
+    "antigos" => {
+      sql.push_str(" ORDER BY p.created_at ASC, p.featured DESC");
+    }
+    _ => {
+      sql.push_str(" ORDER BY p.featured DESC, p.created_at DESC");
+    }
+  }
+
+  sql.push_str(&format!(
+    " LIMIT ${} OFFSET ${}",
+    param_index,
+    param_index + 1
+  ));
+
+  let search_term = search.map(|s| format!("%{}%", s.trim()));
+  let mut query = sqlx::query_as::<_, ProductSummaryRow>(&sql);
+  query = bind_product_filters(query, category, search_term, collection_slug);
+
+  if let Some(min_cents) = filters.price_min_cents {
+    query = query.bind(min_cents);
+  }
+  if let Some(max_cents) = filters.price_max_cents {
+    query = query.bind(max_cents);
+  }
+  if !filters.colors.is_empty() {
+    query = query.bind(filters.colors.clone());
+  }
+  if !filters.sizes.is_empty() {
+    query = query.bind(filters.sizes.clone());
+  }
+
+  query = query.bind(limit).bind(offset);
+
+  let rows = query.fetch_all(pool).await?;
+  Ok(rows.into_iter().map(|r| r.into()).collect())
+}
+
+pub async fn count_products_with_filters(
+  pool: &PgPool,
+  category: Option<&str>,
+  search: Option<&str>,
+  featured_only: bool,
+  include_out_of_stock: bool,
+  collection_slug: Option<&str>,
+  filters: &CatalogFilters,
+) -> Result<i64, sqlx::Error> {
+  let mut sql =
+    String::from("SELECT COUNT(*) FROM products p WHERE p.active = true");
+  let mut param_index = 1;
+  append_product_filters(
+    &mut sql,
+    &mut param_index,
+    category.is_some(),
+    search.is_some(),
+    featured_only,
+    collection_slug.is_some(),
+    include_out_of_stock,
+  );
+
+  append_catalog_filters(&mut sql, &mut param_index, filters);
+
+  let mut query = sqlx::query_scalar::<_, i64>(&sql);
+  if let Some(c) = category {
+    query = query.bind(c);
+  }
+  if let Some(s) = search {
+    let term = format!("%{}%", s.trim());
+    query = query.bind(term.clone()).bind(term.clone()).bind(term);
+  }
+  if let Some(slug) = collection_slug {
+    query = query.bind(slug);
+  }
+
+  if let Some(min_cents) = filters.price_min_cents {
+    query = query.bind(min_cents);
+  }
+  if let Some(max_cents) = filters.price_max_cents {
+    query = query.bind(max_cents);
+  }
+  if !filters.colors.is_empty() {
+    query = query.bind(filters.colors.clone());
+  }
+  if !filters.sizes.is_empty() {
+    query = query.bind(filters.sizes.clone());
+  }
+
+  query.fetch_one(pool).await
+}
+
 pub async fn list_products(
   pool: &PgPool,
   category: Option<&str>,
@@ -221,13 +478,22 @@ pub async fn list_products(
   offset: i64,
 ) -> Result<Vec<ProductSummary>, sqlx::Error> {
   let mut sql = String::from(
-        "SELECT p.id, p.name, p.slug, p.price_in_cents, p.category::text AS category,
+        "SELECT p.id, p.name, p.slug, p.price_in_cents, p.compare_at_price_in_cents, p.category::text AS category,
             (SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.sort_order ASC LIMIT 1) AS image_url,
+            (SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.sort_order ASC LIMIT 1 OFFSET 1) AS secondary_image_url,
             COALESCE((SELECT SUM(GREATEST(i.quantity - i.reserved, 0))::int
                 FROM inventory i
                 INNER JOIN warehouses w ON w.id = i.warehouse_id
                 WHERE i.variant_id IN (SELECT pv.id FROM product_variants pv WHERE pv.product_id = p.id)
-                  AND w.active = true), 0) AS available_total
+                  AND w.active = true), 0) AS available_total,
+            COALESCE(
+              (SELECT json_agg(json_build_array(pv.color, pv.color_hex) ORDER BY pv.color ASC)
+               FROM (SELECT DISTINCT ON (pv.color) pv.color, pv.color_hex
+                     FROM product_variants pv
+                     WHERE pv.product_id = p.id
+                     ORDER BY pv.color ASC, pv.color_hex ASC) pv),
+              '[]'::json
+            )::text AS colors_json
          FROM products p
          WHERE p.active = true",
     );
@@ -289,7 +555,7 @@ pub async fn count_products(
   if let Some(slug) = collection_slug {
     query = query.bind(slug);
   }
-  Ok(query.fetch_one(pool).await?)
+  query.fetch_one(pool).await
 }
 
 pub async fn list_related_products(
@@ -298,13 +564,22 @@ pub async fn list_related_products(
   category: &str,
 ) -> Result<Vec<ProductSummary>, sqlx::Error> {
   let rows = sqlx::query_as::<_, ProductSummaryRow>(
-    "SELECT p.id, p.name, p.slug, p.price_in_cents, p.category::text AS category,
+    "SELECT p.id, p.name, p.slug, p.price_in_cents, p.compare_at_price_in_cents, p.category::text AS category,
             (SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.sort_order ASC LIMIT 1) AS image_url,
+            (SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.sort_order ASC LIMIT 1 OFFSET 1) AS secondary_image_url,
             COALESCE((SELECT SUM(GREATEST(i.quantity - i.reserved, 0))::int
                 FROM inventory i
                 INNER JOIN warehouses w ON w.id = i.warehouse_id
                 WHERE i.variant_id IN (SELECT pv.id FROM product_variants pv WHERE pv.product_id = p.id)
-                  AND w.active = true), 0) AS available_total
+                  AND w.active = true), 0) AS available_total,
+            COALESCE(
+              (SELECT json_agg(json_build_array(pv.color, pv.color_hex) ORDER BY pv.color ASC)
+               FROM (SELECT DISTINCT ON (pv.color) pv.color, pv.color_hex
+                     FROM product_variants pv
+                     WHERE pv.product_id = p.id
+                     ORDER BY pv.color ASC, pv.color_hex ASC) pv),
+              '[]'::json
+            )::text AS colors_json
      FROM products p
      WHERE p.active = true
        AND p.category = $1::product_category
@@ -492,7 +767,7 @@ pub async fn get_store_settings(
   pool: &PgPool,
 ) -> Result<StoreSettings, sqlx::Error> {
   let row = sqlx::query!(
-        "SELECT whatsapp_number, whatsapp_message_template, pix_key, pix_key_type::text AS pix_key_type, pix_merchant_name, pix_merchant_city, free_shipping_threshold_cents
+        "SELECT whatsapp_number, whatsapp_message_template, pix_key, pix_key_type::text AS pix_key_type, pix_merchant_name, pix_merchant_city, free_shipping_threshold_cents, pix_discount_percent, announcement_text, first_purchase_coupon_code
          FROM store_settings ORDER BY created_at ASC LIMIT 1"
     )
     .fetch_optional(pool)
@@ -507,6 +782,9 @@ pub async fn get_store_settings(
       pix_merchant_name: r.pix_merchant_name,
       pix_merchant_city: r.pix_merchant_city,
       free_shipping_threshold_cents: r.free_shipping_threshold_cents,
+      pix_discount_percent: r.pix_discount_percent as u32,
+      announcement_text: r.announcement_text,
+      first_purchase_coupon_code: r.first_purchase_coupon_code,
     },
     None => StoreSettings {
       whatsapp_number: None,
@@ -516,6 +794,9 @@ pub async fn get_store_settings(
       pix_merchant_name: None,
       pix_merchant_city: None,
       free_shipping_threshold_cents: DEFAULT_FREE_SHIPPING_THRESHOLD_CENTS,
+      pix_discount_percent: 5,
+      announcement_text: None,
+      first_purchase_coupon_code: None,
     },
   })
 }
@@ -526,21 +807,33 @@ struct ProductSummaryRow {
   name: String,
   slug: String,
   price_in_cents: i64,
+  compare_at_price_in_cents: Option<i64>,
   category: String,
   image_url: Option<String>,
+  secondary_image_url: Option<String>,
   available_total: Option<i32>,
+  colors_json: Option<String>,
 }
 
 impl From<ProductSummaryRow> for ProductSummary {
   fn from(r: ProductSummaryRow) -> Self {
+    let colors = if let Some(json_str) = r.colors_json {
+      serde_json::from_str(&json_str).unwrap_or_default()
+    } else {
+      Vec::new()
+    };
+
     ProductSummary {
       id: r.id,
       name: r.name,
       slug: r.slug,
       price_in_cents: r.price_in_cents,
+      compare_at_price_in_cents: r.compare_at_price_in_cents,
       category: r.category,
       image_url: r.image_url,
+      secondary_image_url: r.secondary_image_url,
       available_total: r.available_total.unwrap_or(0),
+      colors,
     }
   }
 }

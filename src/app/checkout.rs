@@ -35,6 +35,7 @@ use crate::app::store::coupons::{
 };
 use crate::app::store::inventory::{ReserveLine, reserve_for_order};
 use crate::app::store::order::expire_pending_reservations_in_tx;
+use crate::app::store::pricing::pix_discount_cents;
 use crate::app::store::queries::{format_price, get_store_settings};
 
 #[derive(Debug)]
@@ -207,14 +208,16 @@ pub async fn page(
     &zip_digits,
     settings.free_shipping_threshold_cents,
   );
-  let discount = resolved_coupon
+  let coupon_discount = resolved_coupon
     .as_ref()
     .map(|coupon| coupon.discount_cents)
     .unwrap_or(0);
-  let total = subtotal
-    .checked_sub(discount)
-    .and_then(|n| n.checked_add(shipping.0))
-    .unwrap_or(subtotal);
+  let after_coupon = subtotal.saturating_sub(coupon_discount);
+  let pix_discount =
+    pix_discount_cents(after_coupon, settings.pix_discount_percent);
+  let total = after_coupon
+    .saturating_sub(pix_discount)
+    .saturating_add(shipping.0);
 
   let email_init = input_email(body.as_ref());
   let name_init = input_name(body.as_ref());
@@ -621,10 +624,16 @@ pub async fn page(
                                         <span>(format_price(shipping.0))</span>
                                     }
                                 </div>
-                                if discount > 0 {
+                                if coupon_discount > 0 {
                                     <div class="flex justify-between">
                                         <span class="text-muted-foreground">"Desconto"</span>
-                                        <span>"-" (format_price(discount))</span>
+                                        <span>"-" (format_price(coupon_discount))</span>
+                                    </div>
+                                }
+                                if pix_discount > 0 {
+                                    <div class="flex justify-between">
+                                        <span class="text-muted-foreground">"Desconto PIX (" (settings.pix_discount_percent) "%)"</span>
+                                        <span>"-" (format_price(pix_discount))</span>
                                     </div>
                                 }
                                 <div class="flex justify-between pt-2 text-base font-medium">
@@ -866,8 +875,11 @@ async fn create_order_in_tx(
     .unwrap_or(0);
   let coupon_id = resolved.as_ref().map(|coupon| coupon.id);
   let applied_code = resolved.as_ref().map(|coupon| coupon.code.clone());
-  let total = subtotal
-    .checked_sub(discount)
+  let after_coupon = subtotal.saturating_sub(discount);
+  let pix_discount =
+    pix_discount_cents(after_coupon, settings.pix_discount_percent);
+  let total = after_coupon
+    .checked_sub(pix_discount)
     .and_then(|n| n.checked_add(shipping.0))
     .ok_or_else(|| {
       CheckoutError::Form("Carrinho inválido. Atualize a página.".to_string())
@@ -893,8 +905,8 @@ async fn create_order_in_tx(
   };
 
   sqlx::query(
-        "INSERT INTO orders (id, user_id, guest_email, status, subtotal_cents, shipping_cents, discount_cents, total_cents, shipping_address, notes, coupon_id, access_token)
-         VALUES ($1, $2, $3, 'pending_payment', $4, $5, $6, $7, $8, $9, $10, $11)",
+        "INSERT INTO orders (id, user_id, guest_email, status, subtotal_cents, shipping_cents, discount_cents, pix_discount_cents, total_cents, shipping_address, notes, coupon_id, access_token)
+         VALUES ($1, $2, $3, 'pending_payment', $4, $5, $6, $7, $8, $9, $10, $11, $12)",
     )
     .bind(order_id)
     .bind(user_id)
@@ -902,6 +914,7 @@ async fn create_order_in_tx(
     .bind(subtotal)
     .bind(shipping.0)
     .bind(discount)
+    .bind(pix_discount)
     .bind(total)
     .bind(address)
     .bind(notes.as_deref())
@@ -1317,7 +1330,13 @@ mod tests {
       zip_digits,
       crate::app::store::queries::DEFAULT_FREE_SHIPPING_THRESHOLD_CENTS,
     );
-    let expected_total = subtotal - DISCOUNT_CENTS + shipping_cents;
+    // Default store settings apply a 5% PIX discount after the coupon.
+    let expected_pix = crate::app::store::pricing::pix_discount_cents(
+      subtotal - DISCOUNT_CENTS,
+      5,
+    );
+    let expected_total =
+      subtotal - DISCOUNT_CENTS - expected_pix + shipping_cents;
 
     let order_id = create_order(
       &pool,
@@ -1336,10 +1355,11 @@ mod tests {
       total_cents: i64,
       subtotal_cents: i64,
       shipping_cents: i64,
+      pix_discount_cents: i64,
     }
 
     let saved = sqlx::query_as::<_, SavedOrder>(
-      "SELECT coupon_id, discount_cents, total_cents, subtotal_cents, shipping_cents
+      "SELECT coupon_id, discount_cents, total_cents, subtotal_cents, shipping_cents, pix_discount_cents
        FROM orders WHERE id = $1",
     )
     .bind(order_id)
@@ -1353,8 +1373,10 @@ mod tests {
     assert_eq!(saved.shipping_cents, shipping_cents);
     assert_eq!(
       saved.total_cents,
-      saved.subtotal_cents - saved.discount_cents + saved.shipping_cents
+      saved.subtotal_cents - saved.discount_cents - saved.pix_discount_cents
+        + saved.shipping_cents
     );
+    assert_eq!(saved.pix_discount_cents, expected_pix);
     assert_eq!(saved.total_cents, expected_total);
 
     let coupon_code: Option<String> = sqlx::query_scalar(

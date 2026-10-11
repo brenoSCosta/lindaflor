@@ -1,6 +1,8 @@
+pub mod banners;
 pub mod configuracoes;
 pub mod cupons;
 pub mod estoque;
+pub mod newsletter;
 pub mod pedidos;
 pub mod produtos;
 pub mod usuarios;

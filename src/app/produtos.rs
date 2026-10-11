@@ -11,8 +11,8 @@ use topcoat::{
 };
 
 use crate::app::store::queries::{
-  STOREFRONT_PAGE_SIZE, category_label, clamp_catalog_page, count_products,
-  format_price, list_products,
+  CatalogFilters, STOREFRONT_PAGE_SIZE, category_label, clamp_catalog_page,
+  count_products_with_filters, format_price, list_products_with_filters,
 };
 use crate::components::badge::{BadgeVariant, badge};
 use crate::components::breadcrumb::{
@@ -34,11 +34,20 @@ struct ProductsQuery {
   destaque: Option<bool>,
   esgotados: Option<bool>,
   page: Option<i64>,
+  sort: Option<String>,
+  tamanho: Option<Vec<String>>,
+  cor: Option<Vec<String>>,
+  preco_min: Option<String>,
+  preco_max: Option<String>,
+  disponivel: Option<bool>,
+  sale: Option<bool>,
 }
 
-const CATEGORIES: [(&str, &str); 5] = [
+const CATEGORIES: [(&str, &str); 7] = [
   ("all", "Todos"),
   ("biquini", "Biquínis"),
+  ("top_biquini", "Tops"),
+  ("calcinha_biquini", "Cantinhas"),
   ("maio", "Maiôs"),
   ("saida_praia", "Saídas"),
   ("acessorio", "Acessórios"),
@@ -48,8 +57,58 @@ const SEARCH_MAX: usize = 80;
 
 fn catalog_category(raw: &str) -> String {
   match raw.trim() {
-    "biquini" | "maio" | "saida_praia" | "acessorio" => raw.trim().to_string(),
+    "biquini" | "top_biquini" | "calcinha_biquini" | "maio" | "saida_praia"
+    | "acessorio" => raw.trim().to_string(),
     _ => "all".to_string(),
+  }
+}
+
+const SIZES: [&str; 5] = ["pp", "p", "m", "g", "gg"];
+const COLOR_FILTER_MAX: usize = 20;
+const COLOR_NAME_MAX: usize = 40;
+
+/// Reais in the query string ("89,90" or "89.90") to cents; junk is ignored.
+fn price_param_cents(raw: Option<&str>) -> Option<i64> {
+  let value: f64 = raw?.trim().replace(',', ".").parse().ok()?;
+  (0.0..=100_000.0)
+    .contains(&value)
+    .then(|| (value * 100.0).round() as i64)
+}
+
+/// Normalizes the facet params, which are request input like category/search.
+fn catalog_filters(
+  sizes: Vec<String>,
+  colors: Vec<String>,
+  preco_min: Option<&str>,
+  preco_max: Option<&str>,
+  available_only: bool,
+  sale_only: bool,
+) -> CatalogFilters {
+  let mut sizes: Vec<String> = sizes
+    .into_iter()
+    .map(|size| size.trim().to_lowercase())
+    .filter(|size| SIZES.contains(&size.as_str()))
+    .collect();
+  sizes.dedup();
+  let colors = colors
+    .into_iter()
+    .map(|color| {
+      color
+        .trim()
+        .chars()
+        .take(COLOR_NAME_MAX)
+        .collect::<String>()
+    })
+    .filter(|color| !color.is_empty())
+    .take(COLOR_FILTER_MAX)
+    .collect();
+  CatalogFilters {
+    sizes,
+    colors,
+    price_min_cents: price_param_cents(preco_min),
+    price_max_cents: price_param_cents(preco_max),
+    available_only,
+    sale_only,
   }
 }
 
@@ -65,6 +124,13 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let featured_only = query.destaque.unwrap_or(false);
   let include_out_of_stock = query.esgotados.unwrap_or(false);
   let page = clamp_catalog_page(query.page.unwrap_or(1));
+  let sort = query.sort.clone().unwrap_or_else(|| "destaque".to_string());
+  let tamanho = query.tamanho.clone().unwrap_or_default();
+  let cor = query.cor.clone().unwrap_or_default();
+  let preco_min = query.preco_min.as_deref();
+  let preco_max = query.preco_max.as_deref();
+  let disponivel = query.disponivel.unwrap_or(false);
+  let sale = query.sale.unwrap_or(false);
 
   Ok(view! {
       catalog_results(
@@ -73,6 +139,13 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
           featured_only: featured_only,
           include_out_of_stock: include_out_of_stock,
           catalog_page: page,
+          sort: sort,
+          tamanho: tamanho,
+          cor: cor,
+          preco_min: preco_min.map(|s| s.to_string()),
+          preco_max: preco_max.map(|s| s.to_string()),
+          disponivel: disponivel,
+          sale: sale,
       )
   })
 }
@@ -90,9 +163,17 @@ async fn catalog_results(
   featured_only: bool,
   include_out_of_stock: bool,
   catalog_page: i64,
+  sort: String,
+  tamanho: Vec<String>,
+  cor: Vec<String>,
+  preco_min: Option<String>,
+  preco_max: Option<String>,
+  disponivel: bool,
+  sale: bool,
 ) -> Result<impl View> {
   let category = signal(cx, || catalog_category(&category));
   let search = signal(cx, || catalog_search(&search));
+  let sort_signal = signal(cx, || sort.clone());
   // String flags, not bools: a captured bool becomes a truthy JS object inside raw!.
   let featured_flag = signal(cx, || {
     if featured_only {
@@ -115,13 +196,25 @@ async fn catalog_results(
   let pool = app_context::<PgPool>(cx);
   let category_filter = (active != "all").then_some(active.as_str());
   let search_filter = (!term.is_empty()).then_some(term.as_str());
-  let total = count_products(
+
+  let filters = catalog_filters(
+    tamanho,
+    cor,
+    preco_min.as_deref(),
+    preco_max.as_deref(),
+    disponivel,
+    sale,
+  );
+  let include_out_of_stock = include_out_of_stock && !filters.available_only;
+
+  let total = count_products_with_filters(
     pool,
     category_filter,
     search_filter,
     featured_only,
     include_out_of_stock,
     None,
+    &filters,
   )
   .await?;
   let page_size = STOREFRONT_PAGE_SIZE;
@@ -135,13 +228,16 @@ async fn catalog_results(
     page_num = total_pages;
   }
   let offset = (page_num - 1) * page_size;
-  let products = list_products(
+  let sort_str = sort_signal.get();
+  let products = list_products_with_filters(
     pool,
     category_filter,
     search_filter,
     featured_only,
     include_out_of_stock,
     None,
+    &filters,
+    &sort_str,
     page_size,
     offset,
   )
@@ -287,7 +383,52 @@ async fn catalog_results(
                   </button>
               </p>
           } else {
-              <p class="text-sm text-muted-foreground">(count) " peças"</p>
+              <div class="flex items-center justify-between gap-4 mb-6">
+                  <p class="text-sm text-muted-foreground">(count) " peças"</p>
+                  <div>
+                      <label for="sort-select" class="mr-2 text-sm font-medium">
+                          "Ordenar:"
+                      </label>
+                      <select
+                          id="sort-select"
+                          class="rounded border border-input bg-background px-3 py-2 text-sm"
+                          @change=$(|e: Event| {
+                              sort_signal.set(e.target.value);
+                              current_page.set(1i64);
+                              let sort = sort_signal.get();
+                              let category = category.get();
+                              let search = search.get();
+                              let featured_flag = featured_flag.get();
+                              let sold_out_flag = sold_out_flag.get();
+                              raw!(
+                                  r#"const params = new URLSearchParams();
+                                     const sort = String(${sort});
+                                     const category = String(${category});
+                                     const term = String(${search}).trim();
+                                     if (sort !== "destaque") params.set("sort", sort);
+                                     if (category !== "all") params.set("category", category);
+                                     if (term) params.set("search", term);
+                                     if (String(${featured_flag}) === "true") params.set("destaque", "true");
+                                     if (String(${sold_out_flag}) === "true") params.set("esgotados", "true");
+                                     const qs = params.toString();
+                                     history.replaceState(null, "", qs ? "/produtos?" + qs : "/produtos");"#,
+                                  {
+                                      let _ = (sort, category, search, featured_flag, sold_out_flag);
+                                  }
+                              );
+                          })
+                      >
+                          <option value="destaque" selected=(sort_signal.get() == "destaque")>"Em destaque"</option>
+                          <option value="relevantes" selected=(sort_signal.get() == "relevantes")>"Mais relevantes"</option>
+                          <option value="mais_vendidos" selected=(sort_signal.get() == "mais_vendidos")>"Mais vendidos"</option>
+                          <option value="maior_desconto" selected=(sort_signal.get() == "maior_desconto")>"Maior desconto"</option>
+                          <option value="menor_preco" selected=(sort_signal.get() == "menor_preco")>"Menor preço"</option>
+                          <option value="maior_preco" selected=(sort_signal.get() == "maior_preco")>"Maior preço"</option>
+                          <option value="novos" selected=(sort_signal.get() == "novos")>"Mais novos"</option>
+                          <option value="antigos" selected=(sort_signal.get() == "antigos")>"Mais antigos"</option>
+                      </select>
+                  </div>
+              </div>
               <div class="grid gap-4 @sm/page:grid-cols-2 @2xl/page:grid-cols-3">
                   #[key(product.id.to_string())]
                   for product in products {
@@ -362,4 +503,35 @@ async fn catalog_results(
           }
       )
   })
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn price_param_accepts_comma_and_rejects_junk() {
+    assert_eq!(price_param_cents(Some("89,90")), Some(8990));
+    assert_eq!(price_param_cents(Some("100")), Some(10000));
+    assert_eq!(price_param_cents(Some("-1")), None);
+    assert_eq!(price_param_cents(Some("NaN")), None);
+    assert_eq!(price_param_cents(Some("abc")), None);
+    assert_eq!(price_param_cents(None), None);
+  }
+
+  #[test]
+  fn catalog_filters_drop_unknown_sizes_and_cap_colors() {
+    let colors = (0..30).map(|i| format!("cor{i}")).collect();
+    let filters = catalog_filters(
+      vec!["P".into(), "xxl".into(), "m".into()],
+      colors,
+      None,
+      None,
+      false,
+      true,
+    );
+    assert_eq!(filters.sizes, vec!["p".to_string(), "m".to_string()]);
+    assert_eq!(filters.colors.len(), COLOR_FILTER_MAX);
+    assert!(filters.sale_only);
+  }
 }

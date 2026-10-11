@@ -24,6 +24,10 @@ const PRODUCT_NAMES: [&str; 12] = [
 #[sqlx(type_name = "product_category", rename_all = "lowercase")]
 enum ProductCategory {
   Biquini,
+  #[sqlx(rename = "top_biquini")]
+  TopBiquini,
+  #[sqlx(rename = "calcinha_biquini")]
+  CalchinhaBiquini,
   Maio,
   #[sqlx(rename = "saida_praia")]
   SaidaPraia,
@@ -52,8 +56,10 @@ impl ProductSize {
   }
 }
 
-const CATEGORIES: [ProductCategory; 4] = [
+const CATEGORIES: [ProductCategory; 6] = [
   ProductCategory::Biquini,
+  ProductCategory::TopBiquini,
+  ProductCategory::CalchinhaBiquini,
   ProductCategory::Maio,
   ProductCategory::SaidaPraia,
   ProductCategory::Acessorio,
