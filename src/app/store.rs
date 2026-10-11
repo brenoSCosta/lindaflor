@@ -1,5 +1,6 @@
 pub mod cart;
 pub mod cart_sheet;
+pub mod catalog_filters;
 pub mod coupons;
 pub mod hero;
 pub mod inventory;
@@ -8,4 +9,5 @@ pub mod order;
 pub mod pricing;
 pub mod product_card;
 pub mod queries;
+pub mod shell;
 pub mod wishlist;

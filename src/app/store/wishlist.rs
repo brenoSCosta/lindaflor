@@ -2,9 +2,9 @@ use serde::Deserialize;
 use sqlx::PgPool;
 use topcoat::{
   Result,
-  context::{Cx, app_context},
+  context::{Cx, app_context, memoize},
   icon::{icon, iconify::iconify_icon},
-  router::{content::Form, href, response::Response, route},
+  router::{content::Form, href, request, response::Response, route},
   view::{View, component, view},
 };
 use uuid::Uuid;
@@ -23,6 +23,18 @@ pub async fn wishlist_ids(pool: &PgPool, user_id: Uuid) -> Result<Vec<Uuid>> {
     .fetch_all(pool)
     .await?,
   )
+}
+
+/// Product ids the current user has favorited, loaded once per request so
+/// every card in a grid shares one query. Empty for guests or on error.
+#[memoize]
+pub async fn liked_product_ids(cx: &Cx) -> Vec<Uuid> {
+  let Ok(Some(user)) = optional_user(cx).await else {
+    return Vec::new();
+  };
+  wishlist_ids(app_context::<PgPool>(cx), user.user.id)
+    .await
+    .unwrap_or_default()
 }
 
 /// Wishlist products with storage keys resolved to image URLs.
@@ -51,12 +63,26 @@ fn return_path(next: Option<&str>) -> Option<String> {
     .then(|| next.to_string())
 }
 
+/// Path + query of a same-origin Referer, used when the form sends no `next`
+/// (e.g. cards rendered inside a shard, where the request URI is the shard's).
+fn referer_path(cx: &Cx) -> Option<String> {
+  let headers = request::headers(cx);
+  let referer = headers.get(http::header::REFERER)?.to_str().ok()?;
+  let host = headers.get(http::header::HOST)?.to_str().ok()?;
+  let rest = referer
+    .strip_prefix("https://")
+    .or_else(|| referer.strip_prefix("http://"))?;
+  let path = rest.strip_prefix(host)?;
+  return_path(Some(path))
+}
+
 #[route(POST "/favoritos/alternar")]
 async fn toggle_wishlist(
   cx: &Cx,
   Form(body): Form<ToggleForm>,
 ) -> Result<Response> {
   let back = return_path(body.next.as_deref())
+    .or_else(|| referer_path(cx))
     .unwrap_or_else(|| href!(crate::app::favoritos::page).resolve(cx));
   let Some(user) = optional_user(cx).await? else {
     let login = href!(crate::app::login::page)
@@ -97,7 +123,8 @@ async fn toggle_wishlist(
   toast_redirect(cx, back)
 }
 
-/// Heart toggle. `next` is the page to come back to after toggling.
+/// Heart toggle. `next` is the page to come back to after toggling; pass an
+/// empty string to fall back to the Referer.
 #[component]
 pub async fn wishlist_button(
   product_id: String,

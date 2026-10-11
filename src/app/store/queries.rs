@@ -56,6 +56,7 @@ pub struct CollectionSummary {
   pub product_count: i64,
 }
 
+#[derive(Clone)]
 pub struct StoreSettings {
   pub whatsapp_number: Option<String>,
 
@@ -68,6 +69,24 @@ pub struct StoreSettings {
   pub pix_discount_percent: u32,
   pub announcement_text: Option<String>,
   pub first_purchase_coupon_code: Option<String>,
+}
+
+/// Used when no settings row exists yet.
+impl Default for StoreSettings {
+  fn default() -> Self {
+    Self {
+      whatsapp_number: None,
+      whatsapp_message_template: None,
+      pix_key: None,
+      pix_key_type: None,
+      pix_merchant_name: None,
+      pix_merchant_city: None,
+      free_shipping_threshold_cents: DEFAULT_FREE_SHIPPING_THRESHOLD_CENTS,
+      pix_discount_percent: 5,
+      announcement_text: None,
+      first_purchase_coupon_code: None,
+    }
+  }
 }
 
 pub const DEFAULT_WHATSAPP_NUMBER: &str = "5521992314267";
@@ -786,18 +805,7 @@ pub async fn get_store_settings(
       announcement_text: r.announcement_text,
       first_purchase_coupon_code: r.first_purchase_coupon_code,
     },
-    None => StoreSettings {
-      whatsapp_number: None,
-      whatsapp_message_template: None,
-      pix_key: None,
-      pix_key_type: None,
-      pix_merchant_name: None,
-      pix_merchant_city: None,
-      free_shipping_threshold_cents: DEFAULT_FREE_SHIPPING_THRESHOLD_CENTS,
-      pix_discount_percent: 5,
-      announcement_text: None,
-      first_purchase_coupon_code: None,
-    },
+    None => StoreSettings::default(),
   })
 }
 

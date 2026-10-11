@@ -1,5 +1,7 @@
 use sqlx::PgPool;
-use topcoat::{Result, context::Cx, context::app_context};
+use topcoat::context::{app_context, memoize};
+
+use super::queries::{StoreSettings, get_store_settings};
 
 /// Price after the PIX discount; the discount is rounded down to the cent.
 pub fn pix_price(cents: i64, discount_percent: u32) -> i64 {
@@ -26,38 +28,19 @@ pub fn discount_percent(compare_at: Option<i64>, price: i64) -> Option<u8> {
   })
 }
 
-/// Load PIX %, free shipping threshold, announcement, first-purchase coupon from store_settings.
-pub async fn store_pricing(cx: &Cx) -> Result<StorePricing> {
-  let pool = app_context::<PgPool>(cx);
-  let settings = sqlx::query!(
-    "SELECT pix_discount_percent, free_shipping_threshold_cents, announcement_text, first_purchase_coupon_code FROM store_settings LIMIT 1"
-  )
-    .fetch_optional(pool)
-    .await?;
-
-  Ok(StorePricing {
-    pix_discount_percent: settings
-      .as_ref()
-      .map(|s| s.pix_discount_percent as u32)
-      .unwrap_or(5),
-    free_shipping_threshold_cents: settings
-      .as_ref()
-      .map(|s| s.free_shipping_threshold_cents)
-      .unwrap_or(29900),
-    announcement: settings
-      .as_ref()
-      .and_then(|s| s.announcement_text.clone())
-      .unwrap_or_default(),
-    first_purchase_coupon_code: settings
-      .and_then(|s| s.first_purchase_coupon_code),
-  })
-}
-
-pub struct StorePricing {
-  pub pix_discount_percent: u32,
-  pub free_shipping_threshold_cents: i64,
-  pub announcement: String,
-  pub first_purchase_coupon_code: Option<String>,
+/// Store settings for storefront display (PIX %, free-shipping threshold,
+/// announcement), loaded once per request so every product card shares one
+/// query. Falls back to defaults if the query fails; checkout reads settings
+/// directly so a failure there still surfaces.
+#[memoize]
+pub async fn storefront_settings(cx: &Cx) -> StoreSettings {
+  match get_store_settings(app_context::<PgPool>(cx)).await {
+    Ok(settings) => settings,
+    Err(err) => {
+      tracing::warn!(error = %err, "store settings unavailable, using defaults");
+      StoreSettings::default()
+    }
+  }
 }
 
 #[cfg(test)]

@@ -8,6 +8,7 @@ pub mod conta;
 pub mod dashboard;
 pub mod favoritos;
 pub mod forgot_password;
+pub mod guia_de_medidas;
 pub mod login;
 pub mod newsletter;
 pub mod pedido;
