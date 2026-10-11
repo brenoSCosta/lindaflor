@@ -290,8 +290,18 @@
       body: body,
       redirect: "manual",
       credentials: "same-origin",
-      headers: { "X-Toast-Promise": "1" }
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        "X-Toast-Promise": "1"
+      }
     }).then(function (res) {
+      // `redirect: "manual"` turns a real 3xx into an opaque response whose
+      // Location header is hidden. Reload so the toast cookie and new page
+      // state still land (disable-2FA and other same-path posts).
+      if (res.type === "opaqueredirect") {
+        window.location.reload();
+        return;
+      }
       var data = parseToast(res.headers.get("X-Toast"));
       var loc = res.headers.get("Location");
       if (data) {

@@ -1177,30 +1177,28 @@ async fn security_tab(
                                   action=(href!(settings_post).query([("tab", "security")]))
                                   class="flex items-end gap-2"
                                   novalidate=""
-                                  data-toast-promise=""
-                                  data-toast-loading="Desativando…"
                               >
                               <input type="hidden" name="action" value="disable_2fa">
                               field(
                                   attrs: attributes! {
                                       :data-invalid=$( (!disable_password_error.is_empty()).then_some("true") )
                                   },
-                                  field_label(attrs: attributes! { for="password" }, "Senha")
+                                  field_label(attrs: attributes! { for="disable_password" }, "Senha")
                                   input(
                                       value: disable_password,
                                       touched: disable_password_touched.clone(),
                                       error: disable_password_error.clone(),
                                       attrs: attributes! {
-                                          id="password"
+                                          id="disable_password"
                                           name="password"
                                           type="password"
                                           autocomplete="current-password"
-                                          aria-describedby="password-error"
+                                          aria-describedby="disable-password-error"
                                       }
                                   )
                                   field_error(
                                       message: disable_password_error,
-                                      attrs: attributes! { id="password-error" }
+                                      attrs: attributes! { id="disable-password-error" }
                                   )
                               )
                               button(
@@ -1847,7 +1845,10 @@ pub async fn settings_post(
     "disable_2fa" => {
       let password = body.password.as_deref();
       match service::disable_two_factor(pool, &su.user, password, None).await {
-        Ok(()) => ok_redirect(),
+        Ok(()) => {
+          set_toast(cx, Toast::success("2FA desativada."));
+          toast_redirect(cx, settings_tab_url(cx, &tab))
+        }
         Err(err) => err_redirect(&portuguese_error_message(&err)),
       }
     }

@@ -621,7 +621,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                       <form method="post" action=(href!(create_coupon)) class="grid gap-4 @xl/page:grid-cols-2 " data-toast-promise="" data-toast-loading="Criando cupom…">
                           <input type="hidden" name="q" value=(hidden_q)>
                           <div class="space-y-2">
-                              label(attrs: attributes! { for="code" }, "Código")
+                              label(attrs: attributes! { for="code" }, required: true, "Código")
                               input(attrs: attributes! {
                                   type="text"
                                   name="code"
@@ -632,15 +632,15 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                               })
                           </div>
                           <div class="space-y-2">
-                              label(attrs: attributes! { for="discount_type" }, "Tipo de desconto")
+                              label(attrs: attributes! { for="discount_type" }, required: true, "Tipo de desconto")
                               select(
-                                  attrs: attributes! { name="discount_type" id="discount_type" },
+                                  attrs: attributes! { name="discount_type" id="discount_type" required="" },
                                   <option value="percent">"Percentual (1-50%)"</option>
                                   <option value="fixed">"Valor fixo (centavos)"</option>
                               )
                           </div>
                           <div class="space-y-2">
-                              label(attrs: attributes! { for="discount_value" }, "Valor do desconto")
+                              label(attrs: attributes! { for="discount_value" }, required: true, "Valor do desconto")
                               input(attrs: attributes! {
                                   type="number"
                                   name="discount_value"
@@ -662,45 +662,42 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                               })
                           </div>
                           <div class="space-y-2">
-                              label(attrs: attributes! { for="max_discount_cents" }, "Desconto máximo (centavos, opcional)")
+                              label(attrs: attributes! { for="max_discount_cents" }, "Desconto máximo (centavos)")
                               input(attrs: attributes! {
                                   type="number"
                                   name="max_discount_cents"
                                   id="max_discount_cents"
                                   min="1"
-                                  placeholder="Opcional"
                               })
                           </div>
                           <div class="space-y-2">
-                              label(attrs: attributes! { for="usage_type" }, "Uso")
+                              label(attrs: attributes! { for="usage_type" }, required: true, "Uso")
                               select(
-                                  attrs: attributes! { name="usage_type" id="usage_type" },
+                                  attrs: attributes! { name="usage_type" id="usage_type" required="" },
                                   <option value="unique">"Único (1 uso global, exige atribuição)"</option>
-                                  <option value="unlimited">"Ilimitado (teto opcional)"</option>
+                                  <option value="unlimited">"Ilimitado"</option>
                               )
                           </div>
                           <div class="space-y-2">
-                              label(attrs: attributes! { for="max_uses" }, "Máx. usos (opcional)")
+                              label(attrs: attributes! { for="max_uses" }, "Máx. usos")
                               input(attrs: attributes! {
                                   type="number"
                                   name="max_uses"
                                   id="max_uses"
                                   min="1"
-                                  placeholder="Opcional"
                               })
                           </div>
                           <div class="space-y-2">
-                              label(attrs: attributes! { for="per_user_limit" }, "Limite por usuário (opcional)")
+                              label(attrs: attributes! { for="per_user_limit" }, "Limite por usuário")
                               input(attrs: attributes! {
                                   type="number"
                                   name="per_user_limit"
                                   id="per_user_limit"
                                   min="1"
-                                  placeholder="Opcional"
                               })
                           </div>
                           <div class="space-y-2">
-                              label(attrs: attributes! { for="starts_at" }, "Início (opcional)")
+                              label(attrs: attributes! { for="starts_at" }, "Início")
                               input(attrs: attributes! {
                                   type="datetime-local"
                                   name="starts_at"
@@ -708,7 +705,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                               })
                           </div>
                           <div class="space-y-2">
-                              label(attrs: attributes! { for="expires_at" }, "Expira em (opcional)")
+                              label(attrs: attributes! { for="expires_at" }, "Expira em")
                               input(attrs: attributes! {
                                   type="datetime-local"
                                   name="expires_at"

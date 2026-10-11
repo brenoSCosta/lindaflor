@@ -698,12 +698,12 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                               <input type="hidden" name="user_id" value=(dialog_id)>
                               <input type="hidden" name="q" value=(hidden_q)>
                               <input type="hidden" name="page" value=(hidden_page)>
-                              label(attrs: attributes! { for="ban-reason" class="sr-only" }, "Motivo (opcional)")
+                              label(attrs: attributes! { for="ban-reason" class="sr-only" }, "Motivo")
                               input(attrs: attributes! {
                                   type="text"
                                   name="ban_reason"
                                   id="ban-reason"
-                                  placeholder="Motivo (opcional)"
+                                  placeholder="Motivo"
                               })
                               dialog_footer(
                                   <a href=(cancel_href) class=(button_variants(ButtonVariant::Outline, ButtonSize::Md))>"Cancelar"</a>

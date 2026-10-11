@@ -1,8 +1,9 @@
-use http::StatusCode;
+use http::{HeaderMap, Method, Request, StatusCode, header};
 use test_support::{
-  json_post, pool_and_router, sign_in, sign_up, totp_code, unique_email,
+  json_get, json_post, pool_and_router, sign_in, sign_up, totp_code,
+  unique_email,
 };
-use topcoat::router::Body;
+use topcoat::router::{Body, Router};
 use uuid::Uuid;
 
 // --- P2-3: TOTP secrets encrypted at rest + strict one-time display ---
@@ -265,14 +266,14 @@ async fn settings_setup_page_leaks_no_secret() {
 }
 
 async fn get_html(
-  router: &topcoat::router::Router,
+  router: &Router,
   path: &str,
   cookie: &str,
 ) -> (StatusCode, String) {
-  let req = http::Request::builder()
-    .method(http::Method::GET)
+  let req = Request::builder()
+    .method(Method::GET)
     .uri(path)
-    .header(http::header::COOKIE, cookie)
+    .header(header::COOKIE, cookie)
     .body(Body::empty())
     .expect("build request");
   let response = router.handle(req).await;
@@ -280,6 +281,22 @@ async fn get_html(
   let body = test_support::body_json(response).await;
   let text = body["_body"].as_str().unwrap_or("").to_string();
   (status, text)
+}
+
+async fn settings_form_post(
+  router: &Router,
+  cookie: &str,
+  body: &str,
+) -> (StatusCode, HeaderMap) {
+  let req = Request::builder()
+    .method(Method::POST)
+    .uri("/settings?tab=security")
+    .header(header::COOKIE, cookie)
+    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+    .body(Body::from(body.to_owned()))
+    .expect("build request");
+  let response = router.handle(req).await;
+  (response.status(), response.headers().clone())
 }
 
 #[tokio::test]
@@ -356,6 +373,46 @@ async fn html_enable_shows_secret_once_on_setup_page() {
   assert_eq!(status, StatusCode::OK, "{text}");
   assert!(!text.contains("otpauth://"));
   assert!(!text.contains("data:image/svg+xml"));
+}
+
+#[tokio::test]
+async fn html_disable_2fa_with_password_turns_it_off() {
+  let _ = lindaflor::app::settings::page;
+  let _ = lindaflor::app::settings::settings_post;
+
+  let (_pool, router) = pool_and_router().await;
+  let password = "Harbor-Violet-Tiger-4821-Lantern!";
+  let (cookie, _secret, _user_id) =
+    enable_verified_2fa(&router, "2fa-html-disable", password).await;
+
+  let session = json_get(&router, "/api/auth/get-session", Some(&cookie)).await;
+  assert_eq!(session.json["user"]["twoFactorEnabled"], true);
+
+  let (status, headers) = settings_form_post(
+    &router,
+    &cookie,
+    "action=disable_2fa&password=Harbor-Violet-Tiger-4821-Lantern%21",
+  )
+  .await;
+  assert!(
+    status.is_redirection(),
+    "HTML disable must redirect, got {status}"
+  );
+  let location = headers
+    .get(header::LOCATION)
+    .and_then(|v| v.to_str().ok())
+    .unwrap_or("");
+  assert!(
+    location.contains("/settings"),
+    "expected settings Location, got {location}"
+  );
+
+  let session = json_get(&router, "/api/auth/get-session", Some(&cookie)).await;
+  assert_eq!(
+    session.json["user"]["twoFactorEnabled"], false,
+    "2FA must be off after a correct-password disable, got {:?}",
+    session.json
+  );
 }
 
 #[tokio::test]
