@@ -7,7 +7,7 @@ pub struct ProductSummary {
   pub name: String,
   pub slug: String,
 
-  pub price_in_cents: i32,
+  pub price_in_cents: i64,
   pub category: String,
 
   pub image_url: Option<String>,
@@ -20,7 +20,7 @@ pub struct ProductVariant {
   pub sku: String,
   pub size: String,
   pub color: String,
-  pub price_in_cents: Option<i32>,
+  pub price_in_cents: Option<i64>,
   pub available: i32,
 }
 
@@ -30,7 +30,7 @@ pub struct ProductDetail {
   pub name: String,
   pub slug: String,
   pub description: Option<String>,
-  pub price_in_cents: i32,
+  pub price_in_cents: i64,
   pub category: String,
 
   pub images: Vec<ProductImage>,
@@ -92,7 +92,15 @@ pub fn whatsapp_link(number: &str, text: &str) -> String {
   url.to_string()
 }
 
-pub fn format_price(cents: i32) -> String {
+pub const STOREFRONT_PAGE_SIZE: i64 = 24;
+pub const HOME_FEATURED_LIMIT: i64 = 8;
+
+pub fn clamp_catalog_page(page: i64) -> i64 {
+  page.clamp(1, 10_000)
+}
+
+pub fn format_price(cents: impl Into<i64>) -> String {
+  let cents = cents.into();
   let reais = cents / 100;
   let centavos = (cents % 100).abs();
   let reais_str = reais.to_string();
@@ -129,6 +137,74 @@ pub fn size_label(size: &str) -> &'static str {
   }
 }
 
+fn append_product_filters(
+  sql: &mut String,
+  param_index: &mut i32,
+  category: bool,
+  search: bool,
+  featured_only: bool,
+  collection_slug: bool,
+  include_out_of_stock: bool,
+) {
+  if category {
+    sql.push_str(&format!(
+      " AND p.category = ${}::product_category",
+      param_index
+    ));
+    *param_index += 1;
+  }
+  if search {
+    sql.push_str(&format!(
+            " AND (p.name ILIKE ${} OR p.description ILIKE ${} OR EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = p.id AND pv.sku ILIKE ${}))",
+            param_index,
+            *param_index + 1,
+            *param_index + 2,
+        ));
+    *param_index += 3;
+  }
+  if featured_only {
+    sql.push_str(" AND p.featured = true");
+  }
+  if collection_slug {
+    sql.push_str(&format!(
+            " AND EXISTS (SELECT 1 FROM collections c WHERE c.id = p.collection_id AND c.slug = ${} AND c.active = true)",
+            param_index
+        ));
+    *param_index += 1;
+  }
+  if !include_out_of_stock {
+    sql.push_str(" AND COALESCE((SELECT SUM(GREATEST(i.quantity - i.reserved, 0)) FROM inventory i INNER JOIN warehouses w ON w.id = i.warehouse_id WHERE i.variant_id IN (SELECT pv.id FROM product_variants pv WHERE pv.product_id = p.id) AND w.active = true), 0) > 0");
+  }
+}
+
+fn bind_product_filters<'q>(
+  mut query: sqlx::query::QueryAs<
+    'q,
+    sqlx::Postgres,
+    ProductSummaryRow,
+    sqlx::postgres::PgArguments,
+  >,
+  category: Option<&'q str>,
+  search: Option<String>,
+  collection_slug: Option<&'q str>,
+) -> sqlx::query::QueryAs<
+  'q,
+  sqlx::Postgres,
+  ProductSummaryRow,
+  sqlx::postgres::PgArguments,
+> {
+  if let Some(c) = category {
+    query = query.bind(c);
+  }
+  if let Some(term) = search {
+    query = query.bind(term.clone()).bind(term.clone()).bind(term);
+  }
+  if let Some(slug) = collection_slug {
+    query = query.bind(slug);
+  }
+  query
+}
+
 pub async fn list_products(
   pool: &PgPool,
   category: Option<&str>,
@@ -136,6 +212,8 @@ pub async fn list_products(
   featured_only: bool,
   include_out_of_stock: bool,
   collection_slug: Option<&str>,
+  limit: i64,
+  offset: i64,
 ) -> Result<Vec<ProductSummary>, sqlx::Error> {
   let mut sql = String::from(
         "SELECT p.id, p.name, p.slug, p.price_in_cents, p.category::text AS category,
@@ -150,40 +228,52 @@ pub async fn list_products(
     );
 
   let mut param_index = 1;
+  append_product_filters(
+    &mut sql,
+    &mut param_index,
+    category.is_some(),
+    search.is_some(),
+    featured_only,
+    collection_slug.is_some(),
+    include_out_of_stock,
+  );
+  sql.push_str(&format!(
+    " ORDER BY p.featured DESC, p.created_at DESC LIMIT ${} OFFSET ${}",
+    param_index,
+    param_index + 1
+  ));
 
-  if category.is_some() {
-    sql.push_str(&format!(
-      " AND p.category = ${}::product_category",
-      param_index
-    ));
-    param_index += 1;
-  }
-  if search.is_some() {
-    sql.push_str(&format!(
-            " AND (p.name ILIKE ${} OR p.description ILIKE ${} OR EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = p.id AND pv.sku ILIKE ${}))",
-            param_index,
-            param_index + 1,
-            param_index + 2,
-        ));
-    param_index += 3;
-  }
-  if featured_only {
-    sql.push_str(" AND p.featured = true");
-  }
-  if collection_slug.is_some() {
-    sql.push_str(&format!(
-            " AND EXISTS (SELECT 1 FROM collections c WHERE c.id = p.collection_id AND c.slug = ${} AND c.active = true)",
-            param_index
-        ));
-  }
-  if !include_out_of_stock {
-    sql.push_str(" AND COALESCE((SELECT SUM(GREATEST(i.quantity - i.reserved, 0)) FROM inventory i INNER JOIN warehouses w ON w.id = i.warehouse_id WHERE i.variant_id IN (SELECT pv.id FROM product_variants pv WHERE pv.product_id = p.id) AND w.active = true), 0) > 0");
-  }
-
-  sql.push_str(" ORDER BY p.featured DESC, p.created_at DESC");
-
+  let search_term = search.map(|s| format!("%{}%", s.trim()));
   let mut query = sqlx::query_as::<_, ProductSummaryRow>(&sql);
+  query = bind_product_filters(query, category, search_term, collection_slug);
+  query = query.bind(limit).bind(offset);
 
+  let rows = query.fetch_all(pool).await?;
+  Ok(rows.into_iter().map(|r| r.into()).collect())
+}
+
+pub async fn count_products(
+  pool: &PgPool,
+  category: Option<&str>,
+  search: Option<&str>,
+  featured_only: bool,
+  include_out_of_stock: bool,
+  collection_slug: Option<&str>,
+) -> Result<i64, sqlx::Error> {
+  let mut sql =
+    String::from("SELECT COUNT(*) FROM products p WHERE p.active = true");
+  let mut param_index = 1;
+  append_product_filters(
+    &mut sql,
+    &mut param_index,
+    category.is_some(),
+    search.is_some(),
+    featured_only,
+    collection_slug.is_some(),
+    include_out_of_stock,
+  );
+
+  let mut query = sqlx::query_scalar::<_, i64>(&sql);
   if let Some(c) = category {
     query = query.bind(c);
   }
@@ -194,9 +284,65 @@ pub async fn list_products(
   if let Some(slug) = collection_slug {
     query = query.bind(slug);
   }
+  Ok(query.fetch_one(pool).await?)
+}
 
-  let rows = query.fetch_all(pool).await?;
+pub async fn list_related_products(
+  pool: &PgPool,
+  product_id: Uuid,
+  category: &str,
+) -> Result<Vec<ProductSummary>, sqlx::Error> {
+  let rows = sqlx::query_as::<_, ProductSummaryRow>(
+    "SELECT p.id, p.name, p.slug, p.price_in_cents, p.category::text AS category,
+            (SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.sort_order ASC LIMIT 1) AS image_url,
+            COALESCE((SELECT SUM(GREATEST(i.quantity - i.reserved, 0))::int
+                FROM inventory i
+                INNER JOIN warehouses w ON w.id = i.warehouse_id
+                WHERE i.variant_id IN (SELECT pv.id FROM product_variants pv WHERE pv.product_id = p.id)
+                  AND w.active = true), 0) AS available_total
+     FROM products p
+     WHERE p.active = true
+       AND p.category = $1::product_category
+       AND p.id != $2
+     ORDER BY p.featured DESC, p.created_at DESC
+     LIMIT 4",
+  )
+  .bind(category)
+  .bind(product_id)
+  .fetch_all(pool)
+  .await?;
   Ok(rows.into_iter().map(|r| r.into()).collect())
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[tokio::test]
+  async fn list_products_respects_limit() {
+    let pool = crate::test_support::fresh_pool().await;
+    for i in 0..3 {
+      let id = Uuid::now_v7();
+      sqlx::query(
+        "INSERT INTO products (id, name, slug, price_in_cents, active)
+         VALUES ($1, $2, $3, 1000, true)",
+      )
+      .bind(id)
+      .bind(format!("P{i}"))
+      .bind(format!("p-{id}"))
+      .execute(&pool)
+      .await
+      .unwrap();
+    }
+    let page = list_products(&pool, None, None, false, true, None, 2, 0)
+      .await
+      .unwrap();
+    assert_eq!(page.len(), 2);
+    let total = count_products(&pool, None, None, false, true, None)
+      .await
+      .unwrap();
+    assert!(total >= 3);
+  }
 }
 
 pub async fn get_product_by_slug(
@@ -352,7 +498,7 @@ struct ProductSummaryRow {
   id: Uuid,
   name: String,
   slug: String,
-  price_in_cents: i32,
+  price_in_cents: i64,
   category: String,
   image_url: Option<String>,
   available_total: Option<i32>,

@@ -50,17 +50,20 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     .unwrap_or(0);
 
   let total_revenue: i64 = sqlx::query_scalar!(
-        "SELECT COALESCE(SUM(total_cents), 0)::bigint FROM orders WHERE status NOT IN ('cancelled')"
+        "SELECT COALESCE(SUM(total_cents), 0)::bigint FROM orders WHERE status IN ('paid', 'shipped', 'delivered')"
     )
     .fetch_one(pool)
     .await?
     .unwrap_or(0);
 
-  let low_stock_count: i64 =
-    sqlx::query_scalar!("SELECT COUNT(*) FROM inventory WHERE quantity <= 5")
-      .fetch_one(pool)
-      .await?
-      .unwrap_or(0);
+  let low_stock_count: i64 = sqlx::query_scalar!(
+    "SELECT COUNT(*) FROM inventory i
+       INNER JOIN warehouses w ON w.id = i.warehouse_id
+       WHERE w.active = true AND (i.quantity - i.reserved) <= 5"
+  )
+  .fetch_one(pool)
+  .await?
+  .unwrap_or(0);
 
   let recent_orders = sqlx::query!(
         "SELECT id::text AS \"id!\", guest_email, status::text AS \"status!\", total_cents, created_at FROM orders ORDER BY created_at DESC LIMIT 10"

@@ -102,7 +102,7 @@ struct ListUsersQuery {
 async fn admin_actor(cx: &Cx) -> Result<SessionUser> {
   let session = current_user(cx)
     .await
-    .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))?;
+    .map_err(|e| crate::internal_error::internal_error_cx(cx, &e))?;
   let Some(su) = session.as_ref() else {
     return Err(unauthorized().into());
   };
@@ -416,7 +416,7 @@ pub async fn impersonate_user(
 pub async fn stop_impersonating(cx: &Cx) -> Result<Json<SessionPayload>> {
   let session = current_user(cx)
     .await
-    .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))?;
+    .map_err(|e| crate::internal_error::internal_error_cx(cx, &e))?;
   let Some(su) = session.as_ref() else {
     return Err(unauthorized().into());
   };

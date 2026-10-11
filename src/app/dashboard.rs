@@ -21,7 +21,7 @@ use crate::components::table::{
 pub struct RecentOrder {
   pub id: Uuid,
   pub status: String,
-  pub total_cents: i32,
+  pub total_cents: i64,
   pub created_at: PrimitiveDateTime,
 }
 

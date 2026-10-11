@@ -272,6 +272,11 @@ pub fn pg_max_connections() -> u32 {
   if app_env() == "production" { 20 } else { 5 }
 }
 
+/// Reservation expiry sweep interval from `RESERVATION_SWEEP_SECS` (default 60).
+pub fn reservation_sweep_secs() -> u64 {
+  env_parse("RESERVATION_SWEEP_SECS", 60).max(1)
+}
+
 /// Pool acquire timeout in seconds from `PG_ACQUIRE_TIMEOUT_SECS`.
 pub fn pg_acquire_timeout_secs() -> u64 {
   read_env_or_file("PG_ACQUIRE_TIMEOUT_SECS")

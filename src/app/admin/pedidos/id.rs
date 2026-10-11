@@ -9,7 +9,7 @@ use topcoat::{
 use uuid::Uuid;
 
 use crate::app::auth_helpers::require_admin;
-use crate::app::store::inventory::{convert_reservation, release_reservation};
+use crate::app::store::order::{OrderEvent, apply};
 use crate::app::store::queries::format_price;
 use crate::components::badge::{BadgeVariant, badge};
 use crate::components::button::{ButtonVariant, button};
@@ -31,10 +31,10 @@ pub struct StatusInput {
 struct OrderRow {
   status: String,
   guest_email: Option<String>,
-  subtotal_cents: i32,
-  shipping_cents: i32,
-  discount_cents: i32,
-  total_cents: i32,
+  subtotal_cents: i64,
+  shipping_cents: i64,
+  discount_cents: i64,
+  total_cents: i64,
   shipping_address: Option<serde_json::Value>,
   payment_meta: Option<serde_json::Value>,
   reservation_expires_at: Option<String>,
@@ -46,7 +46,7 @@ struct ItemRow {
   product_name: String,
   variant_label: String,
   quantity: i32,
-  unit_price_cents: i32,
+  unit_price_cents: i64,
 }
 
 fn status_label(status: &str) -> &'static str {
@@ -57,6 +57,7 @@ fn status_label(status: &str) -> &'static str {
     "shipped" => "Enviado",
     "delivered" => "Entregue",
     "cancelled" => "Cancelado",
+    "refunded" => "Estornado",
     _ => "Desconhecido",
   }
 }
@@ -80,46 +81,13 @@ pub async fn page(
   let order_id = Uuid::parse_str(id).map_err(|_| bad_request("invalid id"))?;
 
   if let Some(Form(input)) = body {
-    let mut tx = pool.begin().await?;
-    let current: Option<String> = sqlx::query_scalar(
-      "SELECT status::text FROM orders WHERE id = $1 FOR UPDATE",
-    )
-    .bind(order_id)
-    .fetch_optional(&mut *tx)
-    .await?;
-    let Some(current) = current else {
-      return Err(bad_request("order not found").into());
+    let Some(event) = OrderEvent::parse(&input.status) else {
+      return Err(bad_request("invalid status").into());
     };
-    if current == "pending_payment" {
-      match input.status.as_str() {
-        "paid" => {
-          convert_reservation(&mut tx, order_id).await?;
-          sqlx::query(
-            "UPDATE orders SET status = 'paid', updated_at = now() WHERE id = $1",
-          )
-          .bind(order_id)
-          .execute(&mut *tx)
-          .await?;
-        }
-        "cancelled" => {
-          release_reservation(&mut tx, order_id).await?;
-          sqlx::query(
-            "UPDATE orders SET status = 'cancelled', updated_at = now() WHERE id = $1",
-          )
-          .bind(order_id)
-          .execute(&mut *tx)
-          .await?;
-        }
-        _ => {}
-      }
-    } else if current == "paid" && input.status == "delivered" {
-      sqlx::query(
-        "UPDATE orders SET status = 'delivered', updated_at = now() WHERE id = $1",
-      )
-      .bind(order_id)
-      .execute(&mut *tx)
-      .await?;
-    }
+    let mut tx = pool.begin().await?;
+    apply(&mut tx, order_id, event)
+      .await
+      .map_err(|error| topcoat::Error::from(bad_request(error.to_string())))?;
     tx.commit().await?;
   }
 
@@ -145,6 +113,7 @@ pub async fn page(
 
   let pending = order.status == "pending_payment";
   let paid = order.status == "paid";
+  let shipped = order.status == "shipped";
   let email = order.guest_email.clone().unwrap_or_default();
   let pix_code = order
     .payment_meta
@@ -216,14 +185,60 @@ pub async fn page(
               </div>
           }
           if paid {
-              <form method="post" action=(href!(page, Id(order_id.to_string()))) class="mt-2">
-                  <input type="hidden" name="status" value="delivered">
-                  button(
-                      variant: ButtonVariant::Primary,
-                      attrs: attributes! { type="submit" },
-                      "Marcar como entregue"
-                  )
-              </form>
+              <div class="mt-2 flex flex-wrap gap-3">
+                  <form method="post" action=(href!(page, Id(order_id.to_string())))>
+                      <input type="hidden" name="status" value="shipped">
+                      button(
+                          variant: ButtonVariant::Primary,
+                          attrs: attributes! { type="submit" },
+                          "Marcar como enviado"
+                      )
+                  </form>
+                  <form method="post" action=(href!(page, Id(order_id.to_string())))>
+                      <input type="hidden" name="status" value="cancelled">
+                      button(
+                          variant: ButtonVariant::Outline,
+                          attrs: attributes! { type="submit" },
+                          "Cancelar"
+                      )
+                  </form>
+                  <form method="post" action=(href!(page, Id(order_id.to_string())))>
+                      <input type="hidden" name="status" value="refunded">
+                      button(
+                          variant: ButtonVariant::Outline,
+                          attrs: attributes! { type="submit" },
+                          "Estornar"
+                      )
+                  </form>
+              </div>
+          }
+          if shipped {
+              <div class="mt-2 flex flex-wrap gap-3">
+                  <form method="post" action=(href!(page, Id(order_id.to_string())))>
+                      <input type="hidden" name="status" value="delivered">
+                      button(
+                          variant: ButtonVariant::Primary,
+                          attrs: attributes! { type="submit" },
+                          "Marcar como entregue"
+                      )
+                  </form>
+                  <form method="post" action=(href!(page, Id(order_id.to_string())))>
+                      <input type="hidden" name="status" value="cancelled">
+                      button(
+                          variant: ButtonVariant::Outline,
+                          attrs: attributes! { type="submit" },
+                          "Cancelar"
+                      )
+                  </form>
+                  <form method="post" action=(href!(page, Id(order_id.to_string())))>
+                      <input type="hidden" name="status" value="refunded">
+                      button(
+                          variant: ButtonVariant::Outline,
+                          attrs: attributes! { type="submit" },
+                          "Estornar"
+                      )
+                  </form>
+              </div>
           }
 
           card(
@@ -278,7 +293,7 @@ pub async fn page(
                                   table_cell((item.product_name))
                                   table_cell((item.variant_label))
                                   table_cell((item.quantity))
-                                  table_cell((format_price(item.unit_price_cents * item.quantity)))
+                                  table_cell((format_price(item.unit_price_cents.saturating_mul(i64::from(item.quantity)))))
                               )
                           }
                       )

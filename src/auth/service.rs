@@ -120,12 +120,12 @@ async fn hash_backup_codes_async(codes: Vec<String>) -> Result<String> {
   )
   .await
   .map_err(|_| {
-    topcoat::Error::from(std::io::Error::other("backup code hashing timed out"))
+    crate::internal_error::internal_error(&"backup code hashing timed out")
   })?
   .map_err(|_| {
-    topcoat::Error::from(std::io::Error::other("backup code task failed"))
+    crate::internal_error::internal_error(&"backup code task failed")
   })?
-  .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))
+  .map_err(|e| crate::internal_error::internal_error(&e))
 }
 
 async fn consume_backup_code_async(
@@ -246,15 +246,10 @@ pub async fn sign_up_email(
   email: &str,
   password: &str,
 ) -> Result<SessionUser> {
-  let name = name.trim().to_string();
-  let email = normalize_email(email);
-
-  if name.is_empty() {
-    return Err(bad_request("name is required").into());
-  }
-  if email.is_empty() || !email.contains('@') {
-    return Err(bad_request("valid email is required").into());
-  }
+  let name = crate::auth::validation::validate_name(name)
+    .map_err(|err| bad_request(err.to_string()))?;
+  let email = crate::auth::validation::validate_email(email)
+    .map_err(|err| bad_request(err.to_string()))?;
   if let Err(err) =
     validate_password(password, &[email.as_str(), name.as_str(), "lindaflor"])
   {
@@ -269,7 +264,7 @@ pub async fn sign_up_email(
   .await?
   .is_some()
   {
-    return Err(bad_request("user already exists").into());
+    return Err(bad_request("unable to complete sign-up").into());
   }
 
   let password_hash = hash_password(password)?;
@@ -871,10 +866,8 @@ pub async fn update_user_name(
   user_id: Uuid,
   name: &str,
 ) -> Result<User> {
-  let name = name.trim();
-  if name.is_empty() {
-    return Err(bad_request("name must not be empty").into());
-  }
+  let name = crate::auth::validation::validate_name(name)
+    .map_err(|err| bad_request(err.to_string()))?;
 
   sqlx::query!(
     r#"UPDATE users SET name = $2, updated_at = now() WHERE id = $1"#,
@@ -965,10 +958,8 @@ pub async fn request_change_email(
   new_email: &str,
   callback_url: Option<&str>,
 ) -> Result<()> {
-  let new_email = normalize_email(new_email);
-  if new_email.is_empty() || !new_email.contains('@') {
-    return Err(bad_request("newEmail is required").into());
-  }
+  let new_email = crate::auth::validation::validate_email(new_email)
+    .map_err(|err| bad_request(err.to_string()))?;
   if new_email == normalize_email(current_email) {
     return Err(bad_request("newEmail must differ from current email").into());
   }
@@ -982,7 +973,8 @@ pub async fn request_change_email(
   .await?;
 
   if taken.is_some() {
-    return Err(bad_request("email is already in use").into());
+    tracing::info!(user_id = %user_id, "change-email skipped; address in use");
+    return Ok(());
   }
 
   let identifier_like = format!("{CHANGE_EMAIL_IDENTIFIER_PREFIX}{user_id}:%");
@@ -1338,7 +1330,7 @@ pub async fn enable_two_factor(
   // Encrypt at enrollment: only the one-time response below ever carries
   // the plaintext.
   let encrypted = encrypt_secret(&secret)
-    .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))?;
+    .map_err(|e| crate::internal_error::internal_error(&e))?;
   let id = Uuid::now_v7();
 
   sqlx::query!(r#"DELETE FROM two_factor WHERE user_id = $1"#, user.id)
@@ -1610,7 +1602,6 @@ fn ensure_not_admin_target(target: &User) -> Result<()> {
   Ok(())
 }
 
-#[allow(clippy::too_many_arguments)] // mirrors the audit_events columns 1:1
 async fn record_audit_event<'e, E>(
   executor: E,
   aggregate_type: &str,
@@ -1624,14 +1615,8 @@ async fn record_audit_event<'e, E>(
 where
   E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
-  sqlx::query!(
-    r#"
-        INSERT INTO audit_events
-            (id, aggregate_type, aggregate_id, entity_type, entity_id,
-             actor_user_id, actor_name, metadata)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        "#,
-    Uuid::now_v7(),
+  crate::audit::record_audit_event(
+    executor,
     aggregate_type,
     aggregate_id,
     entity_type,
@@ -1640,7 +1625,6 @@ where
     actor_name,
     metadata,
   )
-  .execute(executor)
   .await?;
   Ok(())
 }

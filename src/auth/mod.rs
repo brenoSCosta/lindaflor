@@ -8,6 +8,7 @@ pub mod session_store;
 pub mod totp;
 pub mod totp_crypto;
 pub mod user;
+pub mod validation;
 
 pub use password::{hash_password, verify_password};
 pub use session_config::session_config;

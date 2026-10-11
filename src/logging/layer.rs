@@ -181,6 +181,21 @@ fn client_safe_error_message(error: &topcoat::Error, status: u16) -> String {
   "internal error".to_string()
 }
 
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use topcoat::Error;
+
+  #[test]
+  fn unknown_500_hides_sqlx_text() {
+    let err = Error::msg(
+      "error returned from database: relation \"audit_events\" does not exist",
+    );
+    let msg = client_safe_error_message(&err, 500);
+    assert_eq!(msg, "internal error");
+  }
+}
+
 fn append_request_id(cx: &Cx, request_id: Uuid) {
   if let Ok(value) = HeaderValue::from_str(&request_id.to_string()) {
     response_headers(cx)

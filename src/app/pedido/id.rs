@@ -37,7 +37,7 @@ struct OrderItem {
   product_name: String,
   variant_label: String,
   quantity: i32,
-  unit_price_cents: i32,
+  unit_price_cents: i64,
 }
 
 struct OrderDetail {
@@ -46,10 +46,10 @@ struct OrderDetail {
   user_id: Option<Uuid>,
   access_token: Uuid,
   guest_email: Option<String>,
-  subtotal_cents: i32,
-  shipping_cents: i32,
-  discount_cents: i32,
-  total_cents: i32,
+  subtotal_cents: i64,
+  shipping_cents: i64,
+  discount_cents: i64,
+  total_cents: i64,
   shipping_address: Option<serde_json::Value>,
   payment_meta: Option<serde_json::Value>,
   created_at: String,
@@ -78,10 +78,10 @@ struct OrderRow {
   user_id: Option<Uuid>,
   access_token: Uuid,
   guest_email: Option<String>,
-  subtotal_cents: i32,
-  shipping_cents: i32,
-  discount_cents: i32,
-  total_cents: i32,
+  subtotal_cents: i64,
+  shipping_cents: i64,
+  discount_cents: i64,
+  total_cents: i64,
   shipping_address: Option<serde_json::Value>,
   payment_meta: Option<serde_json::Value>,
   created_at: String,
@@ -92,7 +92,7 @@ struct ItemRow {
   product_name: String,
   variant_label: String,
   quantity: i32,
-  unit_price_cents: i32,
+  unit_price_cents: i64,
 }
 
 #[derive(sqlx::FromRow)]
@@ -160,6 +160,7 @@ fn status_label(status: &str) -> &'static str {
     "shipped" => "Enviado",
     "delivered" => "Entregue",
     "cancelled" => "Cancelado",
+    "refunded" => "Estornado",
     _ => "Desconhecido",
   }
 }
@@ -423,7 +424,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                     table_cell((item.product_name))
                                     table_cell((item.variant_label))
                                     table_cell((item.quantity))
-                                    table_cell((format_price(item.unit_price_cents * item.quantity)))
+                                    table_cell((format_price(item.unit_price_cents.saturating_mul(i64::from(item.quantity)))))
                                 )
                             }
                         )

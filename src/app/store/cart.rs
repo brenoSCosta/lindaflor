@@ -7,9 +7,7 @@ use topcoat::{
 };
 use uuid::Uuid;
 
-use crate::app::store::inventory::{
-  lock_cart_inventory, release_expired_reservations,
-};
+use crate::app::store::inventory::lock_cart_inventory;
 use crate::app::store::queries::size_label;
 use crate::auth::user::current_user_owned;
 use crate::config::app_env;
@@ -32,7 +30,7 @@ pub struct CartItem {
   pub product_name: String,
   pub variant_label: String,
   pub image_url: Option<String>,
-  pub unit_price_cents: i32,
+  pub unit_price_cents: i64,
   pub quantity: i32,
   pub max_quantity: i32,
 }
@@ -190,10 +188,10 @@ struct HydrateRow {
   product_slug: Option<String>,
   product_name: Option<String>,
   product_active: Option<bool>,
-  product_price: Option<i32>,
+  product_price: Option<i64>,
   size: Option<String>,
   color: Option<String>,
-  variant_price: Option<i32>,
+  variant_price: Option<i64>,
   available: Option<i32>,
   image_url: Option<String>,
 }
@@ -520,10 +518,13 @@ pub async fn set_cart_coupon_proc(
   }
   let subtotal = {
     let hydrated = hydrate_cart(pool, cart.id).await?;
-    cart_subtotal_cents(&hydrated.items)
+    cart_subtotal_cents(&hydrated.items).ok_or_else(|| {
+      topcoat::Error::msg("Carrinho inválido. Atualize a página.")
+    })?
   };
   let mut tx = pool.begin().await?;
-  let outcome = resolve_coupon(&mut tx, &raw, subtotal, user_id, false).await;
+  let outcome =
+    resolve_coupon(&mut tx, &raw, subtotal, user_id, None, false).await;
   tx.rollback().await?;
   match outcome {
     Ok(Some(coupon)) => {
@@ -574,15 +575,19 @@ async fn cart_item_count_for_token(
   Ok(count.unwrap_or(0))
 }
 
-pub fn cart_subtotal_cents(items: &[CartItem]) -> i32 {
-  items.iter().map(|i| i.unit_price_cents * i.quantity).sum()
+pub fn cart_subtotal_cents(items: &[CartItem]) -> Option<i64> {
+  items.iter().try_fold(0i64, |acc, item| {
+    let line = item
+      .unit_price_cents
+      .checked_mul(i64::from(item.quantity))?;
+    acc.checked_add(line)
+  })
 }
 
 pub async fn hydrate_cart(
   pool: &PgPool,
   cart_id: Uuid,
 ) -> Result<HydratedCart, sqlx::Error> {
-  let _ = release_expired_reservations(pool).await;
   let mut tx = pool.begin().await?;
   match hydrate_cart_in_tx(&mut tx, cart_id).await {
     Ok(hydrated) => {

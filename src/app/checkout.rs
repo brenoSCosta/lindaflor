@@ -33,14 +33,14 @@ use crate::app::store::cart::{
 use crate::app::store::coupons::{
   CouponReject, ResolvedCoupon, resolve_coupon,
 };
-use crate::app::store::inventory::{
-  ReserveLine, release_expired_reservations_in_tx, reserve_for_order,
-};
+use crate::app::store::inventory::{ReserveLine, reserve_for_order};
+use crate::app::store::order::expire_pending_reservations_in_tx;
 use crate::app::store::queries::format_price;
 
 #[derive(Debug)]
 enum CheckoutError {
   Form(String),
+  CouponRemoved,
   Db(sqlx::Error),
 }
 
@@ -54,6 +54,9 @@ impl std::fmt::Display for CheckoutError {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
       Self::Form(message) => write!(f, "{message}"),
+      Self::CouponRemoved => {
+        write!(f, "Cupom removido, revise o total.")
+      }
       Self::Db(error) => write!(f, "{error}"),
     }
   }
@@ -123,10 +126,16 @@ pub async fn page(
         .boxed());
   }
 
-  let subtotal = cart_subtotal_cents(&items);
+  let subtotal = cart_subtotal_cents(&items).ok_or_else(|| {
+    topcoat::Error::msg("Carrinho inválido. Atualize a página.")
+  })?;
 
   let stored_coupon = cart_coupon_code(pool, cart.id).await?;
   let coupon_input = input_coupon(body.as_ref(), stored_coupon.as_deref());
+  let preview_email = body
+    .as_ref()
+    .map(|posted| posted.0.guest_email.as_str())
+    .filter(|email| !email.trim().is_empty());
 
   // DB-backed coupon validation. Preview reads through a rolled-back
   // transaction; order creation re-validates inside its own transaction
@@ -137,6 +146,7 @@ pub async fn page(
     &coupon_input,
     subtotal,
     session_user_id,
+    preview_email,
     false,
   )
   .await;
@@ -180,6 +190,9 @@ pub async fn page(
           );
         }
         Err(CheckoutError::Form(message)) => checkout_error = Some(message),
+        Err(CheckoutError::CouponRemoved) => {
+          checkout_error = Some("Cupom removido, revise o total.".to_string());
+        }
         Err(CheckoutError::Db(error)) => return Err(error.into()),
       }
     }
@@ -192,7 +205,10 @@ pub async fn page(
     .as_ref()
     .map(|coupon| coupon.discount_cents)
     .unwrap_or(0);
-  let total = subtotal - discount + shipping.0;
+  let total = subtotal
+    .checked_sub(discount)
+    .and_then(|n| n.checked_add(shipping.0))
+    .unwrap_or(subtotal);
 
   let email_init = input_email(body.as_ref());
   let name_init = input_name(body.as_ref());
@@ -581,7 +597,7 @@ pub async fn page(
                                 for item in items {
                                     <div class="flex justify-between gap-4 text-muted-foreground">
                                         <span>(item.product_name.clone()) " × " (item.quantity)</span>
-                                        <span>(format_price(item.unit_price_cents * item.quantity))</span>
+                                        <span>(format_price(item.unit_price_cents.saturating_mul(i64::from(item.quantity))))</span>
                                     </div>
                                 }
                             </div>
@@ -669,12 +685,10 @@ fn phone_digit_count(value: &str) -> usize {
 }
 
 fn validate_pay_fields(form_data: &CheckoutInput) -> Result<(), String> {
-  if form_data.guest_email.trim().is_empty()
-    || !form_data.guest_email.contains('@')
-  {
+  if crate::auth::validation::validate_email(&form_data.guest_email).is_err() {
     return Err("Informe um e-mail válido.".to_string());
   }
-  if form_data.name.trim().is_empty() {
+  if crate::auth::validation::validate_name(&form_data.name).is_err() {
     return Err("Informe o nome completo.".to_string());
   }
   let digits = phone_digit_count(&form_data.phone);
@@ -753,6 +767,9 @@ async fn create_order(
     }
     Err(error) => {
       let _ = tx.rollback().await;
+      if matches!(error, CheckoutError::CouponRemoved) {
+        crate::app::store::cart::set_cart_coupon(pool, cart_id, None).await?;
+      }
       Err(error)
     }
   }
@@ -780,7 +797,14 @@ async fn create_order_in_tx(
     user_id,
     zip_digits,
   } = params;
-  release_expired_reservations_in_tx(tx).await?;
+  expire_pending_reservations_in_tx(tx)
+    .await
+    .map_err(|error| match error {
+      crate::app::store::order::ApplyError::Db(error) => {
+        CheckoutError::Db(error)
+      }
+      other => CheckoutError::Form(other.to_string()),
+    })?;
   let items = quote_cart_for_checkout(tx, cart_id)
     .await
     .map_err(|error| match error {
@@ -792,7 +816,9 @@ async fn create_order_in_tx(
       ),
       QuoteError::Db(error) => CheckoutError::Db(error),
     })?;
-  let subtotal = cart_subtotal_cents(&items);
+  let subtotal = cart_subtotal_cents(&items).ok_or_else(|| {
+    CheckoutError::Form("Carrinho inválido. Atualize a página.".to_string())
+  })?;
   let shipping = calculate_shipping(subtotal, &form_data.state, zip_digits);
 
   let mut coupon_code = form_data.coupon_code.clone().unwrap_or_default();
@@ -804,19 +830,37 @@ async fn create_order_in_tx(
         .await?;
     coupon_code = stored.unwrap_or_default();
   }
-  let resolved = resolve_coupon(tx, &coupon_code, subtotal, user_id, true)
-    .await
-    .map_err(|outcome| match outcome {
-      CouponReject::Db(error) => CheckoutError::Db(error),
-      CouponReject::Invalid(message) => CheckoutError::Form(message),
-    })?;
+  let resolved = match resolve_coupon(
+    tx,
+    &coupon_code,
+    subtotal,
+    user_id,
+    Some(form_data.guest_email.as_str()),
+    true,
+  )
+  .await
+  {
+    Ok(resolved) => resolved,
+    Err(CouponReject::Db(error)) => return Err(CheckoutError::Db(error)),
+    Err(CouponReject::Invalid(message)) => {
+      if message == "Cupom inválido." {
+        return Err(CheckoutError::CouponRemoved);
+      }
+      return Err(CheckoutError::Form(message));
+    }
+  };
   let discount = resolved
     .as_ref()
     .map(|coupon| coupon.discount_cents)
     .unwrap_or(0);
   let coupon_id = resolved.as_ref().map(|coupon| coupon.id);
   let applied_code = resolved.as_ref().map(|coupon| coupon.code.clone());
-  let total = subtotal - discount + shipping.0;
+  let total = subtotal
+    .checked_sub(discount)
+    .and_then(|n| n.checked_add(shipping.0))
+    .ok_or_else(|| {
+      CheckoutError::Form("Carrinho inválido. Atualize a página.".to_string())
+    })?;
 
   let address = serde_json::json!({
       "name": form_data.name,
@@ -843,7 +887,7 @@ async fn create_order_in_tx(
     )
     .bind(order_id)
     .bind(user_id)
-    .bind(form_data.guest_email)
+    .bind(&form_data.guest_email)
     .bind(subtotal)
     .bind(shipping.0)
     .bind(discount)
@@ -893,14 +937,17 @@ async fn create_order_in_tx(
     })?;
 
   if let Some(coupon) = resolved.as_ref() {
+    let guest_email =
+      user_id.is_none().then_some(form_data.guest_email.as_str());
     sqlx::query(
-      "INSERT INTO coupon_redemptions (id, coupon_id, user_id, order_id)
-             VALUES ($1, $2, $3, $4)",
+      "INSERT INTO coupon_redemptions (id, coupon_id, user_id, order_id, guest_email)
+             VALUES ($1, $2, $3, $4, $5)",
     )
     .bind(Uuid::now_v7())
     .bind(coupon.id)
     .bind(user_id)
     .bind(order_id)
+    .bind(guest_email)
     .execute(&mut **tx)
     .await?;
   }
@@ -937,14 +984,14 @@ async fn create_order_in_tx(
 }
 
 fn calculate_shipping(
-  subtotal_cents: i32,
+  subtotal_cents: i64,
   state: &str,
   zip_digits: &str,
-) -> (i32, bool) {
-  const FREE_SHIPPING_THRESHOLD_CENTS: i32 = 29_900;
-  const SHIPPING_SE_CENTS: i32 = 1_990;
-  const SHIPPING_DEFAULT_CENTS: i32 = 3_990;
-  const SHIPPING_REMOTE_CENTS: i32 = 5_990;
+) -> (i64, bool) {
+  const FREE_SHIPPING_THRESHOLD_CENTS: i64 = 29_900;
+  const SHIPPING_SE_CENTS: i64 = 1_990;
+  const SHIPPING_DEFAULT_CENTS: i64 = 3_990;
+  const SHIPPING_REMOTE_CENTS: i64 = 5_990;
 
   if subtotal_cents >= FREE_SHIPPING_THRESHOLD_CENTS {
     return (0, true);
@@ -970,7 +1017,7 @@ fn calculate_shipping(
 }
 
 fn emv_field(id: &str, value: &str) -> String {
-  format!("{}{}{}", id, value.len(), value)
+  format!("{}{:02}{}", id, value.chars().count(), value)
 }
 
 fn crc16_ccitt_false(payload: &str) -> String {
@@ -1003,7 +1050,7 @@ fn generate_pix_payload(
   pix_key_type: &str,
   merchant_name: &str,
   merchant_city: &str,
-  amount_cents: i32,
+  amount_cents: i64,
   order_id: &str,
 ) -> String {
   let key = match pix_key_type {
@@ -1114,11 +1161,12 @@ mod tests {
   use super::*;
   use crate::app::store::cart::set_cart_coupon;
   use crate::app::store::inventory::{
-    convert_reservation, release_expired_reservations, release_reservation,
+    convert_reservation, release_reservation,
   };
+  use crate::app::store::order::expire_pending_reservations;
 
-  const UNIT_PRICE_CENTS: i32 = 10_000;
-  const DISCOUNT_CENTS: i32 = 1_500;
+  const UNIT_PRICE_CENTS: i64 = 10_000;
+  const DISCOUNT_CENTS: i64 = 1_500;
 
   fn checkout_input(email: &str, code: &str) -> CheckoutInput {
     CheckoutInput {
@@ -1138,7 +1186,7 @@ mod tests {
     }
   }
 
-  async fn seed_variant(pool: &PgPool, price: i32, stock: i32) -> (Uuid, Uuid) {
+  async fn seed_variant(pool: &PgPool, price: i64, stock: i32) -> (Uuid, Uuid) {
     let product_id = Uuid::now_v7();
     let variant_id = Uuid::now_v7();
     let warehouse_id = Uuid::now_v7();
@@ -1251,10 +1299,10 @@ mod tests {
     #[derive(sqlx::FromRow)]
     struct SavedOrder {
       coupon_id: Option<Uuid>,
-      discount_cents: i32,
-      total_cents: i32,
-      subtotal_cents: i32,
-      shipping_cents: i32,
+      discount_cents: i64,
+      total_cents: i64,
+      subtotal_cents: i64,
+      shipping_cents: i64,
     }
 
     let saved = sqlx::query_as::<_, SavedOrder>(
@@ -1285,8 +1333,8 @@ mod tests {
     .expect("coupon code");
     assert_eq!(coupon_code.as_deref(), Some(code.as_str()));
 
-    let redemptions: i64 = sqlx::query_scalar(
-      "SELECT COUNT(*) FROM coupon_redemptions WHERE coupon_id = $1",
+    let redemptions: i64 =     sqlx::query_scalar(
+      "SELECT COUNT(*) FROM coupon_redemptions WHERE coupon_id = $1 AND refunded_at IS NULL",
     )
     .bind(coupon_id)
     .fetch_one(&pool)
@@ -1316,8 +1364,8 @@ mod tests {
         .expect("count orders");
     assert_eq!(orders, 1);
 
-    let redemptions: i64 = sqlx::query_scalar(
-      "SELECT COUNT(*) FROM coupon_redemptions WHERE coupon_id = $1",
+    let redemptions: i64 =     sqlx::query_scalar(
+      "SELECT COUNT(*) FROM coupon_redemptions WHERE coupon_id = $1 AND refunded_at IS NULL",
     )
     .bind(coupon_id)
     .fetch_one(&pool)
@@ -1346,7 +1394,7 @@ mod tests {
         .expect("create order")
         .id;
 
-    let subtotal: i32 =
+    let subtotal: i64 =
       sqlx::query_scalar("SELECT subtotal_cents FROM orders WHERE id = $1")
         .bind(order_id)
         .fetch_one(&pool)
@@ -1354,7 +1402,7 @@ mod tests {
         .expect("subtotal");
     assert_eq!(subtotal, 24_000);
 
-    let unit: i32 = sqlx::query_scalar(
+    let unit: i64 = sqlx::query_scalar(
       "SELECT unit_price_cents FROM order_items WHERE order_id = $1",
     )
     .bind(order_id)
@@ -1470,7 +1518,7 @@ mod tests {
     .await
     .expect("expire");
 
-    release_expired_reservations(&pool)
+    expire_pending_reservations(&pool)
       .await
       .expect("release expired");
 
@@ -1550,9 +1598,81 @@ mod tests {
     assert_eq!(saved_coupon, Some(coupon_id));
   }
 
+  #[tokio::test]
+  async fn stale_coupon_clears_cart_instead_of_hard_fail() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (_product_id, variant_id) =
+      seed_variant(&pool, UNIT_PRICE_CENTS, 2).await;
+    let cart_id = seed_cart(&pool, variant_id, 1).await;
+    set_cart_coupon(&pool, cart_id, Some("GONE-NOW"))
+      .await
+      .expect("persist stale");
+    let email = format!("stale-{}@example.com", Uuid::now_v7().simple());
+    let err = create_order(&pool, cart_id, checkout_input(&email, ""), None)
+      .await
+      .expect_err("stale coupon");
+    assert!(
+      err.to_string().contains("Cupom removido"),
+      "unexpected: {err}"
+    );
+    let stored: Option<String> =
+      sqlx::query_scalar("SELECT coupon_code FROM carts WHERE id = $1")
+        .bind(cart_id)
+        .fetch_one(&pool)
+        .await
+        .expect("cart coupon");
+    assert!(stored.is_none());
+  }
+
+  #[tokio::test]
+  async fn expiry_restores_unique_coupon() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (_product_id, variant_id) =
+      seed_variant(&pool, UNIT_PRICE_CENTS, 2).await;
+    let coupon_id = Uuid::now_v7();
+    let code = format!("EXP{}", Uuid::now_v7().simple());
+    sqlx::query(
+      "INSERT INTO coupons (id, code, discount_type, discount_value, usage_type)
+       VALUES ($1, $2, 'fixed', $3, 'unique')",
+    )
+    .bind(coupon_id)
+    .bind(&code)
+    .bind(DISCOUNT_CENTS)
+    .execute(&pool)
+    .await
+    .expect("insert coupon");
+    let cart_id = seed_cart(&pool, variant_id, 1).await;
+    let email = format!("expc-{}@example.com", Uuid::now_v7().simple());
+    let order_id =
+      create_order(&pool, cart_id, checkout_input(&email, &code), None)
+        .await
+        .expect("create")
+        .id;
+    sqlx::query(
+      "UPDATE orders SET reservation_expires_at = now() - interval '1 hour' WHERE id = $1",
+    )
+    .bind(order_id)
+    .execute(&pool)
+    .await
+    .expect("expire");
+    expire_pending_reservations(&pool).await.expect("sweep");
+    let refunded: Option<time::OffsetDateTime> = sqlx::query_scalar(
+      "SELECT refunded_at FROM coupon_redemptions WHERE order_id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .expect("redemption");
+    assert!(refunded.is_some());
+    let cart_id = seed_cart(&pool, variant_id, 1).await;
+    create_order(&pool, cart_id, checkout_input(&email, &code), None)
+      .await
+      .expect("coupon reusable after expiry");
+  }
+
   async fn seed_split_warehouses(
     pool: &PgPool,
-    price: i32,
+    price: i64,
     default_stock: i32,
     other_stock: i32,
   ) -> (Uuid, Uuid, Uuid) {

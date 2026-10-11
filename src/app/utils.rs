@@ -103,7 +103,7 @@ fn is_webp(bytes: &[u8]) -> bool {
 pub fn storage_failure(err: StorageError) -> Error {
   match err {
     StorageError::Unavailable => Error::msg(MSG_UNAVAILABLE),
-    other => Error::from(other),
+    other => crate::internal_error::internal_error(&other),
   }
 }
 

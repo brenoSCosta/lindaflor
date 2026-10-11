@@ -1,4 +1,4 @@
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -279,7 +279,9 @@ async fn fallback_from_order_items(
       if convert {
         sqlx::query(
           "UPDATE inventory
-           SET reserved = reserved - $2, quantity = quantity - $2, updated_at = now()
+           SET reserved = GREATEST(reserved - $2, 0),
+               quantity = GREATEST(quantity - $2, 0),
+               updated_at = now()
            WHERE id = $1",
         )
         .bind(row.id)
@@ -288,7 +290,9 @@ async fn fallback_from_order_items(
         .await?;
       } else {
         sqlx::query(
-          "UPDATE inventory SET reserved = reserved - $2, updated_at = now() WHERE id = $1",
+          "UPDATE inventory
+           SET reserved = GREATEST(reserved - $2, 0), updated_at = now()
+           WHERE id = $1",
         )
         .bind(row.id)
         .bind(take)
@@ -301,47 +305,187 @@ async fn fallback_from_order_items(
   Ok(())
 }
 
-/// Cancel `pending_payment` orders past `reservation_expires_at` and release holds.
-pub async fn release_expired_reservations(
-  pool: &PgPool,
-) -> Result<(), sqlx::Error> {
-  let mut tx = pool.begin().await?;
-  match release_expired_reservations_in_tx(&mut tx).await {
-    Ok(()) => {
-      tx.commit().await?;
-      Ok(())
-    }
-    Err(error) => {
-      let _ = tx.rollback().await;
-      Err(error)
-    }
-  }
-}
-
-pub async fn release_expired_reservations_in_tx(
+/// Restock sold units onto the default (or first) warehouse after convert.
+pub async fn restock_sold_items(
   tx: &mut Transaction<'_, Postgres>,
+  order_id: Uuid,
 ) -> Result<(), sqlx::Error> {
-  let expired: Vec<Uuid> = sqlx::query_scalar(
-    r#"
-        SELECT id FROM orders
-        WHERE status = 'pending_payment'
-          AND reservation_expires_at IS NOT NULL
-          AND reservation_expires_at < now()
-        FOR UPDATE SKIP LOCKED
-        "#,
+  let items = sqlx::query_as::<_, (Uuid, i32)>(
+    "SELECT variant_id, quantity FROM order_items WHERE order_id = $1",
   )
+  .bind(order_id)
   .fetch_all(&mut **tx)
   .await?;
 
-  for order_id in expired {
-    release_reservation(tx, order_id).await?;
+  for (variant_id, quantity) in items {
+    if quantity <= 0 {
+      continue;
+    }
+    let rows = lock_variant_inventory(tx, variant_id).await?;
+    let Some(target) = rows
+      .iter()
+      .find(|row| row.is_default)
+      .or_else(|| rows.first())
+    else {
+      continue;
+    };
     sqlx::query(
-      "UPDATE orders SET status = 'cancelled', updated_at = now() WHERE id = $1",
+      "UPDATE inventory SET quantity = quantity + $2, updated_at = now() WHERE id = $1",
     )
-    .bind(order_id)
+    .bind(target.id)
+    .bind(quantity)
     .execute(&mut **tx)
     .await?;
   }
-
   Ok(())
+}
+
+/// Adjust on-hand quantity by `delta` (can be negative). Rejects CHECK breaks.
+/// Returns the warehouse id of the adjusted row (for audit metadata).
+pub async fn adjust_stock(
+  tx: &mut Transaction<'_, Postgres>,
+  inventory_id: Uuid,
+  delta: i32,
+) -> Result<Uuid, InventoryError> {
+  let row = sqlx::query_as::<_, (i32, i32, Uuid)>(
+    "SELECT quantity, reserved, warehouse_id FROM inventory WHERE id = $1 FOR UPDATE",
+  )
+  .bind(inventory_id)
+  .fetch_optional(&mut **tx)
+  .await?;
+  let Some((quantity, reserved, warehouse_id)) = row else {
+    return Err(InventoryError::Insufficient);
+  };
+  let next = quantity
+    .checked_add(delta)
+    .ok_or(InventoryError::Insufficient)?;
+  if next < 0 || reserved > next {
+    return Err(InventoryError::Insufficient);
+  }
+  sqlx::query(
+    "UPDATE inventory SET quantity = $2, updated_at = now() WHERE id = $1",
+  )
+  .bind(inventory_id)
+  .bind(next)
+  .execute(&mut **tx)
+  .await?;
+  Ok(warehouse_id)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use sqlx::PgPool;
+
+  async fn seed_order_item_without_reservation(
+    pool: &PgPool,
+    quantity: i32,
+    reserved: i32,
+    item_qty: i32,
+  ) -> (Uuid, Uuid) {
+    let product_id = Uuid::now_v7();
+    let variant_id = Uuid::now_v7();
+    let warehouse_id = Uuid::now_v7();
+    let inventory_id = Uuid::now_v7();
+    let order_id = Uuid::now_v7();
+
+    sqlx::query(
+      "INSERT INTO products (id, name, slug, price_in_cents) VALUES ($1, 'T', $2, 1000)",
+    )
+    .bind(product_id)
+    .bind(format!("p-{product_id}"))
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+      "INSERT INTO product_variants (id, product_id, sku, size, color)
+       VALUES ($1, $2, $3, 'm', 'azul')",
+    )
+    .bind(variant_id)
+    .bind(product_id)
+    .bind(format!("sku-{variant_id}"))
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+      "INSERT INTO warehouses (id, code, name, is_default, active)
+       VALUES ($1, $2, 'W', true, true)",
+    )
+    .bind(warehouse_id)
+    .bind(format!("wh-{}", warehouse_id.simple()))
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+      "INSERT INTO inventory (id, variant_id, warehouse_id, quantity, reserved)
+       VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(inventory_id)
+    .bind(variant_id)
+    .bind(warehouse_id)
+    .bind(quantity)
+    .bind(reserved)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+      "INSERT INTO orders (id, guest_email, status, access_token, total_cents)
+       VALUES ($1, 'a@b.co', 'pending_payment', $2, 1000)",
+    )
+    .bind(order_id)
+    .bind(Uuid::now_v7())
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+      "INSERT INTO order_items (id, order_id, variant_id, product_name, variant_label, quantity, unit_price_cents)
+       VALUES ($1, $2, $3, 'T', 'M / azul', $4, 1000)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(order_id)
+    .bind(variant_id)
+    .bind(item_qty)
+    .execute(pool)
+    .await
+    .unwrap();
+    (order_id, inventory_id)
+  }
+
+  #[tokio::test]
+  async fn fallback_release_twice_does_not_go_negative() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (order_id, inventory_id) =
+      seed_order_item_without_reservation(&pool, 5, 1, 1).await;
+    let mut tx = pool.begin().await.unwrap();
+    release_reservation(&mut tx, order_id).await.unwrap();
+    release_reservation(&mut tx, order_id).await.unwrap();
+    let (quantity, reserved): (i32, i32) =
+      sqlx::query_as("SELECT quantity, reserved FROM inventory WHERE id = $1")
+        .bind(inventory_id)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(quantity, 5);
+    assert_eq!(reserved, 0);
+  }
+
+  #[tokio::test]
+  async fn fallback_convert_twice_does_not_go_negative() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (order_id, inventory_id) =
+      seed_order_item_without_reservation(&pool, 5, 1, 1).await;
+    let mut tx = pool.begin().await.unwrap();
+    convert_reservation(&mut tx, order_id).await.unwrap();
+    convert_reservation(&mut tx, order_id).await.unwrap();
+    let (quantity, reserved): (i32, i32) =
+      sqlx::query_as("SELECT quantity, reserved FROM inventory WHERE id = $1")
+        .bind(inventory_id)
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(quantity, 4);
+    assert_eq!(reserved, 0);
+  }
 }

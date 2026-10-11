@@ -52,14 +52,20 @@ pub async fn cart_sheet(cx: &Cx, open: Signal<bool>) -> Result<impl View> {
   }
   let items = hydrated.items;
   let notices = hydrated.notices;
-  let subtotal = cart_subtotal_cents(&items);
+  let subtotal = cart_subtotal_cents(&items).unwrap_or(0);
   let stored_coupon = cart_coupon_code(pool, cart.id).await?;
   let coupon_initial = stored_coupon.clone().unwrap_or_default();
 
   let mut preview_tx = pool.begin().await?;
-  let coupon_outcome =
-    resolve_coupon(&mut preview_tx, &coupon_initial, subtotal, user_id, false)
-      .await;
+  let coupon_outcome = resolve_coupon(
+    &mut preview_tx,
+    &coupon_initial,
+    subtotal,
+    user_id,
+    None,
+    false,
+  )
+  .await;
   preview_tx.rollback().await?;
   let (resolved_coupon, preview_error) = match coupon_outcome {
     Ok(coupon) => (coupon, None),
@@ -271,7 +277,7 @@ pub async fn cart_sheet(cx: &Cx, open: Signal<bool>) -> Result<impl View> {
                               </div>
                           </div>
                           <p class="shrink-0 text-right text-sm font-medium text-primary">
-                              (format_price(item.unit_price_cents * item.quantity))
+                              (format_price(item.unit_price_cents.saturating_mul(i64::from(item.quantity))))
                           </p>
                       </div>
                   }

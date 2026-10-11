@@ -117,10 +117,11 @@ async fn product_directory(
   let products = sqlx::query!(
         "SELECT p.id::text AS \"id!\", p.name, p.slug, p.category::text AS \"category!\", p.price_in_cents, p.active,
                 COUNT(DISTINCT pv.id) as variant_count,
-                COALESCE(SUM(i.quantity), 0) as available_total
+                COALESCE(SUM(GREATEST(i.quantity - i.reserved, 0)) FILTER (WHERE w.active = true), 0) as available_total
          FROM products p
          LEFT JOIN product_variants pv ON pv.product_id = p.id
          LEFT JOIN inventory i ON i.variant_id = pv.id
+         LEFT JOIN warehouses w ON w.id = i.warehouse_id
          WHERE ($1 = '' OR p.name ILIKE '%' || $1 || '%')
            AND ($2 = 'all' OR p.active = ($2 = 'true'))
          GROUP BY p.id

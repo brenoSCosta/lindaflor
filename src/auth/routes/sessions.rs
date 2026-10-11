@@ -57,7 +57,7 @@ pub struct OkStatus {
 pub async fn list_sessions(cx: &Cx) -> Result<Json<Vec<ListedSessionJson>>> {
   let session = current_user(cx)
     .await
-    .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))?;
+    .map_err(|e| crate::internal_error::internal_error_cx(cx, &e))?;
   let Some(su) = session.as_ref() else {
     return Err(unauthorized().into());
   };
@@ -118,7 +118,7 @@ pub async fn revoke_session(
 ) -> Result<Json<OkStatus>> {
   let session = current_user(cx)
     .await
-    .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))?;
+    .map_err(|e| crate::internal_error::internal_error_cx(cx, &e))?;
   let Some(su) = session.as_ref() else {
     return Err(unauthorized().into());
   };
@@ -162,7 +162,7 @@ pub async fn revoke_session(
 pub async fn revoke_other_sessions(cx: &Cx) -> Result<Json<OkStatus>> {
   let session = current_user(cx)
     .await
-    .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))?;
+    .map_err(|e| crate::internal_error::internal_error_cx(cx, &e))?;
   let Some(su) = session.as_ref() else {
     return Err(unauthorized().into());
   };

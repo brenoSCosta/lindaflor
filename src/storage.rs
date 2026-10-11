@@ -19,7 +19,7 @@ pub struct S3ObjectStore {
 impl S3ObjectStore {
   fn new(config: &crate::config::S3Config) -> Self {
     Self {
-      http: reqwest::Client::new(),
+      http: crate::http_client::shared_http_client().clone(),
       endpoint: config.endpoint.trim_end_matches('/').to_string(),
       bucket: config.bucket.clone(),
       region: config.region.clone(),
@@ -431,10 +431,8 @@ fn status_error_with_body(
   status: reqwest::StatusCode,
   body: &str,
 ) -> StorageError {
-  let snippet: String = body.chars().take(500).collect();
-  StorageError::Other(format!(
-    "s3 request failed: status {status} body {snippet}"
-  ))
+  tracing::error!(status = %status, body_len = body.len(), "s3 request failed");
+  StorageError::Other(format!("s3 request failed: status {status}"))
 }
 
 type StoredObject = (String, Vec<u8>);

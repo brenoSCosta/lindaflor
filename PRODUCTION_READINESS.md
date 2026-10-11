@@ -247,36 +247,38 @@ No `pg_dump`/`pg_basebackup`/PITR, no Valkey `BGSAVE` schedule, no S3 versioning
 
 ### 4.1 Order state machine dead ends — `src/app/admin/pedidos/id.rs:93-122`, `migrations/0002_commerce.sql:7`
 Enum is `pending_payment | paid | processing | shipped | delivered | cancelled`. Admin only implements `pending_payment→paid/cancelled` and `paid→delivered`. `processing`/`shipped` are unreachable; no `paid→cancelled/refund` restock path. Double-POST safe (`FOR UPDATE` + re-check — good, keep).
-- [ ] Fix: implement `pending_payment→paid→shipped→delivered` + `paid→refunded/cancelled` (restock via `convert/release` inverse + coupon restore) as the `order.apply` table in §2.0. Needed for MP refunds (§2). Manual DB work until then — document runbook.
+- [x] Fix: implement `pending_payment→paid→shipped→delivered` + `paid→refunded/cancelled` (restock via `convert/release` inverse + coupon restore) as the `order.apply` table in §2.0. Needed for MP refunds (§2). Manual DB work until then — document runbook.
 
 ### 4.2 Catalog unbounded — `src/app/store/queries.rs:132-200`, `src/app.rs:221-227`, `src/app/produtos.rs:107-115`, `src/app/colecoes/slug.rs:49`, `src/app/produtos/slug.rs:112-120`
 `list_products` has no `LIMIT/OFFSET`. Home runs **two** unbounded queries (`featured` + `all`, not the same catalog twice). Related products load the full category then `.take(4)` in memory. (Admin `pedidos/produtos/conta/pedidos` correctly use `COUNT+LIMIT/OFFSET` — keep as pattern.)
-- [ ] Fix: paginate storefront (`LIMIT 24 + cursor/offset`, clamp `1..10_000` like admin); related via `WHERE id != $1 ... LIMIT 4` in SQL; add index on `(active, featured, created_at)`.
+- [x] Fix: paginate storefront (`LIMIT 24 + cursor/offset`, clamp `1..10_000` like admin); related via `WHERE id != $1 ... LIMIT 4` in SQL; add index on `(active, featured, created_at)`.
 
 ### 4.3 Coupon edge cases — `src/app/store/coupons.rs:109-210,176-203`, `src/app/checkout.rs:784-792`, `migrations/0006_inventory_reservations.sql:15-16`
 - `per_user_limit` skipped when `user_id=None` — guests reuse unlimited coupons infinitely (only global `max_uses` stops it). Email collected but unused for limiting. → Key redemptions by `COALESCE(user_id::text, guest_email)` when email present; else require login for per-user coupons.
 - Cancelled/expired orders keep `coupon_redemptions` rows, still counted toward caps — single-use coupon burned by abandoned PIX. → On cancel/expire, delete or mark `refunded` redemption in same tx (needed for §2 refund flow).
 - Posted `coupon_code` wins over `carts.coupon_code`; stale stored code fails order instead of auto-clearing; `carts.coupon_code` has no FK, survives coupon delete. → On `CouponReject`, clear cart code + surface “cupom removido, revise o total” instead of hard fail.
 - `fixed` only checks `>0` (`admin/cupons.rs:836-841`) — misconfigured `fixed=999999` clamped to subtotal by `calc_coupon_discount` (no negative total — OK) but yields free-items+shipping-only. → Add admin cap (e.g. ≤ subtotal typical or ≤ 50_000) + warning.
+- [x] Guest/email redemption key, `refunded_at` restore, stale-code clear, admin fixed cap 50_000.
 
 ### 4.4 Inventory accounting gaps — `src/app/store/inventory.rs:251-302`, `migrations/0002_commerce.sql:66-73`, `src/app/store/cart.rs:315-541`
 - Normal convert/release uses `GREATEST(reserved - $2, 0)` (`inventory.rs:178-190`). `fallback_from_order_items` does raw `reserved - $2` for **both** convert and release (`:279-296`) → double-release (expiry race + admin cancel) can drive `reserved` negative. No `CHECK(reserved>=0)` to catch it; reads mask with `GREATEST(quantity-reserved,0)`.
 - `hydrate_cart_in_tx` locks only `ci`, not inventory rows; cart qty can transiently exceed stock (mitigated at checkout re-quote — checkout locking `ORDER BY i.id FOR UPDATE` + `reserve_for_order` re-check is correct, keep + keep `last_unit_race_only_one_order_succeeds` test).
 - `hydrate_cart` fire-and-forget `release_expired_reservations` on every cart view — extra write tx per read, failures ignored.
 - `i32` cents summed without overflow check (`cart.rs:533-535`, `checkout.rs:781,805`); huge qty panics debug / wraps release. `emv_field` uses byte `len()` (`checkout.rs:958-960`) — OK ASCII today, wrong for multibyte per Bacen.
-- [ ] Fix: `GREATEST` in the fallback path too + `CHECK(quantity>=0, reserved>=0, reserved<=quantity)`; move expiry sweep to background worker; `i64` cents + `checked_add`; `chars().count()` for EMV lengths; `i32 → i64` migration for money columns if needed.
+- [x] Fix: `GREATEST` in the fallback path too + `CHECK(quantity>=0, reserved>=0, reserved<=quantity)`; move expiry sweep to background worker; `i64` cents + `checked_add`; `chars().count()` for EMV lengths; `i32 → i64` migration for money columns if needed.
 
 ### 4.5 Admin data honesty — `src/app/admin.rs:52-63`, `src/app/admin/produtos.rs:117-128`, `src/app/admin/estoque.rs:150-162`, `src/app/admin/produtos/id.rs:486-561`
 - “Receita Total” sums `NOT IN ('cancelled')` (includes unpaid `pending_payment`). → `WHERE status='paid'`.
 - Product list `SUM(quantity)` labeled “Disponível” ignores `reserved` (overstates vs storefront `quantity-reserved`). `low_stock_count` ignores `reserved`/warehouse `active`. → Use `quantity-reserved`. Estoque table itself already shows reserved + available (`estoque.rs:103-107`).
 - Estoque page copy promises “entradas, transferências e CSV” (`:159`) but the page is read-only; `sync_variants` never updates `inventory.quantity` — new variants get `0`, existing qty uneditable, no replenishment UI path. → Minimal `adjust_stock(variant_id, delta, reason)` + audit table before launch, else document manual-SQL runbook and restrict who can run it.
+- [x] Paid-through-fulfillment revenue, `quantity-reserved` Disponível/low-stock, `adjust_stock` + `audit_events`.
 
 ### 4.6 Input validation / body limits / error leakage
 - `sign_up.rs:57-63` only `name.is_empty()`, `email.contains('@')`, `len>=8`; `normalize_email` is `trim+lowercase` (`dto.rs:120`); no max-len, no RFC email, no complexity. `sign_in.rs:84` only empty-check.
 - `BodyLimit` only on `/settings/avatar` (3MB) + `/admin/produtos/create|update` (20MB) (`src/app.rs:90-93`). All `/api/auth/*` JSON unbounded → large-body DoS. Avatar limit mismatch: route 3MB vs `validate_image` 2MB (`src/app/utils.rs:16,40-47` — magic-byte classify is good, keep).
 - `map_err(|e| Error::from(io::Error::other(e.to_string())))?` pattern (`delete_user.rs:65,92`, `session.rs:23`, `sessions.rs:60,121,165`, `admin.rs:104,416`, `accounts.rs:67,117,193`) turns full `sqlx`/`argon2` strings into 500 bodies — leaks constraint/table/connection detail. Same for S3 500-char body (`storage.rs:401→utils.rs:106`) and Google `Token(status: body)` (`google.rs:122,145`).
 - `sign_up.rs:82` / `change_email.rs:72-82` distinguish “already exists/in use” → user enumeration (sign-in correctly generic — keep).
-- [ ] Fix: shared `validator` rules (name 1..100, email RFC + 254 max, password 8..128 + breach-list via `hibp` or zxcvbn floor); global `BodyLimit(1MB)` default + per-route overrides; map internal errors to generic `500 internal` + `error_id` (log full with `tracing::error!(error_id, ?err)`); return generic “email sent if account exists” on reset/signup-enumeration paths; shared `reqwest` client timeout (Google/S3/MP — §2.0 retry/CB).
+- [x] Fix: shared `validator` rules (name 1..100, email RFC + 254 max, password 8..128 + breach-list via `hibp` or zxcvbn floor); global `BodyLimit(1MB)` default + per-route overrides; map internal errors to generic `500 internal` + `error_id` (log full with `tracing::error!(error_id, ?err)`); return generic “email sent if account exists” on reset/signup-enumeration paths; shared `reqwest` client timeout (Google/S3/MP — §2.0 retry/CB).
 
 ---
 

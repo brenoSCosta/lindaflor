@@ -1,9 +1,12 @@
 pub mod api;
 pub mod app;
+pub mod audit;
 pub mod auth;
 pub mod components;
 pub mod config;
 pub mod db;
+pub mod http_client;
+pub mod internal_error;
 pub mod logging;
 pub mod openapi;
 pub mod rate_limit;

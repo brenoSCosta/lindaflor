@@ -68,15 +68,13 @@ pub async fn change_email(
 ) -> Result<Json<OkStatus>> {
   let session = current_user(cx)
     .await
-    .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))?;
+    .map_err(|e| crate::internal_error::internal_error_cx(cx, &e))?;
   let Some(su) = session.as_ref() else {
     return Err(unauthorized().into());
   };
 
-  let new_email = normalize_email(&body.new_email);
-  if new_email.is_empty() || !new_email.contains('@') {
-    return Err(bad_request("newEmail is required").into());
-  }
+  let new_email = crate::auth::validation::validate_email(&body.new_email)
+    .map_err(|err| bad_request(err.to_string()))?;
   if new_email == su.user.email {
     return Err(bad_request("newEmail must differ from current email").into());
   }
@@ -112,9 +110,8 @@ pub async fn change_email(
       .fetch_optional(pool)
       .await?;
       match row.and_then(|r| r.password) {
-        Some(stored) => verify_password(pw, &stored).map_err(|e| {
-          topcoat::Error::from(std::io::Error::other(e.to_string()))
-        })?,
+        Some(stored) => verify_password(pw, &stored)
+          .map_err(|e| crate::internal_error::internal_error(&e))?,
         None => false,
       }
     }
@@ -146,9 +143,8 @@ pub async fn change_email(
             tf.secret_key_version,
           )
           .map_err(|_| unauthorized())?;
-          verify_code(secret.as_str(), code).map_err(|e| {
-            topcoat::Error::from(std::io::Error::other(e.to_string()))
-          })?
+          verify_code(secret.as_str(), code)
+            .map_err(|e| crate::internal_error::internal_error(&e))?
         }
         None => false,
       }
@@ -172,7 +168,7 @@ pub async fn change_email(
   .await?;
 
   if taken.is_some() {
-    return Err(bad_request("email is already in use").into());
+    return Ok(Json(OkStatus { status: true }));
   }
 
   // Drop prior pending change-email tokens for this user.
@@ -296,7 +292,7 @@ pub async fn confirm_change_email(
     sqlx::query!("DELETE FROM verifications WHERE id = $1", verification.id)
       .execute(pool)
       .await?;
-    return Err(bad_request("email is already in use").into());
+    return Err(bad_request("unable to complete email change").into());
   }
 
   let updated = sqlx::query!(

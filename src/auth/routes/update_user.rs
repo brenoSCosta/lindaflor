@@ -45,7 +45,7 @@ pub async fn update_user(
 ) -> Result<Json<UpdateUserResponse>> {
   let session = current_user(cx)
     .await
-    .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))?;
+    .map_err(|e| crate::internal_error::internal_error_cx(cx, &e))?;
   let Some(su) = session.as_ref() else {
     return Err(unauthorized().into());
   };
@@ -54,14 +54,13 @@ pub async fn update_user(
     return Err(bad_request("name or image is required").into());
   }
 
-  let name = body
-    .name
-    .as_deref()
-    .map(str::trim)
-    .filter(|n| !n.is_empty());
-  if body.name.is_some() && name.is_none() {
-    return Err(bad_request("name must not be empty").into());
-  }
+  let name = match body.name.as_deref() {
+    None => None,
+    Some(raw) => Some(
+      crate::auth::validation::validate_name(raw)
+        .map_err(|err| bad_request(err.to_string()))?,
+    ),
+  };
 
   let pool = app_context::<PgPool>(cx);
 

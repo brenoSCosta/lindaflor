@@ -63,7 +63,9 @@ use crate::rate_limit::{
 use crate::theme::{THEME_INIT_SCRIPT, THEME_TOGGLE_SCRIPT, read_theme};
 
 use self::store::product_card::product_card;
-use self::store::queries::list_products;
+use self::store::queries::{
+  HOME_FEATURED_LIMIT, STOREFRONT_PAGE_SIZE, list_products,
+};
 
 /// Client-side reveal + `#sobre` landing behavior (see `assets/sobre.js`).
 const SOBRE_SCRIPT: Asset = asset!("assets/sobre.js");
@@ -110,7 +112,8 @@ pub fn router(
   builder = crate::security_headers::apply_security_headers_fallback(builder);
 
   builder = builder
-    .layer(BodyLimit::max(3 * 1024 * 1024).at("/settings/avatar"))
+    .layer(BodyLimit::max(1024 * 1024))
+    .layer(BodyLimit::max(2 * 1024 * 1024).at("/settings/avatar"))
     // Product create/edit carry product fields plus up to 8 images @ 2MB each.
     .layer(BodyLimit::max(20 * 1024 * 1024).at("/admin/produtos/create"))
     .layer(BodyLimit::max(20 * 1024 * 1024).at("/admin/produtos/update"))
@@ -298,10 +301,14 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let pool = app_context::<PgPool>(cx);
   let store = crate::app::utils::object_store(cx);
 
-  let featured = list_products(pool, None, None, true, true, None).await?;
+  let featured =
+    list_products(pool, None, None, true, true, None, HOME_FEATURED_LIMIT, 0)
+      .await?;
   let featured =
     crate::app::admin::produtos::resolve_summary_images(&store, featured).await;
-  let all_products = list_products(pool, None, None, false, true, None).await?;
+  let all_products =
+    list_products(pool, None, None, false, true, None, STOREFRONT_PAGE_SIZE, 0)
+      .await?;
   let all_products =
     crate::app::admin::produtos::resolve_summary_images(&store, all_products)
       .await;

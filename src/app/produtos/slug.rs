@@ -15,8 +15,7 @@ use crate::app::store::cart::{
 };
 use crate::app::store::queries::{
   DEFAULT_WHATSAPP_NUMBER, category_label, format_price, get_product_by_slug,
-  get_store_settings, list_products, render_whatsapp_template, size_label,
-  whatsapp_link,
+  get_store_settings, render_whatsapp_template, size_label, whatsapp_link,
 };
 use crate::auth::user::current_user_owned;
 use crate::components::accordion::{
@@ -109,15 +108,13 @@ pub async fn page(
     };
 
   let settings = get_store_settings(pool).await?;
-  let related =
-    list_products(pool, Some(&product.category), None, false, true, None)
-      .await?;
+  let related = crate::app::store::queries::list_related_products(
+    pool,
+    product.id,
+    &product.category,
+  )
+  .await?;
   let related = resolve_summaries(&store, related).await;
-  let related: Vec<_> = related
-    .into_iter()
-    .filter(|p| p.slug != product.slug)
-    .take(4)
-    .collect();
 
   let product_query = query_params::<ProductQuery>(cx)?;
   let selected_variant = product

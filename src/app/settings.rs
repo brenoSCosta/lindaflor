@@ -1830,7 +1830,10 @@ pub async fn settings_post(
       match service::confirm_enable_two_factor(cx, pool, &su.user, code).await {
         Ok(()) => {
           set_toast(cx, Toast::success("2FA ativada."));
-          toast_redirect(cx, href!(page).query([("tab", "security")]).resolve(cx))
+          toast_redirect(
+            cx,
+            href!(page).query([("tab", "security")]).resolve(cx),
+          )
         }
         Err(err) => {
           set_toast(cx, Toast::error(portuguese_error_message(&err)));

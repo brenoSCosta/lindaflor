@@ -3,12 +3,13 @@ use topcoat::{
   Result,
   context::Cx,
   context::app_context,
-  router::{href, page, path_param},
+  router::{error::bad_request, href, page, path_param, query_params},
   view::{View, ViewExt, attributes, class, view},
 };
 
 use crate::app::store::queries::{
-  category_label, count_collection_products, format_price,
+  STOREFRONT_PAGE_SIZE, category_label, clamp_catalog_page,
+  count_collection_products, count_products, format_price,
   get_collection_by_slug, list_products,
 };
 use crate::components::badge::{BadgeVariant, badge};
@@ -19,8 +20,16 @@ use crate::components::breadcrumb::{
 use crate::components::button::{ButtonSize, ButtonVariant, button_variants};
 use crate::components::card::{card, card_footer, card_header, card_title};
 use crate::components::container::container;
+use crate::components::pagination::{
+  pagination, pagination_content, pagination_item,
+};
 
 path_param!(pub(crate) slug);
+
+#[query_params(error = bad_request)]
+struct CollectionQuery {
+  page: Option<i64>,
+}
 
 #[page]
 pub async fn page(cx: &Cx) -> Result<impl View> {
@@ -45,8 +54,40 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     };
 
   let product_count = count_collection_products(pool, &collection.id).await?;
-  let products =
-    list_products(pool, None, None, false, true, Some(slug)).await?;
+  let query = query_params::<CollectionQuery>(cx)
+    .map_err(|err| bad_request(format!("consulta inválida: {err}")))?;
+  let mut page_num = clamp_catalog_page(query.page.unwrap_or(1));
+  let page_size = STOREFRONT_PAGE_SIZE;
+  let total = count_products(pool, None, None, false, true, Some(slug)).await?;
+  let total_pages = if total == 0 {
+    0
+  } else {
+    (total + page_size - 1) / page_size
+  };
+  if total_pages > 0 && page_num > total_pages {
+    page_num = total_pages;
+  }
+  let products = list_products(
+    pool,
+    None,
+    None,
+    false,
+    true,
+    Some(slug),
+    page_size,
+    (page_num - 1) * page_size,
+  )
+  .await?;
+  let show_pagination = total_pages > 1;
+  let has_prev = page_num > 1;
+  let has_next = total_pages > 0 && page_num < total_pages;
+  let page_label = if total_pages == 0 {
+    "Página 1 de 1".to_string()
+  } else {
+    format!("Página {page_num} de {total_pages}")
+  };
+  let prev_href = format!("?page={}", page_num - 1);
+  let next_href = format!("?page={}", page_num + 1);
   let store = crate::app::utils::object_store(cx);
   let products =
     crate::app::admin::produtos::resolve_summary_images(&store, products).await;
@@ -112,6 +153,29 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                     )
                 }
             </div>
+            if show_pagination {
+                pagination(
+                    pagination_content(
+                        if has_prev {
+                            pagination_item(
+                                <a href=(prev_href) class=(button_variants(ButtonVariant::Ghost, ButtonSize::Md))>
+                                    "Anterior"
+                                </a>
+                            )
+                        }
+                        pagination_item(
+                            <span class="px-3 text-sm text-muted-foreground">(page_label)</span>
+                        )
+                        if has_next {
+                            pagination_item(
+                                <a href=(next_href) class=(button_variants(ButtonVariant::Ghost, ButtonSize::Md))>
+                                    "Próxima"
+                                </a>
+                            )
+                        }
+                    )
+                )
+            }
         )
     }.boxed())
 }

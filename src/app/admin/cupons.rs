@@ -836,8 +836,8 @@ fn validate_create(body: &CreateCouponForm) -> Result<ValidCoupon, String> {
   if discount_type == "percent" && !(1..=50).contains(&discount_value) {
     return Err("Percentual deve ser entre 1 e 50.".to_string());
   }
-  if discount_type == "fixed" && discount_value <= 0 {
-    return Err("Valor do desconto deve ser maior que zero.".to_string());
+  if discount_type == "fixed" && !(1..=50_000).contains(&discount_value) {
+    return Err("Valor fixo deve ser entre 1 e 50000 centavos.".to_string());
   }
 
   let min_subtotal_cents = if form_text(&body.min_subtotal_cents).is_empty() {

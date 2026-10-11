@@ -47,6 +47,22 @@ async fn sign_up_sign_in_get_session_sign_out() {
 }
 
 #[tokio::test]
+async fn sign_up_existing_email_does_not_enumerate() {
+  let (_pool, router) = pool_and_router().await;
+  let email = unique_email("exists");
+  let password = "Harbor-Violet-Tiger-4821-Lantern!";
+  let first = sign_up(&router, "First", &email, password).await;
+  assert_eq!(first.status, StatusCode::OK);
+  let again = sign_up(&router, "Second", &email, password).await;
+  assert_eq!(again.status, StatusCode::BAD_REQUEST, "{:?}", again.json);
+  let body = again.json.to_string();
+  assert!(
+    !body.to_lowercase().contains("already exists"),
+    "leaked existence: {body}"
+  );
+}
+
+#[tokio::test]
 async fn sign_in_wrong_password_is_unauthorized() {
   let (_pool, router) = pool_and_router().await;
   let email = unique_email("wrong-pw");

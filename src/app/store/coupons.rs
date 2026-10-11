@@ -8,9 +8,9 @@ pub struct CouponRow {
   pub id: Uuid,
   pub code: String,
   pub discount_type: String,
-  pub discount_value: i32,
-  pub min_subtotal_cents: i32,
-  pub max_discount_cents: Option<i32>,
+  pub discount_value: i64,
+  pub min_subtotal_cents: i64,
+  pub max_discount_cents: Option<i64>,
   pub active: bool,
   pub starts_at: Option<time::OffsetDateTime>,
   pub expires_at: Option<time::OffsetDateTime>,
@@ -43,7 +43,7 @@ impl CouponRow {
 ///   `min(max_discount_cents if Some, subtotal).max(0)`.
 /// - Unknown `discount_type` => `0`.
 /// - Uses `i64` intermediates to avoid overflow.
-pub fn calc_coupon_discount(coupon: &CouponRow, subtotal_cents: i32) -> i32 {
+pub fn calc_coupon_discount(coupon: &CouponRow, subtotal_cents: i64) -> i64 {
   if subtotal_cents <= 0 {
     return 0;
   }
@@ -53,13 +53,12 @@ pub fn calc_coupon_discount(coupon: &CouponRow, subtotal_cents: i32) -> i32 {
   match coupon.discount_type.as_str() {
     "fixed" => coupon.discount_value.min(subtotal_cents).max(0),
     "percent" => {
-      let subtotal = subtotal_cents as i64;
-      let value = coupon.discount_value as i64;
-      let mut discount = (subtotal * value) / 100;
+      let mut discount =
+        subtotal_cents.saturating_mul(coupon.discount_value) / 100;
       if let Some(cap) = coupon.max_discount_cents {
-        discount = discount.min(cap as i64);
+        discount = discount.min(cap);
       }
-      discount.min(subtotal).max(0) as i32
+      discount.min(subtotal_cents).max(0)
     }
     _ => 0,
   }
@@ -68,7 +67,7 @@ pub fn calc_coupon_discount(coupon: &CouponRow, subtotal_cents: i32) -> i32 {
 pub struct ResolvedCoupon {
   pub id: Uuid,
   pub code: String,
-  pub discount_cents: i32,
+  pub discount_cents: i64,
 }
 
 pub enum CouponReject {
@@ -89,7 +88,10 @@ impl From<sqlx::Error> for CouponReject {
 /// restriction (when the coupon has any `coupon_assignments` rows only the
 /// assigned logged-in user may use it — guests are rejected), global
 /// `COUNT(*) vs effective_max_uses` (`unique` counts as 1 even when
-/// `max_uses` is NULL), and per-user `COUNT(*) vs per_user_limit`.
+/// `max_uses` is NULL), and per-identity `COUNT(*) vs per_user_limit`
+/// keyed by `COALESCE(user_id::text, lower(guest_email))`. Active
+/// redemptions only (`refunded_at IS NULL`). Missing identity on a
+/// per-user coupon is a reject (login or checkout email).
 ///
 /// Discount math is shared via [`calc_coupon_discount`]. Shipping is computed
 /// on the pre-discount subtotal by the caller. Pass `for_update = true`
@@ -97,8 +99,9 @@ impl From<sqlx::Error> for CouponReject {
 pub async fn resolve_coupon(
   tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
   raw_code: &str,
-  subtotal_cents: i32,
+  subtotal_cents: i64,
   user_id: Option<Uuid>,
+  guest_email: Option<&str>,
   for_update: bool,
 ) -> Result<Option<ResolvedCoupon>, CouponReject> {
   let code = raw_code.trim();
@@ -175,7 +178,8 @@ pub async fn resolve_coupon(
 
   if let Some(cap) = coupon.effective_max_uses() {
     let global_redemptions: i64 = sqlx::query_scalar(
-      "SELECT COUNT(*) FROM coupon_redemptions WHERE coupon_id = $1",
+      "SELECT COUNT(*) FROM coupon_redemptions
+       WHERE coupon_id = $1 AND refunded_at IS NULL",
     )
     .bind(coupon_id)
     .fetch_one(&mut **tx)
@@ -187,19 +191,32 @@ pub async fn resolve_coupon(
     }
   }
 
-  if let Some(uid) = user_id {
-    let personal_redemptions: i64 = sqlx::query_scalar(
-      "SELECT COUNT(*) FROM coupon_redemptions WHERE coupon_id = $1 AND user_id = $2",
-    )
-    .bind(coupon_id)
-    .bind(uid)
-    .fetch_one(&mut **tx)
-    .await?;
-    if personal_redemptions >= i64::from(coupon.per_user_limit) {
-      return Err(CouponReject::Invalid(
-        "Você já utilizou este cupom o máximo de vezes permitido.".to_string(),
-      ));
-    }
+  let identity = user_id.map(|id| id.to_string()).or_else(|| {
+    guest_email
+      .map(str::trim)
+      .filter(|email| !email.is_empty())
+      .map(|email| email.to_ascii_lowercase())
+  });
+  let Some(identity) = identity else {
+    return Err(CouponReject::Invalid(
+      "Entre para usar este cupom, ou informe seu e-mail no checkout."
+        .to_string(),
+    ));
+  };
+  let personal_redemptions: i64 = sqlx::query_scalar(
+    "SELECT COUNT(*) FROM coupon_redemptions
+     WHERE coupon_id = $1
+       AND refunded_at IS NULL
+       AND COALESCE(user_id::text, lower(guest_email)) = $2",
+  )
+  .bind(coupon_id)
+  .bind(&identity)
+  .fetch_one(&mut **tx)
+  .await?;
+  if personal_redemptions >= i64::from(coupon.per_user_limit) {
+    return Err(CouponReject::Invalid(
+      "Você já utilizou este cupom o máximo de vezes permitido.".to_string(),
+    ));
   }
 
   Ok(Some(ResolvedCoupon {
@@ -209,6 +226,20 @@ pub async fn resolve_coupon(
   }))
 }
 
+pub async fn restore_redemption_for_order(
+  tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+  order_id: Uuid,
+) -> Result<(), sqlx::Error> {
+  sqlx::query(
+    "UPDATE coupon_redemptions SET refunded_at = now()
+     WHERE order_id = $1 AND refunded_at IS NULL",
+  )
+  .bind(order_id)
+  .execute(&mut **tx)
+  .await?;
+  Ok(())
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -216,9 +247,9 @@ mod tests {
 
   fn coupon(
     discount_type: &str,
-    discount_value: i32,
-    min_subtotal_cents: i32,
-    max_discount_cents: Option<i32>,
+    discount_value: i64,
+    min_subtotal_cents: i64,
+    max_discount_cents: Option<i64>,
   ) -> CouponRow {
     CouponRow {
       id: Uuid::now_v7(),
@@ -285,9 +316,9 @@ mod tests {
   struct NewCoupon {
     code: String,
     discount_type: String,
-    discount_value: i32,
-    min_subtotal_cents: i32,
-    max_discount_cents: Option<i32>,
+    discount_value: i64,
+    min_subtotal_cents: i64,
+    max_discount_cents: Option<i64>,
     active: bool,
     starts_at: Option<time::OffsetDateTime>,
     expires_at: Option<time::OffsetDateTime>,
@@ -393,15 +424,17 @@ mod tests {
     coupon_id: Uuid,
     user_id: Option<Uuid>,
     order_id: Uuid,
+    guest_email: Option<&str>,
   ) {
     sqlx::query(
-      "INSERT INTO coupon_redemptions (id, coupon_id, user_id, order_id)
-       VALUES ($1, $2, $3, $4)",
+      "INSERT INTO coupon_redemptions (id, coupon_id, user_id, order_id, guest_email)
+       VALUES ($1, $2, $3, $4, $5)",
     )
     .bind(Uuid::now_v7())
     .bind(coupon_id)
     .bind(user_id)
     .bind(order_id)
+    .bind(guest_email)
     .execute(&mut **tx)
     .await
     .expect("insert redemption");
@@ -436,7 +469,8 @@ mod tests {
     let pool = crate::test_support::fresh_pool().await;
     let mut tx = pool.begin().await.expect("begin tx");
 
-    let result = resolve_coupon(&mut tx, "   ", 5_000, None, false).await;
+    let result =
+      resolve_coupon(&mut tx, "   ", 5_000, None, Some("g@x.co"), false).await;
     assert!(matches!(result, Ok(None)));
 
     tx.rollback().await.expect("rollback");
@@ -448,8 +482,15 @@ mod tests {
     let mut tx = pool.begin().await.expect("begin tx");
 
     let unknown = unwrap_invalid(
-      resolve_coupon(&mut tx, &unique_code("missing"), 5_000, None, false)
-        .await,
+      resolve_coupon(
+        &mut tx,
+        &unique_code("missing"),
+        5_000,
+        None,
+        Some("g@x.co"),
+        false,
+      )
+      .await,
     );
     assert_eq!(unknown, "Cupom inválido.");
 
@@ -457,8 +498,9 @@ mod tests {
     let mut coupon = new_coupon(&code);
     coupon.active = false;
     insert_coupon(&mut tx, &coupon).await;
-    let inactive =
-      unwrap_invalid(resolve_coupon(&mut tx, &code, 5_000, None, false).await);
+    let inactive = unwrap_invalid(
+      resolve_coupon(&mut tx, &code, 5_000, None, Some("g@x.co"), false).await,
+    );
     assert_eq!(inactive, "Cupom inválido.");
 
     tx.rollback().await.expect("rollback");
@@ -475,7 +517,8 @@ mod tests {
     future.starts_at = Some(now + time::Duration::hours(1));
     insert_coupon(&mut tx, &future).await;
     let message = unwrap_invalid(
-      resolve_coupon(&mut tx, &future_code, 5_000, None, false).await,
+      resolve_coupon(&mut tx, &future_code, 5_000, None, Some("g@x.co"), false)
+        .await,
     );
     assert_eq!(message, "Este cupom ainda não está válido.");
 
@@ -484,7 +527,15 @@ mod tests {
     expired.expires_at = Some(now - time::Duration::hours(1));
     insert_coupon(&mut tx, &expired).await;
     let message = unwrap_invalid(
-      resolve_coupon(&mut tx, &expired_code, 5_000, None, false).await,
+      resolve_coupon(
+        &mut tx,
+        &expired_code,
+        5_000,
+        None,
+        Some("g@x.co"),
+        false,
+      )
+      .await,
     );
     assert_eq!(message, "Cupom expirado.");
 
@@ -501,8 +552,9 @@ mod tests {
     coupon.min_subtotal_cents = 15_000;
     insert_coupon(&mut tx, &coupon).await;
 
-    let message =
-      unwrap_invalid(resolve_coupon(&mut tx, &code, 1_000, None, false).await);
+    let message = unwrap_invalid(
+      resolve_coupon(&mut tx, &code, 1_000, None, Some("g@x.co"), false).await,
+    );
     assert_eq!(
       message,
       format!(
@@ -531,6 +583,7 @@ mod tests {
         &fixed_code.to_lowercase(),
         subtotal,
         None,
+        Some("g@x.co"),
         false,
       )
       .await,
@@ -553,6 +606,7 @@ mod tests {
         &percent_code.to_lowercase(),
         subtotal,
         None,
+        Some("g@x.co"),
         false,
       )
       .await,
@@ -574,7 +628,8 @@ mod tests {
     let open_code = unique_code("open");
     insert_coupon(&mut tx, &new_coupon(&open_code)).await;
     let resolved = unwrap_coupon(
-      resolve_coupon(&mut tx, &open_code, 5_000, None, false).await,
+      resolve_coupon(&mut tx, &open_code, 5_000, None, Some("g@x.co"), false)
+        .await,
     );
     assert_eq!(resolved.code, open_code);
 
@@ -592,7 +647,15 @@ mod tests {
     .expect("assign coupon");
 
     let guest = unwrap_invalid(
-      resolve_coupon(&mut tx, &restricted_code, 5_000, None, false).await,
+      resolve_coupon(
+        &mut tx,
+        &restricted_code,
+        5_000,
+        None,
+        Some("g@x.co"),
+        false,
+      )
+      .await,
     );
     assert_eq!(
       guest,
@@ -600,14 +663,28 @@ mod tests {
     );
 
     let rejected = unwrap_invalid(
-      resolve_coupon(&mut tx, &restricted_code, 5_000, Some(outsider), false)
-        .await,
+      resolve_coupon(
+        &mut tx,
+        &restricted_code,
+        5_000,
+        Some(outsider),
+        None,
+        false,
+      )
+      .await,
     );
     assert_eq!(rejected, "Este cupom não está disponível para a sua conta.");
 
     let accepted = unwrap_coupon(
-      resolve_coupon(&mut tx, &restricted_code, 5_000, Some(member), false)
-        .await,
+      resolve_coupon(
+        &mut tx,
+        &restricted_code,
+        5_000,
+        Some(member),
+        None,
+        false,
+      )
+      .await,
     );
     assert_eq!(accepted.code, restricted_code);
 
@@ -625,9 +702,10 @@ mod tests {
     unique.max_uses = None;
     let unique_id = insert_coupon(&mut tx, &unique).await;
     let order_id = insert_order(&mut tx, None).await;
-    insert_redemption(&mut tx, unique_id, None, order_id).await;
+    insert_redemption(&mut tx, unique_id, None, order_id, Some("g@x.co")).await;
     let message = unwrap_invalid(
-      resolve_coupon(&mut tx, &once_code, 5_000, None, false).await,
+      resolve_coupon(&mut tx, &once_code, 5_000, None, Some("g@x.co"), false)
+        .await,
     );
     assert_eq!(message, "Este cupom atingiu o limite de utilizações.");
 
@@ -638,10 +716,12 @@ mod tests {
     let capped_id = insert_coupon(&mut tx, &capped).await;
     for _ in 0..2 {
       let order_id = insert_order(&mut tx, None).await;
-      insert_redemption(&mut tx, capped_id, None, order_id).await;
+      insert_redemption(&mut tx, capped_id, None, order_id, Some("g@x.co"))
+        .await;
     }
     let message = unwrap_invalid(
-      resolve_coupon(&mut tx, &capped_code, 5_000, None, false).await,
+      resolve_coupon(&mut tx, &capped_code, 5_000, None, Some("g@x.co"), false)
+        .await,
     );
     assert_eq!(message, "Este cupom atingiu o limite de utilizações.");
 
@@ -649,13 +729,15 @@ mod tests {
     let mut open = new_coupon(&open_code);
     open.usage_type = "unlimited".to_string();
     open.max_uses = None;
+    open.per_user_limit = 10;
     let open_id = insert_coupon(&mut tx, &open).await;
     for _ in 0..3 {
       let order_id = insert_order(&mut tx, None).await;
-      insert_redemption(&mut tx, open_id, None, order_id).await;
+      insert_redemption(&mut tx, open_id, None, order_id, Some("g@x.co")).await;
     }
     let resolved = unwrap_coupon(
-      resolve_coupon(&mut tx, &open_code, 5_000, None, false).await,
+      resolve_coupon(&mut tx, &open_code, 5_000, None, Some("g@x.co"), false)
+        .await,
     );
     assert_eq!(resolved.code, open_code);
 
@@ -663,7 +745,7 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn per_user_cap_applies_only_when_user_id_is_some() {
+  async fn per_user_cap_keys_guest_email_and_requires_identity() {
     let pool = crate::test_support::fresh_pool().await;
     let mut tx = pool.begin().await.expect("begin tx");
 
@@ -675,21 +757,56 @@ mod tests {
 
     let user = insert_user(&mut tx).await;
     let order_id = insert_order(&mut tx, Some(user)).await;
-    insert_redemption(&mut tx, coupon_id, Some(user), order_id).await;
+    insert_redemption(&mut tx, coupon_id, Some(user), order_id, None).await;
 
     let message = unwrap_invalid(
-      resolve_coupon(&mut tx, &code, 5_000, Some(user), false).await,
+      resolve_coupon(&mut tx, &code, 5_000, Some(user), None, false).await,
     );
     assert_eq!(
       message,
       "Você já utilizou este cupom o máximo de vezes permitido."
     );
 
+    let no_id = unwrap_invalid(
+      resolve_coupon(&mut tx, &code, 5_000, None, None, false).await,
+    );
+    assert_eq!(
+      no_id,
+      "Entre para usar este cupom, ou informe seu e-mail no checkout."
+    );
+
     let guest_order = insert_order(&mut tx, None).await;
-    insert_redemption(&mut tx, coupon_id, None, guest_order).await;
-    let guest =
-      unwrap_coupon(resolve_coupon(&mut tx, &code, 5_000, None, false).await);
-    assert_eq!(guest.code, code);
+    insert_redemption(
+      &mut tx,
+      coupon_id,
+      None,
+      guest_order,
+      Some("guest@x.co"),
+    )
+    .await;
+    let same_guest = unwrap_invalid(
+      resolve_coupon(&mut tx, &code, 5_000, None, Some("guest@x.co"), false)
+        .await,
+    );
+    assert_eq!(
+      same_guest,
+      "Você já utilizou este cupom o máximo de vezes permitido."
+    );
+
+    let other = unwrap_coupon(
+      resolve_coupon(&mut tx, &code, 5_000, None, Some("other@x.co"), false)
+        .await,
+    );
+    assert_eq!(other.code, code);
+
+    restore_redemption_for_order(&mut tx, guest_order)
+      .await
+      .expect("restore");
+    let after_restore = unwrap_coupon(
+      resolve_coupon(&mut tx, &code, 5_000, None, Some("guest@x.co"), false)
+        .await,
+    );
+    assert_eq!(after_restore.code, code);
 
     tx.rollback().await.expect("rollback");
   }
@@ -703,8 +820,10 @@ mod tests {
     let coupon = new_coupon(&code);
     let id = insert_coupon(&mut tx, &coupon).await;
     let subtotal = 8_000;
-    let resolved =
-      unwrap_coupon(resolve_coupon(&mut tx, &code, subtotal, None, true).await);
+    let resolved = unwrap_coupon(
+      resolve_coupon(&mut tx, &code, subtotal, None, Some("g@x.co"), true)
+        .await,
+    );
     assert_eq!(resolved.code, code);
     assert_eq!(
       resolved.discount_cents,

@@ -36,9 +36,8 @@ fn clamp_order_query(raw: &str) -> String {
 
 fn clamp_order_status(raw: &str) -> String {
   match raw.trim() {
-    "pending_payment" | "paid" | "cancelled" | "delivered" => {
-      raw.trim().to_string()
-    }
+    "pending_payment" | "paid" | "shipped" | "delivered" | "cancelled"
+    | "refunded" => raw.trim().to_string(),
     _ => "all".to_string(),
   }
 }

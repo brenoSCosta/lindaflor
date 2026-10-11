@@ -1,5 +1,6 @@
-use http::StatusCode;
-use test_support::{json_get, pool_and_router};
+use http::{Method, Request, StatusCode, header};
+use test_support::{body_bytes, json_get, pool_and_router};
+use topcoat::router::Body;
 
 #[tokio::test]
 async fn health_check_returns_ok() {
@@ -32,4 +33,19 @@ async fn readyz_returns_503_when_database_degraded() {
   );
   assert_eq!(response.json["status"], "degraded");
   assert_eq!(response.json["database"], "degraded");
+}
+
+#[tokio::test]
+async fn default_body_limit_rejects_over_1mb() {
+  let (_pool, router) = pool_and_router().await;
+  let req = Request::builder()
+    .method(Method::POST)
+    .uri("/api/auth/sign-in/email")
+    .header(header::CONTENT_TYPE, "application/json")
+    .body(Body::from(vec![b'x'; 1024 * 1024 + 1]))
+    .expect("request");
+  let response = router.handle(req).await;
+  assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+  let body = String::from_utf8_lossy(&body_bytes(response).await).into_owned();
+  assert!(!body.to_lowercase().contains("sqlx"), "{body}");
 }

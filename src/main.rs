@@ -46,6 +46,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   // (30s shutdown timeout). Close the pool afterwards so in-flight queries
   // finish before the process exits.
   let pool_for_shutdown = pool.clone();
+  let sweep_pool = pool.clone();
+  let sweep_secs = lindaflor::config::reservation_sweep_secs();
+  tokio::spawn(async move {
+    let mut interval =
+      tokio::time::interval(std::time::Duration::from_secs(sweep_secs));
+    loop {
+      interval.tick().await;
+      if let Err(error) =
+        lindaflor::app::store::order::expire_pending_reservations(&sweep_pool)
+          .await
+      {
+        tracing::error!(error = %error, "reservation sweep failed");
+      }
+    }
+  });
   topcoat::serve(listener, lindaflor::app::router(pool, valkey_conn, storage))
     .await?;
   pool_for_shutdown.close().await;

@@ -123,8 +123,7 @@ pub async fn exchange_code(
   code: &str,
 ) -> Result<GoogleTokenResponse, GoogleOAuthError> {
   let redirect_uri = config.redirect_uri();
-  let client = reqwest::Client::new();
-  let response = client
+  let response = crate::http_client::shared_http_client()
     .post(GOOGLE_TOKEN_URL)
     .header("Accept", "application/json")
     .form(&[
@@ -140,7 +139,8 @@ pub async fn exchange_code(
   let status = response.status();
   let body = response.text().await?;
   if !status.is_success() {
-    return Err(GoogleOAuthError::Token(format!("status {status}: {body}")));
+    tracing::error!(status = %status, "google token exchange failed");
+    return Err(GoogleOAuthError::Token(format!("status {status}")));
   }
 
   serde_json::from_str(&body)
@@ -151,8 +151,7 @@ pub async fn exchange_code(
 pub async fn fetch_userinfo(
   access_token: &str,
 ) -> Result<GoogleUserInfo, GoogleOAuthError> {
-  let client = reqwest::Client::new();
-  let response = client
+  let response = crate::http_client::shared_http_client()
     .get(GOOGLE_USERINFO_URL)
     .bearer_auth(access_token)
     .header("Accept", "application/json")
@@ -162,9 +161,8 @@ pub async fn fetch_userinfo(
   let status = response.status();
   let body = response.text().await?;
   if !status.is_success() {
-    return Err(GoogleOAuthError::UserInfo(format!(
-      "status {status}: {body}"
-    )));
+    tracing::error!(status = %status, "google userinfo failed");
+    return Err(GoogleOAuthError::UserInfo(format!("status {status}")));
   }
 
   serde_json::from_str(&body)

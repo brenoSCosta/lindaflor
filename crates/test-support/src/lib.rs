@@ -14,7 +14,10 @@ use sqlx::postgres::PgPoolOptions;
 use tokio::sync::OnceCell;
 use topcoat::asset::RouterBuilderAssetExt;
 use topcoat::cookie::RouterBuilderCookieExt;
-use topcoat::router::{Body, OriginPolicy, Router, RouterBuilderDiscoverExt};
+use topcoat::router::{
+  Body, BodyLimit, OriginPolicy, Router, RouterBuilder,
+  RouterBuilderDiscoverExt,
+};
 use topcoat::session::RouterBuilderSessionExt;
 use uuid::Uuid;
 
@@ -123,6 +126,14 @@ fn install_test_rate_limit_env() {
   }
 }
 
+fn apply_body_limits(builder: RouterBuilder) -> RouterBuilder {
+  builder
+    .layer(BodyLimit::max(1024 * 1024))
+    .layer(BodyLimit::max(2 * 1024 * 1024).at("/settings/avatar"))
+    .layer(BodyLimit::max(20 * 1024 * 1024).at("/admin/produtos/create"))
+    .layer(BodyLimit::max(20 * 1024 * 1024).at("/admin/produtos/update"))
+}
+
 pub fn build_auth_router(pool: PgPool) -> Router {
   unsafe { std::env::set_var("APP_ENV", "development") };
   install_test_rate_limit_env();
@@ -173,6 +184,7 @@ pub fn build_auth_router(pool: PgPool) -> Router {
   // Mirror src/app.rs: fallback outermost among app layers, tower last.
   builder =
     lindaflor::security_headers::apply_security_headers_fallback(builder);
+  builder = apply_body_limits(builder);
   builder = builder
     .layer(RateLimitLayer::global(DEFAULT_GLOBAL_PER_MIN))
     .layer(RateLimitLayer::scoped(
@@ -313,6 +325,7 @@ pub fn build_prod_router(pool: PgPool) -> Router {
   builder = builder.origin_policy(origin_policy);
   builder =
     lindaflor::security_headers::apply_security_headers_fallback(builder);
+  builder = apply_body_limits(builder);
   builder = builder
     .layer(RateLimitLayer::global(DEFAULT_GLOBAL_PER_MIN))
     .layer(RateLimitLayer::scoped(

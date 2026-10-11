@@ -292,8 +292,7 @@ async fn exchange_code_with_verifier(
   code_verifier: &str,
 ) -> Result<GoogleTokenResponse, GoogleOAuthError> {
   let redirect_uri = config.redirect_uri();
-  let client = reqwest::Client::new();
-  let response = client
+  let response = crate::http_client::shared_http_client()
     .post(GOOGLE_TOKEN_URL)
     .header("Accept", "application/json")
     .form(&[
@@ -310,7 +309,8 @@ async fn exchange_code_with_verifier(
   let status = response.status();
   let body = response.text().await?;
   if !status.is_success() {
-    return Err(GoogleOAuthError::Token(format!("status {status}: {body}")));
+    tracing::error!(status = %status, "google token exchange failed");
+    return Err(GoogleOAuthError::Token(format!("status {status}")));
   }
 
   serde_json::from_str(&body)

@@ -272,8 +272,8 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   }.boxed())
 }
 
-fn format_price_input(cents: i32) -> String {
-  format!("{:.2}", f64::from(cents) / 100.0)
+fn format_price_input(cents: i64) -> String {
+  format!("{:.2}", cents as f64 / 100.0)
 }
 
 #[route(POST "/admin/produtos/update")]

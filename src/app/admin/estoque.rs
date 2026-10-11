@@ -1,15 +1,19 @@
+use serde::Deserialize;
 use sqlx::PgPool;
 use topcoat::{
   Result,
   context::Cx,
   context::app_context,
-  router::{page, query_params},
+  router::{content::Form, error::bad_request, page, query_params},
   runtime::{Event, shard, signal},
   view::{View, attributes, view},
 };
+use uuid::Uuid;
 
 use crate::app::auth_helpers::require_admin;
+use crate::app::store::inventory::adjust_stock;
 use crate::components::badge::{BadgeVariant, badge};
+use crate::components::button::{ButtonSize, ButtonVariant, button};
 use crate::components::card::{card, card_content, card_header, card_title};
 use crate::components::container::container;
 use crate::components::input::input;
@@ -20,6 +24,13 @@ use crate::components::table::{
 #[query_params(error = bad_request)]
 struct StockQuery {
   q: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct AdjustStockForm {
+  inventory_id: String,
+  delta: String,
+  reason: String,
 }
 
 const STOCK_QUERY_MAX: usize = 80;
@@ -90,6 +101,7 @@ async fn stock_directory(cx: &Cx, q: String) -> Result<impl View> {
                                   table_head("Qtd")
                                   table_head("Reservado")
                                   table_head("Disponível")
+                                  table_head("Ajuste")
                               )
                           )
                           table_body(
@@ -104,6 +116,31 @@ async fn stock_directory(cx: &Cx, q: String) -> Result<impl View> {
                                       table_cell((item.reserved))
                                       table_cell(
                                           <span class="font-medium">(item.quantity - item.reserved)</span>
+                                      )
+                                      table_cell(
+                                          <form method="post" class="flex flex-wrap items-center gap-2">
+                                              <input type="hidden" name="inventory_id" value=(item.id.to_string())>
+                                              input(attrs: attributes! {
+                                                  type="number"
+                                                  name="delta"
+                                                  required=""
+                                                  placeholder="Δ"
+                                                  class="w-20"
+                                              })
+                                              input(attrs: attributes! {
+                                                  type="text"
+                                                  name="reason"
+                                                  required=""
+                                                  placeholder="Motivo"
+                                                  class="w-36"
+                                              })
+                                              button(
+                                                  variant: ButtonVariant::Outline,
+                                                  size: ButtonSize::Sm,
+                                                  attrs: attributes! { type="submit" },
+                                                  "Ajustar"
+                                              )
+                                          </form>
                                       )
                                   )
                               }
@@ -147,16 +184,53 @@ async fn stock_directory(cx: &Cx, q: String) -> Result<impl View> {
   })
 }
 
-#[page]
-pub async fn page(cx: &Cx) -> Result<impl View> {
-  let _actor = require_admin(cx).await?;
+#[page([GET, POST])]
+pub async fn page(
+  cx: &Cx,
+  body: Option<Form<AdjustStockForm>>,
+) -> Result<impl View> {
+  let actor = require_admin(cx).await?;
+  if let Some(Form(form)) = body {
+    let inventory_id = Uuid::parse_str(form.inventory_id.trim())
+      .map_err(|_| bad_request("inventory id inválido"))?;
+    let delta: i32 = form
+      .delta
+      .trim()
+      .parse()
+      .map_err(|_| bad_request("delta inválido"))?;
+    let reason = form.reason.trim();
+    if reason.is_empty() || reason.chars().count() > 200 {
+      return Err(bad_request("informe um motivo (até 200 caracteres)").into());
+    }
+    let pool = app_context::<PgPool>(cx);
+    let mut tx = pool.begin().await?;
+    let warehouse_id = adjust_stock(&mut tx, inventory_id, delta)
+      .await
+      .map_err(|error| topcoat::Error::from(bad_request(error.to_string())))?;
+    crate::audit::record_audit_event(
+      &mut *tx,
+      "inventory",
+      &inventory_id.to_string(),
+      "inventory",
+      inventory_id,
+      Some(actor.user.id),
+      Some(actor.user.name.as_str()),
+      serde_json::json!({
+        "delta": delta,
+        "reason": reason,
+        "warehouse_id": warehouse_id,
+      }),
+    )
+    .await?;
+    tx.commit().await?;
+  }
   let query = query_params::<StockQuery>(cx)?;
   let q = clamp_stock_query(query.q.as_deref().unwrap_or(""));
 
   Ok(view! {
       container(
           <h1 class="text-2xl font-semibold tracking-tight">"Estoque"</h1>
-          <p class="text-muted-foreground">"Saldo por depósito, entradas, transferências e sincronização CSV."</p>
+          <p class="text-muted-foreground">"Saldo por depósito. Use o ajuste para entradas e baixas manuais."</p>
 
           stock_directory(q: q)
       )

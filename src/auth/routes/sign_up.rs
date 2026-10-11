@@ -14,9 +14,10 @@ use uuid::Uuid;
 
 use crate::auth::CREDENTIAL_PROVIDER_ID;
 use crate::auth::password::{hash_password, validate_password};
-use crate::auth::routes::dto::{SessionPayload, client_meta, normalize_email};
+use crate::auth::routes::dto::{SessionPayload, client_meta};
 use crate::auth::session_store;
 use crate::auth::user::{SessionUser, User};
+use crate::auth::validation::{validate_email, validate_name};
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -48,16 +49,11 @@ pub async fn sign_up_email(
   cx: &Cx,
   Json(body): Json<SignUpEmailBody>,
 ) -> Result<(StatusCode, Json<SessionPayload>)> {
-  let name = body.name.trim().to_string();
-  let email = normalize_email(&body.email);
+  let name =
+    validate_name(&body.name).map_err(|err| bad_request(err.to_string()))?;
+  let email =
+    validate_email(&body.email).map_err(|err| bad_request(err.to_string()))?;
   let password = body.password;
-
-  if name.is_empty() {
-    return Err(bad_request("name is required").into());
-  }
-  if email.is_empty() || !email.contains('@') {
-    return Err(bad_request("valid email is required").into());
-  }
   // Defense-in-depth: the service validates authoritatively, but reject
   // weak input here too before any DB work.
   if let Err(err) =
@@ -76,7 +72,7 @@ pub async fn sign_up_email(
   .await?
   .is_some()
   {
-    return Err(bad_request("user already exists").into());
+    return Err(bad_request("unable to complete sign-up").into());
   }
 
   let password_hash = hash_password(&password)?;

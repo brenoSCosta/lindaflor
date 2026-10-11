@@ -17,9 +17,7 @@ use topcoat::{
 
 use crate::auth::CREDENTIAL_PROVIDER_ID;
 use crate::auth::password::verify_password;
-use crate::auth::routes::dto::{
-  SessionPayload, client_meta, normalize_email, random_token,
-};
+use crate::auth::routes::dto::{SessionPayload, client_meta, random_token};
 use crate::auth::routes::two_factor::create_pending_2fa;
 use crate::auth::session_store;
 use crate::auth::user::{SessionUser, User, is_currently_banned};
@@ -64,8 +62,9 @@ pub async fn sign_in_email(
   cx: &Cx,
   Json(body): Json<SignInEmailBody>,
 ) -> Result<(StatusCode, Json<serde_json::Value>)> {
-  let email = normalize_email(&body.email);
-  if email.is_empty() || body.password.is_empty() {
+  let email = crate::auth::validation::validate_email(&body.email)
+    .map_err(|_| bad_request("email and password are required"))?;
+  if body.password.is_empty() {
     return Err(bad_request("email and password are required").into());
   }
 

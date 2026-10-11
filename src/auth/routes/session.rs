@@ -20,6 +20,6 @@ pub async fn get_session(cx: &Cx) -> Result<Json<Option<SessionPayload>>> {
   // `#[memoize(as_ref)]` → `Result<&Option<SessionUser>, &Error>`
   let session = current_user(cx)
     .await
-    .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))?;
+    .map_err(|e| crate::internal_error::internal_error_cx(cx, &e))?;
   Ok(Json(session.as_ref().map(SessionPayload::from)))
 }

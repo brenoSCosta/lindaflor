@@ -71,7 +71,7 @@ pub async fn delete_user(
 
   let session = current_user(cx)
     .await
-    .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))?;
+    .map_err(|e| crate::internal_error::internal_error_cx(cx, &e))?;
   let Some(su) = session.as_ref() else {
     return Err(unauthorized().into());
   };
@@ -117,9 +117,8 @@ pub async fn delete_user(
       let Some(hash) = account.password.as_deref() else {
         return Err(unauthorized().into());
       };
-      let ok = verify_password(pw, hash).map_err(|e| {
-        topcoat::Error::from(std::io::Error::other(e.to_string()))
-      })?;
+      let ok = verify_password(pw, hash)
+        .map_err(|e| crate::internal_error::internal_error(&e))?;
       if !ok {
         return Err(unauthorized().into());
       }
@@ -154,9 +153,8 @@ pub async fn delete_user(
             tf.secret_key_version,
           )
           .map_err(|_| unauthorized())?;
-          verify_code(secret.as_str(), code).map_err(|e| {
-            topcoat::Error::from(std::io::Error::other(e.to_string()))
-          })?
+          verify_code(secret.as_str(), code)
+            .map_err(|e| crate::internal_error::internal_error(&e))?
         }
         None => false,
       }

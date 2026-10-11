@@ -46,7 +46,7 @@ fn now_plus(secs: i64) -> PrimitiveDateTime {
 async fn require_session(cx: &Cx) -> Result<SessionUser> {
   let session = current_user(cx)
     .await
-    .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))?;
+    .map_err(|e| crate::internal_error::internal_error_cx(cx, &e))?;
   match session.as_ref() {
     Some(su) => Ok(su.clone()),
     None => Err(unauthorized().into()),
@@ -256,12 +256,12 @@ async fn hash_backup_codes_async(codes: Vec<String>) -> Result<String> {
   )
   .await
   .map_err(|_| {
-    topcoat::Error::from(std::io::Error::other("backup code hashing timed out"))
+    crate::internal_error::internal_error(&"backup code hashing timed out")
   })?
   .map_err(|_| {
-    topcoat::Error::from(std::io::Error::other("backup code task failed"))
+    crate::internal_error::internal_error(&"backup code task failed")
   })?
-  .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))
+  .map_err(|e| crate::internal_error::internal_error(&e))
 }
 
 async fn consume_backup_code_async(
@@ -360,7 +360,7 @@ pub async fn enable(cx: &Cx) -> Result<Json<EnableTwoFactorResponse>> {
   // Encrypt at enrollment: only this one-time response ever carries the
   // plaintext. Re-POST rotates via DELETE+INSERT below.
   let encrypted = encrypt_secret(&secret)
-    .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))?;
+    .map_err(|e| crate::internal_error::internal_error_cx(cx, &e))?;
   let id = Uuid::now_v7();
 
   sqlx::query!(r#"DELETE FROM two_factor WHERE user_id = $1"#, su.user.id)

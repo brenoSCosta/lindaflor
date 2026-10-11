@@ -68,7 +68,7 @@ pub struct OkStatus {
 pub async fn list_accounts(cx: &Cx) -> Result<Json<Vec<AccountJson>>> {
   let session = current_user(cx)
     .await
-    .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))?;
+    .map_err(|e| crate::internal_error::internal_error_cx(cx, &e))?;
   let Some(su) = session.as_ref() else {
     return Err(unauthorized().into());
   };
@@ -118,7 +118,7 @@ pub async fn link_social(
 ) -> Result<(StatusCode, Json<serde_json::Value>)> {
   let session = current_user(cx)
     .await
-    .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))?;
+    .map_err(|e| crate::internal_error::internal_error_cx(cx, &e))?;
   let Some(su) = session.as_ref() else {
     return Err(unauthorized().into());
   };
@@ -217,7 +217,7 @@ pub async fn unlink_account(
 ) -> Result<Json<OkStatus>> {
   let session = current_user(cx)
     .await
-    .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))?;
+    .map_err(|e| crate::internal_error::internal_error_cx(cx, &e))?;
   let Some(su) = session.as_ref() else {
     return Err(unauthorized().into());
   };

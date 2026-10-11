@@ -68,9 +68,9 @@ pub async fn send_verification_email(
   {
     normalize_email(email)
   } else {
-    let session = current_user(cx).await.map_err(|e| {
-      topcoat::Error::from(std::io::Error::other(e.to_string()))
-    })?;
+    let session = current_user(cx)
+      .await
+      .map_err(|e| crate::internal_error::internal_error(&e))?;
     match session.as_ref() {
       Some(su) => su.user.email.clone(),
       None => return Err(bad_request("email is required").into()),
