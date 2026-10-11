@@ -20,6 +20,7 @@ use crate::auth::service::{
 };
 use crate::auth::session_store;
 use crate::auth::totp::verify_code;
+use crate::auth::totp_crypto::decrypt_row_secret;
 use crate::auth::user::current_user;
 
 const DELETE_TOKEN_TTL_SECS: i64 = 30 * 60;
@@ -89,7 +90,7 @@ pub async fn delete_user(
   .and_then(|r| r.password)
   .is_some_and(|p| !p.is_empty());
   let totp_verified = sqlx::query!(
-    r#"SELECT secret, verified FROM two_factor WHERE user_id = $1"#,
+    r#"SELECT verified FROM two_factor WHERE user_id = $1"#,
     su.user.id,
   )
   .fetch_optional(pool)
@@ -139,15 +140,24 @@ pub async fn delete_user(
       false
     } else {
       let tf = sqlx::query!(
-        r#"SELECT secret FROM two_factor WHERE user_id = $1"#,
+        r#"SELECT secret_nonce, secret_ciphertext, secret_key_version FROM two_factor WHERE user_id = $1"#,
         su.user.id,
       )
       .fetch_optional(pool)
       .await?;
       match tf {
-        Some(tf) => verify_code(&tf.secret, code).map_err(|e| {
-          topcoat::Error::from(std::io::Error::other(e.to_string()))
-        })?,
+        // Fail closed on any decrypt error.
+        Some(tf) => {
+          let secret = decrypt_row_secret(
+            tf.secret_nonce,
+            tf.secret_ciphertext,
+            tf.secret_key_version,
+          )
+          .map_err(|_| unauthorized())?;
+          verify_code(secret.as_str(), code).map_err(|e| {
+            topcoat::Error::from(std::io::Error::other(e.to_string()))
+          })?
+        }
         None => false,
       }
     }

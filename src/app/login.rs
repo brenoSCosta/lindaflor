@@ -10,9 +10,9 @@ use topcoat::{
   view::{View, component, view},
 };
 
+use crate::auth::password::{MAX_PASSWORD_LEN, MIN_PASSWORD_LEN};
 use crate::auth::service::{
-  self, MIN_PASSWORD_LEN, SignInOutcome, portuguese_error_message,
-  set_pending_2fa_cookie,
+  self, SignInOutcome, portuguese_error_message, set_pending_2fa_cookie,
 };
 use crate::components::button::{ButtonVariant, button};
 use crate::components::field::{
@@ -69,8 +69,9 @@ async fn signin_form(
   next: String,
 ) -> Result<impl View> {
   // `len()` on strings is f64 in expr vocabulary (JS number
-  // semantics), so keep the threshold as f64 for same-type comparison.
+  // semantics), so keep the thresholds as f64 for same-type comparison.
   let min_len = MIN_PASSWORD_LEN as f64;
+  let max_len = MAX_PASSWORD_LEN as f64;
   let email = signal(cx, || default_email.clone());
   let email_touched = signal(cx, || false);
   let email_error = expr!({
@@ -98,6 +99,8 @@ async fn signin_form(
       "Informe a senha.".to_owned()
     } else if value.len() < min_len {
       "A senha deve ter pelo menos 8 caracteres.".to_owned()
+    } else if value.len() > max_len {
+      "A senha deve ter no máximo 128 caracteres.".to_owned()
     } else {
       "".to_owned()
     }
@@ -112,6 +115,8 @@ async fn signin_form(
     } else if password_val.is_empty() {
       true
     } else if password_val.len() < min_len {
+      true
+    } else if password_val.len() > max_len {
       true
     } else {
       false
@@ -170,6 +175,7 @@ async fn signin_form(
                       name="password"
                       type="password"
                       autocomplete="current-password"
+                      maxlength="128"
                       placeholder="Senha"
                       aria-describedby="password-error"
                   }
@@ -203,6 +209,7 @@ async fn signup_form(
   next: String,
 ) -> Result<impl View> {
   let min_len = MIN_PASSWORD_LEN as f64;
+  let max_len = MAX_PASSWORD_LEN as f64;
   let name = signal(cx, || default_name.clone());
   let name_touched = signal(cx, || false);
   let name_error = expr!({
@@ -244,6 +251,8 @@ async fn signup_form(
       "Informe a senha.".to_owned()
     } else if value.len() < min_len {
       "A senha deve ter pelo menos 8 caracteres.".to_owned()
+    } else if value.len() > max_len {
+      "A senha deve ter no máximo 128 caracteres.".to_owned()
     } else {
       "".to_owned()
     }
@@ -261,6 +270,8 @@ async fn signup_form(
     } else if password_val.is_empty() {
       true
     } else if password_val.len() < min_len {
+      true
+    } else if password_val.len() > max_len {
       true
     } else {
       false
@@ -342,6 +353,7 @@ async fn signup_form(
                       name="password"
                       type="password"
                       autocomplete="new-password"
+                      maxlength="128"
                       placeholder="Senha"
                       aria-describedby="password-error"
                   }

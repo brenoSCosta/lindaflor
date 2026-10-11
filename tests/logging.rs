@@ -232,7 +232,13 @@ async fn signed_in_request_enriches_user_fields() {
     router_with_logging(pool, RequestLoggingLayer::new(1.0, 1000, sink));
 
   let email = unique_email("log");
-  let signed = sign_up(&router, "Log User", &email, "password12").await;
+  let signed = sign_up(
+    &router,
+    "Log User",
+    &email,
+    "Harbor-Violet-Tiger-4821-Lantern!",
+  )
+  .await;
   assert_eq!(signed.status, StatusCode::OK, "{:?}", signed.json);
   let cookie = signed.next_cookie.expect("session cookie");
 

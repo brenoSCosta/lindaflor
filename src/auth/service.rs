@@ -1,4 +1,4 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use sqlx::PgPool;
 use time::PrimitiveDateTime;
@@ -13,7 +13,10 @@ use uuid::Uuid;
 
 use crate::auth::CREDENTIAL_PROVIDER_ID;
 use crate::auth::google::{GoogleOAuthConfig, safe_callback_path};
-use crate::auth::password::{hash_password, verify_password};
+use crate::auth::password::{
+  MAX_PASSWORD_LEN, MIN_PASSWORD_LEN, hash_password, validate_password,
+  verify_password,
+};
 use crate::auth::routes::dto::{
   client_meta, format_primitive, normalize_email, random_token,
 };
@@ -29,9 +32,9 @@ use crate::auth::totp::{
   consume_backup_code, generate_backup_codes, generate_secret,
   hash_backup_codes, verify_code,
 };
+use crate::auth::totp_crypto::{decrypt_row_secret, encrypt_secret};
 use crate::auth::user::{SessionUser, User, is_currently_banned};
 
-pub const MIN_PASSWORD_LEN: usize = 8;
 pub const PENDING_2FA_COOKIE: &str = "lindaflor_pending_2fa";
 pub const PENDING_2FA_COOKIE_HOST: &str = "__Host-lindaflor_pending_2fa";
 
@@ -103,6 +106,40 @@ fn system_time_to_primitive(st: SystemTime) -> PrimitiveDateTime {
 fn now_plus(secs: i64) -> PrimitiveDateTime {
   let odt = time::OffsetDateTime::now_utc() + time::Duration::seconds(secs);
   PrimitiveDateTime::new(odt.date(), odt.time())
+}
+
+/// Argon2id backup-code hashing/verification is blocking CPU work: run it
+/// on the blocking pool with a 5s bound. `guard_pending_2fa` (attempt
+/// cap) must already have run before any verify call so expensive hashes
+/// cannot be used as a DoS amplifier. Hash failures are 500s
+/// (server-side); verify timeouts fail closed as 401.
+async fn hash_backup_codes_async(codes: Vec<String>) -> Result<String> {
+  tokio::time::timeout(
+    Duration::from_secs(5),
+    tokio::task::spawn_blocking(move || hash_backup_codes(&codes)),
+  )
+  .await
+  .map_err(|_| {
+    topcoat::Error::from(std::io::Error::other("backup code hashing timed out"))
+  })?
+  .map_err(|_| {
+    topcoat::Error::from(std::io::Error::other("backup code task failed"))
+  })?
+  .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))
+}
+
+async fn consume_backup_code_async(
+  stored: String,
+  code: String,
+) -> Result<String> {
+  let remaining = tokio::time::timeout(
+    Duration::from_secs(5),
+    tokio::task::spawn_blocking(move || consume_backup_code(&stored, &code)),
+  )
+  .await
+  .map_err(|_| unauthorized())?
+  .map_err(|_| unauthorized())?;
+  remaining.ok_or_else(unauthorized).map_err(Into::into)
 }
 
 pub fn is_admin(role: Option<&str>) -> bool {
@@ -218,13 +255,10 @@ pub async fn sign_up_email(
   if email.is_empty() || !email.contains('@') {
     return Err(bad_request("valid email is required").into());
   }
-  if password.len() < MIN_PASSWORD_LEN {
-    return Err(
-      bad_request(format!(
-        "password must be at least {MIN_PASSWORD_LEN} characters"
-      ))
-      .into(),
-    );
+  if let Err(err) =
+    validate_password(password, &[email.as_str(), name.as_str(), "lindaflor"])
+  {
+    return Err(bad_request(err.to_string()).into());
   }
 
   if sqlx::query_scalar!(
@@ -496,14 +530,6 @@ pub async fn reset_password(
   if token.trim().is_empty() {
     return Err(bad_request("token is required").into());
   }
-  if new_password.len() < MIN_PASSWORD_LEN {
-    return Err(
-      bad_request(format!(
-        "password must be at least {MIN_PASSWORD_LEN} characters"
-      ))
-      .into(),
-    );
-  }
 
   let token_hash = verification_token_hash(token.trim());
   let verification = sqlx::query!(
@@ -537,6 +563,14 @@ pub async fn reset_password(
   let Some(user) = user else {
     return Err(bad_request("invalid or expired token").into());
   };
+
+  // Authoritative policy check (with the account email as zxcvbn input)
+  // before hashing or touching credential rows.
+  if let Err(err) =
+    validate_password(new_password, &[email.as_str(), "lindaflor"])
+  {
+    return Err(bad_request(err.to_string()).into());
+  }
 
   let password_hash = hash_password(new_password)?;
 
@@ -731,7 +765,7 @@ pub async fn complete_2fa_with_totp(
   let (verification_id, user_id) =
     resolve_pending_user_id(pool, pending_token.trim()).await?;
   let tf = sqlx::query!(
-    r#"SELECT secret, verified FROM two_factor WHERE user_id = $1"#,
+    r#"SELECT secret_nonce, secret_ciphertext, secret_key_version, verified FROM two_factor WHERE user_id = $1"#,
     user_id,
   )
   .fetch_optional(pool)
@@ -743,7 +777,15 @@ pub async fn complete_2fa_with_totp(
   }
   guard_pending_2fa(cx, pool, pending_token.trim(), user_id, verification_id)
     .await?;
-  if !verify_code(&tf.secret, code).map_err(bad_request)? {
+  // Fail closed on any decrypt error (wrong key or tampered row):
+  // indistinguishable from a wrong code here.
+  let secret = decrypt_row_secret(
+    tf.secret_nonce,
+    tf.secret_ciphertext,
+    tf.secret_key_version,
+  )
+  .map_err(|_| unauthorized())?;
+  if !verify_code(secret.as_str(), code).map_err(bad_request)? {
     return Err(unauthorized().into());
   }
   if !crate::valkey::totp_reserve(crate::valkey::conn_from(cx), &user_id, code)
@@ -795,8 +837,9 @@ pub async fn complete_2fa_with_backup(
   guard_pending_2fa(cx, pool, pending_token.trim(), user_id, verification_id)
     .await?;
 
+  // Rate-limit guard above runs BEFORE the Argon2 work below.
   let stored =
-    consume_backup_code(&tf.backup_codes, code).ok_or_else(unauthorized)?;
+    consume_backup_code_async(tf.backup_codes, code.to_owned()).await?;
   sqlx::query!(
     r#"UPDATE two_factor SET backup_codes = $2 WHERE id = $1"#,
     tf.id,
@@ -855,13 +898,19 @@ pub async fn change_password(
   if current_password.is_empty() {
     return Err(bad_request("currentPassword is required").into());
   }
-  if new_password.len() < MIN_PASSWORD_LEN {
-    return Err(
-      bad_request(format!(
-        "password must be at least {MIN_PASSWORD_LEN} characters"
-      ))
-      .into(),
-    );
+  // Authoritative policy check (with the account name/email as zxcvbn
+  // input) before verifying or re-hashing anything. `load_user` reuses the
+  // cached user lookup; a missing row falls back to the site name alone
+  // and surfaces as unauthorized below.
+  let existing = load_user(pool, user_id).await.ok();
+  let (account_name, account_email) = existing
+    .map(|user| (user.name, user.email))
+    .unwrap_or_default();
+  if let Err(err) = validate_password(
+    new_password,
+    &[account_email.as_str(), account_name.as_str(), "lindaflor"],
+  ) {
+    return Err(bad_request(err.to_string()).into());
   }
 
   let account = sqlx::query!(
@@ -1266,7 +1315,7 @@ pub async fn request_delete_user(
 
 // --- 2FA enable / disable (authenticated) ---
 
-#[derive(Debug)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct EnableTwoFactorResult {
   pub totp_uri: String,
   pub secret: String,
@@ -1285,7 +1334,11 @@ pub async fn enable_two_factor(
 
   let (secret, totp_uri) = generate_secret(&user.email).map_err(bad_request)?;
   let backup_codes = generate_backup_codes();
-  let backup_stored = hash_backup_codes(&backup_codes);
+  let backup_stored = hash_backup_codes_async(backup_codes.clone()).await?;
+  // Encrypt at enrollment: only the one-time response below ever carries
+  // the plaintext.
+  let encrypted = encrypt_secret(&secret)
+    .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))?;
   let id = Uuid::now_v7();
 
   sqlx::query!(r#"DELETE FROM two_factor WHERE user_id = $1"#, user.id)
@@ -1294,13 +1347,15 @@ pub async fn enable_two_factor(
 
   sqlx::query!(
     r#"
-        INSERT INTO two_factor (id, secret, backup_codes, user_id, verified)
-        VALUES ($1, $2, $3, $4, false)
+        INSERT INTO two_factor (id, backup_codes, user_id, verified, secret_nonce, secret_ciphertext, secret_key_version)
+        VALUES ($1, $2, $3, false, $4, $5, $6)
         "#,
     id,
-    secret,
     backup_stored,
     user.id,
+    encrypted.nonce,
+    encrypted.ciphertext,
+    encrypted.key_version,
   )
   .execute(pool)
   .await?;
@@ -1330,7 +1385,7 @@ pub async fn confirm_enable_two_factor(
   }
 
   let tf = sqlx::query!(
-    r#"SELECT id, secret, verified FROM two_factor WHERE user_id = $1"#,
+    r#"SELECT id, secret_nonce, secret_ciphertext, secret_key_version, verified FROM two_factor WHERE user_id = $1"#,
     user.id,
   )
   .fetch_optional(pool)
@@ -1342,7 +1397,13 @@ pub async fn confirm_enable_two_factor(
       bad_request("two-factor authentication is already verified").into(),
     );
   }
-  if !verify_code(&tf.secret, code).map_err(bad_request)? {
+  let secret = decrypt_row_secret(
+    tf.secret_nonce,
+    tf.secret_ciphertext,
+    tf.secret_key_version,
+  )
+  .map_err(|_| unauthorized())?;
+  if !verify_code(secret.as_str(), code).map_err(bad_request)? {
     return Err(unauthorized().into());
   }
   if !crate::valkey::totp_reserve(crate::valkey::conn_from(cx), &user.id, code)
@@ -1368,27 +1429,24 @@ pub async fn confirm_enable_two_factor(
   Ok(())
 }
 
-pub async fn pending_two_factor_setup(
+/// Whether an unverified TOTP enrollment exists for this user.
+///
+/// Strict one-time display: the pending secret is NEVER re-read from the
+/// DB (sole exposure is the enable response). This selects only the row
+/// id, so the settings page can offer the confirm-code form without
+/// touching secret material.
+pub async fn has_unverified_two_factor(
   pool: &PgPool,
   user_id: Uuid,
-) -> Result<Option<(String, String)>> {
+) -> Result<bool> {
   let tf = sqlx::query!(
-    r#"SELECT secret, verified FROM two_factor WHERE user_id = $1"#,
+    r#"SELECT id FROM two_factor WHERE user_id = $1 AND verified = false"#,
     user_id,
   )
   .fetch_optional(pool)
   .await?;
 
-  match tf {
-    Some(tf) if !tf.verified => {
-      let totp_uri = format!(
-        "otpauth://totp/LindaFlor?secret={}&issuer=LindaFlor",
-        tf.secret
-      );
-      Ok(Some((tf.secret, totp_uri)))
-    }
-    _ => Ok(None),
-  }
+  Ok(tf.is_some())
 }
 
 pub async fn disable_two_factor(
@@ -1418,14 +1476,20 @@ pub async fn disable_two_factor(
     false
   } else if let Some(code) = code.map(str::trim).filter(|c| !c.is_empty()) {
     let tf = sqlx::query!(
-      r#"SELECT secret, verified FROM two_factor WHERE user_id = $1"#,
+      r#"SELECT secret_nonce, secret_ciphertext, secret_key_version, verified FROM two_factor WHERE user_id = $1"#,
       user.id,
     )
     .fetch_optional(pool)
     .await?;
     match tf {
       Some(tf) if tf.verified => {
-        verify_code(&tf.secret, code).map_err(bad_request)?
+        let secret = decrypt_row_secret(
+          tf.secret_nonce,
+          tf.secret_ciphertext,
+          tf.secret_key_version,
+        )
+        .map_err(|_| unauthorized())?;
+        verify_code(secret.as_str(), code).map_err(bad_request)?
       }
       _ => false,
     }
@@ -1528,6 +1592,59 @@ fn ensure_admin(actor: &SessionUser) -> Result<()> {
   }
 }
 
+fn ensure_not_self(
+  actor: &SessionUser,
+  target: Uuid,
+  what: &'static str,
+) -> Result<()> {
+  if target == actor.user.id {
+    return Err(bad_request(what).into());
+  }
+  Ok(())
+}
+
+fn ensure_not_admin_target(target: &User) -> Result<()> {
+  if is_admin(target.role.as_deref()) {
+    return Err(forbidden().into());
+  }
+  Ok(())
+}
+
+#[allow(clippy::too_many_arguments)] // mirrors the audit_events columns 1:1
+async fn record_audit_event<'e, E>(
+  executor: E,
+  aggregate_type: &str,
+  aggregate_id: &str,
+  entity_type: &str,
+  entity_id: Uuid,
+  actor_id: Option<Uuid>,
+  actor_name: Option<&str>,
+  metadata: serde_json::Value,
+) -> Result<()>
+where
+  E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+  sqlx::query!(
+    r#"
+        INSERT INTO audit_events
+            (id, aggregate_type, aggregate_id, entity_type, entity_id,
+             actor_user_id, actor_name, metadata)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        "#,
+    Uuid::now_v7(),
+    aggregate_type,
+    aggregate_id,
+    entity_type,
+    entity_id,
+    actor_id,
+    actor_name,
+    metadata,
+  )
+  .execute(executor)
+  .await?;
+  Ok(())
+}
+
 fn canonical_role(role: &str) -> Result<&'static str> {
   if role.trim().eq_ignore_ascii_case("admin") {
     Ok("admin")
@@ -1626,15 +1743,30 @@ pub async fn set_user_role(
   role: &str,
 ) -> Result<User> {
   ensure_admin(actor)?;
+  ensure_not_self(actor, user_id, "cannot change own role")?;
   let role = canonical_role(role)?;
-  let _ = load_user(pool, user_id).await?;
+  let target = load_user(pool, user_id).await?;
+  ensure_not_admin_target(&target)?;
+  let mut tx = pool.begin().await?;
   sqlx::query!(
     r#"UPDATE users SET role = $2, updated_at = now() WHERE id = $1"#,
     user_id,
     role,
   )
-  .execute(pool)
+  .execute(&mut *tx)
   .await?;
+  record_audit_event(
+    &mut *tx,
+    "user",
+    &user_id.to_string(),
+    "user",
+    user_id,
+    Some(actor.user.id),
+    Some(actor.user.name.as_str()),
+    serde_json::json!({ "action": "set_role", "role": role }),
+  )
+  .await?;
+  tx.commit().await?;
   load_user(pool, user_id).await
 }
 
@@ -1656,10 +1788,9 @@ pub async fn ban_user(
   ban_reason: Option<&str>,
 ) -> Result<User> {
   ensure_admin(actor)?;
-  if user_id == actor.user.id {
-    return Err(bad_request("cannot ban yourself").into());
-  }
-  let _ = load_user(pool, user_id).await?;
+  ensure_not_self(actor, user_id, "cannot ban yourself")?;
+  let target = load_user(pool, user_id).await?;
+  ensure_not_admin_target(&target)?;
   let reason = ban_reason
     .map(str::trim)
     .filter(|s| !s.is_empty())
@@ -1680,6 +1811,17 @@ pub async fn ban_user(
   sqlx::query!(r#"DELETE FROM sessions WHERE user_id = $1"#, user_id)
     .execute(&mut *tx)
     .await?;
+  record_audit_event(
+    &mut *tx,
+    "user",
+    &user_id.to_string(),
+    "user",
+    user_id,
+    Some(actor.user.id),
+    Some(actor.user.name.as_str()),
+    serde_json::json!({ "action": "ban_user", "reason": reason }),
+  )
+  .await?;
   tx.commit().await?;
 
   load_user(pool, user_id).await
@@ -1691,7 +1833,10 @@ pub async fn unban_user(
   user_id: Uuid,
 ) -> Result<User> {
   ensure_admin(actor)?;
-  let _ = load_user(pool, user_id).await?;
+  ensure_not_self(actor, user_id, "cannot unban yourself")?;
+  let target = load_user(pool, user_id).await?;
+  ensure_not_admin_target(&target)?;
+  let mut tx = pool.begin().await?;
   sqlx::query!(
     r#"
         UPDATE users
@@ -1700,8 +1845,20 @@ pub async fn unban_user(
         "#,
     user_id,
   )
-  .execute(pool)
+  .execute(&mut *tx)
   .await?;
+  record_audit_event(
+    &mut *tx,
+    "user",
+    &user_id.to_string(),
+    "user",
+    user_id,
+    Some(actor.user.id),
+    Some(actor.user.name.as_str()),
+    serde_json::json!({ "action": "unban_user" }),
+  )
+  .await?;
+  tx.commit().await?;
   load_user(pool, user_id).await
 }
 
@@ -1711,13 +1868,27 @@ pub async fn remove_user(
   user_id: Uuid,
 ) -> Result<()> {
   ensure_admin(actor)?;
-  if user_id == actor.user.id {
-    return Err(bad_request("cannot remove yourself").into());
-  }
-  let _ = load_user(pool, user_id).await?;
+  ensure_not_self(actor, user_id, "cannot remove yourself")?;
+  let target = load_user(pool, user_id).await?;
+  ensure_not_admin_target(&target)?;
+  let mut tx = pool.begin().await?;
   sqlx::query!(r#"DELETE FROM users WHERE id = $1"#, user_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+  // `entity_id` has no FK so the audit row keeps the removed id: insert
+  // AFTER the delete inside the same tx.
+  record_audit_event(
+    &mut *tx,
+    "user",
+    &user_id.to_string(),
+    "user",
+    user_id,
+    Some(actor.user.id),
+    Some(actor.user.name.as_str()),
+    serde_json::json!({ "action": "remove_user" }),
+  )
+  .await?;
+  tx.commit().await?;
   Ok(())
 }
 
@@ -1759,15 +1930,47 @@ pub async fn revoke_admin_session(
   pool: &PgPool,
   actor: &SessionUser,
   session_id: Uuid,
+  expected_user_id: Uuid,
 ) -> Result<()> {
   ensure_admin(actor)?;
-  let deleted =
-    sqlx::query!(r#"DELETE FROM sessions WHERE id = $1"#, session_id)
-      .execute(pool)
-      .await?;
+  let owner: Option<Uuid> = sqlx::query_scalar!(
+    r#"SELECT user_id FROM sessions WHERE id = $1"#,
+    session_id,
+  )
+  .fetch_optional(pool)
+  .await?;
+  let Some(owner) = owner else {
+    return Err(bad_request("session not found").into());
+  };
+  if expected_user_id != owner {
+    return Err(forbidden().into());
+  }
+  ensure_not_self(actor, owner, "cannot revoke own session")?;
+  let target = load_user(pool, owner).await?;
+  ensure_not_admin_target(&target)?;
+  let mut tx = pool.begin().await?;
+  let deleted = sqlx::query!(
+    r#"DELETE FROM sessions WHERE id = $1 AND user_id = $2"#,
+    session_id,
+    owner,
+  )
+  .execute(&mut *tx)
+  .await?;
   if deleted.rows_affected() == 0 {
     return Err(bad_request("session not found").into());
   }
+  record_audit_event(
+    &mut *tx,
+    "user",
+    &owner.to_string(),
+    "session",
+    session_id,
+    Some(actor.user.id),
+    Some(actor.user.name.as_str()),
+    serde_json::json!({ "action": "revoke_session", "session_id": session_id }),
+  )
+  .await?;
+  tx.commit().await?;
   Ok(())
 }
 
@@ -1777,8 +1980,25 @@ pub async fn revoke_admin_user_sessions(
   user_id: Uuid,
 ) -> Result<()> {
   ensure_admin(actor)?;
-  let _ = load_user(pool, user_id).await?;
-  session_store::delete_all_for_user(pool, user_id).await?;
+  ensure_not_self(actor, user_id, "cannot revoke own sessions")?;
+  let target = load_user(pool, user_id).await?;
+  ensure_not_admin_target(&target)?;
+  let mut tx = pool.begin().await?;
+  sqlx::query!(r#"DELETE FROM sessions WHERE user_id = $1"#, user_id)
+    .execute(&mut *tx)
+    .await?;
+  record_audit_event(
+    &mut *tx,
+    "user",
+    &user_id.to_string(),
+    "user",
+    user_id,
+    Some(actor.user.id),
+    Some(actor.user.name.as_str()),
+    serde_json::json!({ "action": "revoke_all_sessions" }),
+  )
+  .await?;
+  tx.commit().await?;
   Ok(())
 }
 
@@ -1789,6 +2009,10 @@ pub fn portuguese_error_message(err: &topcoat::Error) -> String {
     "Já existe uma conta com este e-mail.".into()
   } else if msg.contains("at least") {
     format!("A senha deve ter pelo menos {MIN_PASSWORD_LEN} caracteres.")
+  } else if msg.contains("at most") {
+    format!("A senha deve ter no máximo {MAX_PASSWORD_LEN} caracteres.")
+  } else if msg.contains("too weak") {
+    "Escolha uma senha mais forte.".into()
   } else if msg.contains("invalid or expired") {
     "Link inválido ou expirado.".into()
   } else if msg.contains("does not match") {
@@ -1920,7 +2144,9 @@ mod tests {
     .await
     .unwrap();
 
-    reset_password(&pool, raw, "newpassword99").await.unwrap();
+    reset_password(&pool, raw, "Harbor-Violet-Tiger-4821-Lantern!")
+      .await
+      .unwrap();
 
     let leftover: i64 = sqlx::query_scalar(
       "SELECT count(*) FROM verifications WHERE identifier = $1",
@@ -1955,7 +2181,7 @@ mod tests {
     .await
     .unwrap();
 
-    let err = reset_password(&pool, raw, "newpassword99")
+    let err = reset_password(&pool, raw, "Harbor-Violet-Tiger-4821-Lantern!")
       .await
       .expect_err("expired token");
     let msg = err.to_string().to_ascii_lowercase();

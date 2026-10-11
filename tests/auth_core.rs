@@ -8,7 +8,7 @@ use uuid::Uuid;
 async fn sign_up_sign_in_get_session_sign_out() {
   let (_pool, router) = pool_and_router().await;
   let email = unique_email("core");
-  let password = "password123";
+  let password = "Harbor-Violet-Tiger-4821-Lantern!";
 
   let signed_up = sign_up(&router, "Core User", &email, password).await;
   assert_eq!(signed_up.status, StatusCode::OK, "{:?}", signed_up.json);
@@ -50,7 +50,13 @@ async fn sign_up_sign_in_get_session_sign_out() {
 async fn sign_in_wrong_password_is_unauthorized() {
   let (_pool, router) = pool_and_router().await;
   let email = unique_email("wrong-pw");
-  let signed_up = sign_up(&router, "Wrong Pw", &email, "password123").await;
+  let signed_up = sign_up(
+    &router,
+    "Wrong Pw",
+    &email,
+    "Harbor-Violet-Tiger-4821-Lantern!",
+  )
+  .await;
   assert_eq!(signed_up.status, StatusCode::OK);
 
   let bad = sign_in(&router, &email, "not-the-password").await;
@@ -61,7 +67,7 @@ async fn sign_in_wrong_password_is_unauthorized() {
 async fn expired_temp_ban_does_not_block_sign_in_or_session() {
   let (pool, router) = pool_and_router().await;
   let email = unique_email("core-ban-expiry");
-  let password = "password123";
+  let password = "Harbor-Violet-Tiger-4821-Lantern!";
 
   let signed_up = sign_up(&router, "Core Ban Expiry", &email, password).await;
   assert_eq!(signed_up.status, StatusCode::OK);

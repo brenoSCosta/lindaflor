@@ -265,6 +265,69 @@ fn fallback_del(key: &str) {
   }
 }
 
+fn fallback_set(key: &str, val: &str, ttl: Duration) {
+  let mut guard = fallback().lock().unwrap_or_else(|e| e.into_inner());
+  if guard.len() > 4096 {
+    let now = Instant::now();
+    guard.retain(|_, (_, deadline)| *deadline > now);
+  }
+  guard.insert(key.to_owned(), (val.to_owned(), Instant::now() + ttl));
+}
+
+fn fallback_take(key: &str) -> Option<String> {
+  let mut guard = fallback().lock().unwrap_or_else(|e| e.into_inner());
+  match guard.remove(key) {
+    Some((v, deadline)) if deadline > Instant::now() => Some(v),
+    _ => None,
+  }
+}
+
+async fn valkey_getdel(
+  conn: Option<MultiplexedConnection>,
+  key: &str,
+) -> Option<String> {
+  let mut conn = conn?;
+  redis::cmd("GETDEL")
+    .arg(key)
+    .query_async(&mut conn)
+    .await
+    .ok()
+    .flatten()
+}
+
+/// One-time HTML enrollment payload (secret / otpauth URI / backup codes).
+/// Keyed by session token hash so a refresh after consume cannot re-read
+/// the encrypted DB row. TTL matches pending-2FA (10 min).
+pub const ENROLLMENT_FLASH_TTL_SECS: u64 = 10 * 60;
+
+fn enrollment_flash_key(session_hash: &str) -> String {
+  format!("2fa:enroll-flash:{session_hash}")
+}
+
+/// Store the enable response for the next GET of the setup page.
+pub async fn totp_enrollment_flash_put(
+  conn: Option<MultiplexedConnection>,
+  session_hash: &str,
+  json: &str,
+) {
+  let key = enrollment_flash_key(session_hash);
+  valkey_set_ex(conn, &key, json, ENROLLMENT_FLASH_TTL_SECS).await;
+  fallback_set(&key, json, Duration::from_secs(ENROLLMENT_FLASH_TTL_SECS));
+}
+
+/// Consume the enrollment flash. Second GET returns `None`.
+pub async fn totp_enrollment_flash_take(
+  conn: Option<MultiplexedConnection>,
+  session_hash: &str,
+) -> Option<String> {
+  let key = enrollment_flash_key(session_hash);
+  if let Some(json) = valkey_getdel(conn.clone(), &key).await {
+    fallback_del(&key);
+    return Some(json);
+  }
+  fallback_take(&key)
+}
+
 /// Failures tracked per `(ip, email)` for 15 minutes (escalating TTL, see
 /// [`record_auth_fail`]). At [`AUTH_FAIL_MAX`] the pair is locked out.
 pub const AUTH_FAIL_MAX: u64 = 10;

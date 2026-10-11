@@ -21,6 +21,16 @@ fn is_development() -> bool {
 
 /// Build [`SessionConfig`]: hardened `__Host-` cookie in production; plain
 /// `session` cookie (Secure=false, SameSite=Lax) when `APP_ENV` is development.
+///
+/// Production delegates to Topcoat's [`CookieTokenStore`], whose internal
+/// jar applies secure, host-prefixed, HttpOnly, SameSite=Lax, Path=/
+/// overrides on every operation (`override_secure(true)`,
+/// `override_prefix_host()` so `session` is sent as `__Host-session`,
+/// `override_http_only(true)`, `override_same_site(Lax)`,
+/// `override_path("/")`): `write` adds `Max-Age`, `delete` clears via
+/// `remove` with the same overrides, so the expiry always matches the
+/// cookie it clears. `__Host-` additionally requires no `Domain`, which
+/// holds (no domain is ever set).
 pub fn session_config() -> SessionConfig {
   if is_development() {
     // Local HTTP: `__Host-` + Secure would never stick on http://localhost.

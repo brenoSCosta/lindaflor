@@ -33,7 +33,7 @@ struct OAuthStateValue {
   #[serde(default, skip_serializing_if = "Option::is_none")]
   link_user_id: Option<Uuid>,
   /// Hex session-token hash (link flow) the callback must present.
-  /// `None` for legacy login-flow rows written before session binding.
+  /// `None` for login flows (no session to bind).
   #[serde(default, skip_serializing_if = "Option::is_none")]
   session_binding: Option<String>,
   /// PKCE `code_verifier`; sent as `code_verifier` at token exchange.
@@ -230,7 +230,7 @@ pub async fn store_oauth_state_full(
     code_verifier: code_verifier.map(str::to_owned),
     nonce: nonce.map(str::to_owned),
   })
-  .unwrap_or_else(|_| callback_path.to_string());
+  .expect("oauth state value serializes");
   sqlx::query!(
         r#"
         INSERT INTO verifications (id, identifier, value, expires_at, created_at, updated_at)
@@ -271,27 +271,16 @@ pub async fn consume_oauth_state(
     .execute(pool)
     .await?;
 
-  let parsed =
-    if let Ok(v) = serde_json::from_str::<OAuthStateValue>(&row.value) {
-      ConsumedOAuthState {
-        callback_path: safe_callback_path(Some(&v.callback)),
-        link_user_id: v.link_user_id,
-        session_binding: v.session_binding,
-        code_verifier: v.code_verifier,
-        nonce: v.nonce,
-      }
-    } else {
-      // Legacy plain callback path.
-      ConsumedOAuthState {
-        callback_path: safe_callback_path(Some(&row.value)),
-        link_user_id: None,
-        session_binding: None,
-        code_verifier: None,
-        nonce: None,
-      }
-    };
+  let parsed = serde_json::from_str::<OAuthStateValue>(&row.value)
+    .map_err(|_| bad_request("invalid or expired OAuth state"))?;
 
-  Ok(parsed)
+  Ok(ConsumedOAuthState {
+    callback_path: safe_callback_path(Some(&parsed.callback)),
+    link_user_id: parsed.link_user_id,
+    session_binding: parsed.session_binding,
+    code_verifier: parsed.code_verifier,
+    nonce: parsed.nonce,
+  })
 }
 
 /// Exchange an authorization code for tokens, presenting the PKCE
@@ -892,7 +881,7 @@ mod tests {
       .is_err()
     );
 
-    // Missing binding (legacy row) or missing session is rejected.
+    // Missing binding or missing session is rejected.
     assert!(
       verify_link_session(None, Some("hash-a"), link_user, Some(link_user))
         .is_err()

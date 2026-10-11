@@ -17,7 +17,9 @@ use crate::auth::routes::dto::{normalize_email, random_token};
 use crate::auth::service::{
   verification_token_hash, verification_token_hash_prefix,
 };
+use crate::auth::session_store;
 use crate::auth::totp::verify_code;
+use crate::auth::totp_crypto::decrypt_row_secret;
 use crate::auth::user::current_user;
 
 const CHANGE_EMAIL_TOKEN_TTL_SECS: i64 = 30 * 60;
@@ -93,7 +95,7 @@ pub async fn change_email(
   .and_then(|r| r.password)
   .is_some_and(|p| !p.is_empty());
   let totp_verified = sqlx::query!(
-    r#"SELECT secret, verified FROM two_factor WHERE user_id = $1"#,
+    r#"SELECT verified FROM two_factor WHERE user_id = $1"#,
     su.user.id,
   )
   .fetch_optional(pool)
@@ -130,15 +132,24 @@ pub async fn change_email(
       false
     } else {
       let tf = sqlx::query!(
-        r#"SELECT secret FROM two_factor WHERE user_id = $1"#,
+        r#"SELECT secret_nonce, secret_ciphertext, secret_key_version FROM two_factor WHERE user_id = $1"#,
         su.user.id,
       )
       .fetch_optional(pool)
       .await?;
       match tf {
-        Some(tf) => verify_code(&tf.secret, code).map_err(|e| {
-          topcoat::Error::from(std::io::Error::other(e.to_string()))
-        })?,
+        // Fail closed on any decrypt error.
+        Some(tf) => {
+          let secret = decrypt_row_secret(
+            tf.secret_nonce,
+            tf.secret_ciphertext,
+            tf.secret_key_version,
+          )
+          .map_err(|_| unauthorized())?;
+          verify_code(secret.as_str(), code).map_err(|e| {
+            topcoat::Error::from(std::io::Error::other(e.to_string()))
+          })?
+        }
         None => false,
       }
     }
@@ -198,6 +209,11 @@ pub async fn change_email(
         expires_at,
     )
     .execute(pool)
+    .await?;
+
+  // An email change is a credential change: drop every other session now,
+  // keeping only the session that authorized this request.
+  session_store::delete_all_for_user_except(pool, su.user.id, su.session_id)
     .await?;
 
   tracing::info!(
@@ -302,6 +318,11 @@ pub async fn confirm_change_email(
   sqlx::query!("DELETE FROM verifications WHERE id = $1", verification.id)
     .execute(pool)
     .await?;
+
+  // The address changed: drop every session (including the requester's, if
+  // any). Confirm stays token-only so logged-out mail links keep working;
+  // the caller simply signs in again with the new address.
+  session_store::delete_all_for_user(pool, user_id).await?;
 
   Ok(Json(OkStatus { status: true }))
 }

@@ -20,7 +20,16 @@ use topcoat::{
   view::{View, attributes, component, view},
 };
 
+use crate::config::app_env;
+
 const TOAST_COOKIE: &str = "toast";
+// `__Host-` variant used outside development. `__Host-` requires Secure,
+// Path=/ and no Domain, all of which the toast cookie already sets (see
+// `toast_cookie`); the prefix keeps a network attacker from planting a
+// sibling-domain toast. Safe to rename per env: only the server reads this
+// cookie (HttpOnly, rendered into the layout by `take_toasts`, never
+// touched by JS), following the `pending_2fa` pattern.
+const TOAST_COOKIE_HOST: &str = "__Host-toast";
 const TOAST_MAX_CHARS: usize = 180;
 const MAX_TOASTS: usize = 5;
 const COOKIE_BUDGET: usize = 3500;
@@ -260,13 +269,29 @@ fn sanitize(mut toast: Toast) -> Option<Toast> {
   Some(toast)
 }
 
+fn toast_cookie_secure() -> bool {
+  !matches!(app_env().as_str(), "development" | "dev")
+}
+
+fn toast_cookie_name() -> &'static str {
+  if toast_cookie_secure() {
+    TOAST_COOKIE_HOST
+  } else {
+    TOAST_COOKIE
+  }
+}
+
 fn toast_cookie(json: String) -> Cookie<'static> {
-  Cookie::build((TOAST_COOKIE, json))
+  let secure = toast_cookie_secure();
+  let mut builder = Cookie::build((toast_cookie_name(), json))
     .path("/")
     .max_age(Duration::seconds(60))
     .http_only(true)
-    .same_site(SameSite::Lax)
-    .build()
+    .same_site(SameSite::Lax);
+  if secure {
+    builder = builder.secure(true);
+  }
+  builder.build()
 }
 
 /// Value the jar will put in `Set-Cookie`, using the cookie crate's encoder.
@@ -276,11 +301,9 @@ fn encoded_set_cookie(json: &str) -> String {
 
 /// Percent-encoded JSON, the form `X-Toast` and leftover cookies use.
 fn encoded_toast_json(json: &str) -> String {
-  let encoded = Cookie::new(TOAST_COOKIE, json)
-    .stripped()
-    .encoded()
-    .to_string();
-  encoded[TOAST_COOKIE.len() + 1..].to_owned()
+  let name = toast_cookie_name();
+  let encoded = Cookie::new(name, json).stripped().encoded().to_string();
+  encoded[name.len() + 1..].to_owned()
 }
 
 fn percent_decode(input: &str) -> String {
@@ -376,7 +399,7 @@ fn location_header(uri: &str) -> HeaderValue {
 
 fn current_queue(cx: &Cx) -> Vec<Toast> {
   cookies(cx)
-    .get(TOAST_COOKIE)
+    .get(toast_cookie_name())
     .map(|cookie| decode_queue(cookie.value()))
     .unwrap_or_default()
 }
@@ -583,13 +606,22 @@ pub fn set_toast(cx: &Cx, toast: Toast) {
 }
 
 /// Read and clear the toast cookie. Call this from the root layout only.
+/// The clearing `Set-Cookie` mirrors [`toast_cookie`] (same name/path,
+/// `HttpOnly`, `SameSite=Lax`, `Secure`-iff-prod) so the expiry overwrites
+/// the cookie in every env.
 pub fn take_toasts(cx: &Cx) -> Vec<Toast> {
   let jar = cookies(cx);
-  let Some(cookie) = jar.get(TOAST_COOKIE) else {
+  let Some(cookie) = jar.get(toast_cookie_name()) else {
     return Vec::new();
   };
   let value = cookie.value().to_owned();
-  jar.remove(Cookie::build((TOAST_COOKIE, "")).path("/").build());
+  let secure = toast_cookie_secure();
+  let mut builder = Cookie::build((toast_cookie_name(), "")).path("/");
+  builder = builder.http_only(true).same_site(SameSite::Lax);
+  if secure {
+    builder = builder.secure(true);
+  }
+  jar.remove(builder.build());
   decode_queue(&value)
 }
 

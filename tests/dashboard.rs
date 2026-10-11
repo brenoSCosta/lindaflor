@@ -61,7 +61,7 @@ async fn anonymous_dashboard_redirects_to_login() {
     &router,
     "Dashboard User",
     &unique_email("dash"),
-    "password123",
+    "Harbor-Violet-Tiger-4821-Lantern!",
   )
   .await;
   assert_eq!(signed_up.status, StatusCode::OK);
@@ -95,11 +95,21 @@ async fn anonymous_dashboard_redirects_to_login() {
 async fn dashboard_scopes_orders_to_current_user() {
   let (pool, router) = pool_and_router().await;
 
-  let a =
-    sign_up(&router, "User A", &unique_email("dash-a"), "password123").await;
+  let a = sign_up(
+    &router,
+    "User A",
+    &unique_email("dash-a"),
+    "Harbor-Violet-Tiger-4821-Lantern!",
+  )
+  .await;
   assert_eq!(a.status, StatusCode::OK);
-  let b =
-    sign_up(&router, "User B", &unique_email("dash-b"), "password123").await;
+  let b = sign_up(
+    &router,
+    "User B",
+    &unique_email("dash-b"),
+    "Harbor-Violet-Tiger-4821-Lantern!",
+  )
+  .await;
   assert_eq!(b.status, StatusCode::OK);
   let cookie_a = a.next_cookie.clone().expect("cookie a");
 
@@ -137,11 +147,21 @@ async fn dashboard_scopes_orders_to_current_user() {
 async fn load_recent_orders_is_scoped_to_owner() {
   let (pool, router) = pool_and_router().await;
 
-  let a =
-    sign_up(&router, "User A", &unique_email("dash-a"), "password123").await;
+  let a = sign_up(
+    &router,
+    "User A",
+    &unique_email("dash-a"),
+    "Harbor-Violet-Tiger-4821-Lantern!",
+  )
+  .await;
   assert_eq!(a.status, StatusCode::OK);
-  let b =
-    sign_up(&router, "User B", &unique_email("dash-b"), "password123").await;
+  let b = sign_up(
+    &router,
+    "User B",
+    &unique_email("dash-b"),
+    "Harbor-Violet-Tiger-4821-Lantern!",
+  )
+  .await;
   assert_eq!(b.status, StatusCode::OK);
 
   let order_a = insert_order(&pool, user_id(&a.json), 424242).await;

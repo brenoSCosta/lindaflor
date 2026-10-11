@@ -11,18 +11,19 @@ use topcoat::{
 };
 
 use crate::auth::CREDENTIAL_PROVIDER_ID;
-use crate::auth::password::{hash_password, verify_password};
+use crate::auth::password::{
+  hash_password, validate_password, verify_password,
+};
 use crate::auth::session_store;
 use crate::auth::user::current_user;
-
-const MIN_PASSWORD_LEN: usize = 8;
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangePasswordBody {
   pub current_password: String,
   pub new_password: String,
-  /// When true, drop other sessions for this user.
+  /// When false, keep other sessions for this user. Defaults to true:
+  /// omitting the flag revokes every other session.
   #[serde(default)]
   pub revoke_other_sessions: Option<bool>,
 }
@@ -58,13 +59,13 @@ pub async fn change_password(
   if body.current_password.is_empty() {
     return Err(bad_request("currentPassword is required").into());
   }
-  if body.new_password.len() < MIN_PASSWORD_LEN {
-    return Err(
-      bad_request(format!(
-        "password must be at least {MIN_PASSWORD_LEN} characters"
-      ))
-      .into(),
-    );
+  // Defense-in-depth: the service validates authoritatively, but reject
+  // weak input here too before any DB work.
+  if let Err(err) = validate_password(
+    &body.new_password,
+    &[su.user.email.as_str(), su.user.name.as_str(), "lindaflor"],
+  ) {
+    return Err(bad_request(err.to_string()).into());
   }
 
   let pool = app_context::<PgPool>(cx);
@@ -109,7 +110,7 @@ pub async fn change_password(
   .execute(pool)
   .await?;
 
-  if body.revoke_other_sessions.unwrap_or(false) {
+  if body.revoke_other_sessions.unwrap_or(true) {
     session_store::delete_all_for_user_except(pool, su.user.id, su.session_id)
       .await?;
   }

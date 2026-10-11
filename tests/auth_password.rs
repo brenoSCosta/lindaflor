@@ -1,15 +1,18 @@
 use http::StatusCode;
 use test_support::{
   json_post, pool_and_router, sign_in, sign_up, unique_email,
-  verification_token,
+  verification_token_like,
 };
+
+const STRONG_PASSWORD: &str = "Harbor-Violet-Tiger-4821-Lantern!";
+const STRONG_NEW_PASSWORD: &str = "Quilt-Mango-Brave-Pixel-7395?";
 
 #[tokio::test]
 async fn request_and_reset_password() {
   let (pool, router) = pool_and_router().await;
   let email = unique_email("reset");
-  let old_password = "password123";
-  let new_password = "newpassword99";
+  let old_password = STRONG_PASSWORD;
+  let new_password = STRONG_NEW_PASSWORD;
 
   let signed_up = sign_up(&router, "Reset User", &email, old_password).await;
   assert_eq!(signed_up.status, StatusCode::OK);
@@ -50,7 +53,8 @@ async fn request_and_reset_password() {
     "value_hash must be a digest, not the raw secret"
   );
 
-  let token = verification_token(&pool, "reset-password:").await;
+  let token =
+    verification_token_like(&pool, &format!("reset-password:{email}")).await;
 
   let reset = json_post(
     &router,
@@ -70,4 +74,61 @@ async fn request_and_reset_password() {
 
   let ok = sign_in(&router, &email, new_password).await;
   assert_eq!(ok.status, StatusCode::OK, "{:?}", ok.json);
+}
+
+#[tokio::test]
+async fn sign_up_rejects_weak_password() {
+  let (_pool, router) = pool_and_router().await;
+  let res =
+    sign_up(&router, "Weak User", &unique_email("weak"), "password123").await;
+  assert_eq!(res.status, StatusCode::BAD_REQUEST, "{:?}", res.json);
+}
+
+#[tokio::test]
+async fn sign_up_rejects_short_password() {
+  let (_pool, router) = pool_and_router().await;
+  let res =
+    sign_up(&router, "Short User", &unique_email("short"), "Ab1!").await;
+  assert_eq!(res.status, StatusCode::BAD_REQUEST, "{:?}", res.json);
+}
+
+#[tokio::test]
+async fn sign_up_rejects_password_over_max_chars() {
+  let (_pool, router) = pool_and_router().await;
+  // 129 chars (multibyte `é` also exercises the chars-not-bytes bound).
+  let long: String = "é".repeat(129);
+  assert_eq!(long.chars().count(), 129);
+  let res = sign_up(&router, "Long User", &unique_email("long"), &long).await;
+  assert_eq!(res.status, StatusCode::BAD_REQUEST, "{:?}", res.json);
+}
+
+#[tokio::test]
+async fn reset_password_rejects_weak_new_password() {
+  let (pool, router) = pool_and_router().await;
+  let email = unique_email("reset-weak");
+  let signed_up = sign_up(&router, "Reset Weak", &email, STRONG_PASSWORD).await;
+  assert_eq!(signed_up.status, StatusCode::OK);
+
+  let req = json_post(
+    &router,
+    "/api/auth/request-password-reset",
+    None,
+    serde_json::json!({ "email": email }),
+  )
+  .await;
+  assert_eq!(req.status, StatusCode::OK);
+
+  let token =
+    verification_token_like(&pool, &format!("reset-password:{email}")).await;
+  let reset = json_post(
+    &router,
+    "/api/auth/reset-password",
+    None,
+    serde_json::json!({
+        "token": token,
+        "newPassword": "password123",
+    }),
+  )
+  .await;
+  assert_eq!(reset.status, StatusCode::BAD_REQUEST, "{:?}", reset.json);
 }

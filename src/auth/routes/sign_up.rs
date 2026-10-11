@@ -13,12 +13,10 @@ use topcoat::{
 use uuid::Uuid;
 
 use crate::auth::CREDENTIAL_PROVIDER_ID;
-use crate::auth::password::hash_password;
+use crate::auth::password::{hash_password, validate_password};
 use crate::auth::routes::dto::{SessionPayload, client_meta, normalize_email};
 use crate::auth::session_store;
 use crate::auth::user::{SessionUser, User};
-
-const MIN_PASSWORD_LEN: usize = 8;
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -60,13 +58,12 @@ pub async fn sign_up_email(
   if email.is_empty() || !email.contains('@') {
     return Err(bad_request("valid email is required").into());
   }
-  if password.len() < MIN_PASSWORD_LEN {
-    return Err(
-      bad_request(format!(
-        "password must be at least {MIN_PASSWORD_LEN} characters"
-      ))
-      .into(),
-    );
+  // Defense-in-depth: the service validates authoritatively, but reject
+  // weak input here too before any DB work.
+  if let Err(err) =
+    validate_password(&password, &[email.as_str(), name.as_str(), "lindaflor"])
+  {
+    return Err(bad_request(err.to_string()).into());
   }
 
   let pool = app_context::<PgPool>(cx);

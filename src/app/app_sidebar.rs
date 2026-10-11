@@ -91,7 +91,9 @@ fn initials(name: &str) -> String {
 
 /// Whether this request path should use the authenticated app chrome + sidebar.
 pub fn is_app_shell_path(path: &str) -> bool {
-  matches!(path, "/dashboard" | "/settings" | "/accept-invitation")
+  matches!(path, "/dashboard" | "/accept-invitation")
+    || path == "/settings"
+    || path.starts_with("/settings/")
     || path.starts_with("/conta")
     || path.starts_with("/admin")
 }

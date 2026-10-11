@@ -1,4 +1,8 @@
 use std::env;
+use std::sync::OnceLock;
+
+use rand::RngCore;
+use zeroize::Zeroizing;
 
 /// Read `KEY`, falling back to Docker-secret style `KEY_FILE` (a path whose
 /// contents are the value, trailing newlines trimmed). Direct env wins; empty
@@ -77,8 +81,11 @@ impl Config {
       .unwrap_or_else(|| "redis://127.0.0.1:4202".to_string());
     // Fail boot in production without a valid public origin. The
     // origin feeds `base_url` + `OriginPolicy` (see `src/app.rs`).
+    // Also fail boot without a TOTP encryption key: encrypted secrets
+    // could not be decrypted after a restart otherwise.
     if app_env() == "production" {
       require_app_origin()?;
+      totp_encryption_key()?;
     }
     Ok(Self {
       port,
@@ -117,6 +124,79 @@ pub fn token_pepper() -> String {
   env_non_empty("TOKEN_PEPPER").unwrap_or_default()
 }
 
+/// Parse a raw `TOTP_ENCRYPTION_KEY` value into 32 key bytes.
+///
+/// Accepts standard-base64-encoded 32 bytes (44 chars padded) or
+/// lowercase/uppercase hex of 64 chars (32 bytes). Surrounding whitespace
+/// is ignored; anything else is [`ConfigError::InvalidTotpEncryptionKey`].
+/// Error messages never echo the key material.
+pub fn parse_totp_encryption_key(raw: &str) -> Result<[u8; 32], ConfigError> {
+  use base64::Engine as _;
+
+  let trimmed = raw.trim();
+  if trimmed.is_empty() {
+    return Err(ConfigError::MissingTotpEncryptionKey);
+  }
+  let mut key = [0u8; 32];
+  if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(trimmed)
+    && decoded.len() == 32
+  {
+    key.copy_from_slice(&decoded);
+    return Ok(key);
+  }
+  if let Ok(decoded) = hex::decode(trimmed)
+    && decoded.len() == 32
+  {
+    key.copy_from_slice(&decoded);
+    return Ok(key);
+  }
+  Err(ConfigError::InvalidTotpEncryptionKey)
+}
+
+/// XChaCha20-Poly1305 key encrypting `two_factor` secrets at rest.
+///
+/// Read from `TOTP_ENCRYPTION_KEY` (or `TOTP_ENCRYPTION_KEY_FILE`, Docker-
+/// secret style — direct env wins). Missing in production is a boot error
+/// (see [`Config::from_env`]); in dev/test an ephemeral per-process key is
+/// generated once (cached in a [`OnceLock`]) and a warning is emitted — its
+/// ciphertexts do not survive restarts and cannot be shared across
+/// replicas.
+///
+/// Explicit keys are re-parsed on every call so rotation (new env value +
+/// `secret_key_version` bump) takes effect without a restart; the ephemeral
+/// fallback is the only value cached.
+///
+/// KMS envelope (production): store `base64(KMS_Encrypt(DEK))` in the
+/// environment and have the entrypoint decrypt it at boot into a tmpfs
+/// file (e.g. `/run/secrets/totp-key`, mode `0400`) pointed to by
+/// `TOTP_ENCRYPTION_KEY_FILE`. The plaintext DEK never lands in the
+/// process environment, shell history, or container image — only in the
+/// tmpfs file and process memory (as [`Zeroizing`]). Never log the key.
+pub fn totp_encryption_key() -> Result<Zeroizing<[u8; 32]>, ConfigError> {
+  if let Some(raw) = read_env_or_file("TOTP_ENCRYPTION_KEY") {
+    return parse_totp_encryption_key(&raw).map(Zeroizing::new);
+  }
+  if app_env() == "production" {
+    return Err(ConfigError::MissingTotpEncryptionKey);
+  }
+  static EPHEMERAL_TOTP_KEY: OnceLock<Zeroizing<[u8; 32]>> = OnceLock::new();
+  static WARNED_ONCE: std::sync::Once = std::sync::Once::new();
+  WARNED_ONCE.call_once(|| {
+    tracing::warn!(
+      "TOTP_ENCRYPTION_KEY is unset: using an ephemeral in-memory key. \
+       TOTP secrets encrypted now cannot be decrypted after a restart or on \
+       another replica. Set TOTP_ENCRYPTION_KEY (or TOTP_ENCRYPTION_KEY_FILE) \
+       for any durable environment."
+    );
+  });
+  let key = EPHEMERAL_TOTP_KEY.get_or_init(|| {
+    let mut bytes = [0u8; 32];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    Zeroizing::new(bytes)
+  });
+  Ok(key.clone())
+}
+
 fn env_parse<T: std::str::FromStr>(key: &str, default: T) -> T {
   read_env_or_file(key)
     .and_then(|value| value.parse().ok())
@@ -151,6 +231,27 @@ pub fn log_file_max_bytes() -> u64 {
 /// Empty or unset uses the default.
 pub fn log_file_max_files() -> u32 {
   env_parse("LOG_FILE_MAX_FILES", 5)
+}
+
+/// Minimum password length in characters from `PASSWORD_MIN_LEN`
+/// (default matches [`crate::auth::password::MIN_PASSWORD_LEN`]).
+/// Read by [`crate::auth::password::validate_password`].
+pub fn password_min_len() -> usize {
+  env_parse("PASSWORD_MIN_LEN", 8)
+}
+
+/// Maximum password length in characters from `PASSWORD_MAX_LEN`
+/// (default matches [`crate::auth::password::MAX_PASSWORD_LEN`]).
+/// Read by [`crate::auth::password::validate_password`].
+pub fn password_max_len() -> usize {
+  env_parse("PASSWORD_MAX_LEN", 128)
+}
+
+/// Minimum `zxcvbn` score (0-4) from `PASSWORD_MIN_ZXCVBN_SCORE`
+/// (default matches [`crate::auth::password::MIN_ZXCVBN_SCORE`]).
+/// Read by [`crate::auth::password::validate_password`].
+pub fn password_min_zxcvbn_score() -> u8 {
+  env_parse("PASSWORD_MIN_ZXCVBN_SCORE", 3)
 }
 
 /// Bearer token for `GET /metrics` from `METRICS_TOKEN`. Empty or unset
@@ -281,6 +382,14 @@ pub enum ConfigError {
     "refusing to seed with a weak SEED_ADMIN_PASSWORD in production: set a strong (12+ char) password or generate one per deploy"
   )]
   WeakSeedPassword,
+  #[error(
+    "missing TOTP_ENCRYPTION_KEY: set it (or TOTP_ENCRYPTION_KEY_FILE) to a base64-32B or hex-64 key; see totp_encryption_key docs for the KMS envelope"
+  )]
+  MissingTotpEncryptionKey,
+  #[error(
+    "invalid TOTP_ENCRYPTION_KEY: expected base64-encoded 32 bytes or 64 hex chars"
+  )]
+  InvalidTotpEncryptionKey,
 }
 
 #[cfg(test)]
@@ -406,7 +515,166 @@ mod tests {
     let _env = set_env("APP_ENV", "production");
     let _origin = set_env("APP_ORIGIN", "https://loja.example.com/");
     let _db = set_env("DATABASE_URL", "postgres://localhost/test");
+    let _key = set_env(
+      "TOTP_ENCRYPTION_KEY",
+      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    );
+    let _key_file = remove_env("TOTP_ENCRYPTION_KEY_FILE");
     Config::from_env().expect("prod boot with valid APP_ORIGIN");
+  }
+
+  #[test]
+  fn from_env_fails_in_production_without_totp_key() {
+    let _lock = ENV_LOCK.lock().expect("env lock");
+    let _env = set_env("APP_ENV", "production");
+    let _origin = set_env("APP_ORIGIN", "https://loja.example.com");
+    let _db = set_env("DATABASE_URL", "postgres://localhost/test");
+    let _key = remove_env("TOTP_ENCRYPTION_KEY");
+    let _key_file = remove_env("TOTP_ENCRYPTION_KEY_FILE");
+    let err = Config::from_env().expect_err("prod boot must require key");
+    assert!(
+      matches!(err, ConfigError::MissingTotpEncryptionKey),
+      "unexpected error: {err:?}"
+    );
+  }
+
+  /// Fixed 32-byte test key (`0x00..=0x1f`), base64 and hex forms.
+  const TEST_KEY_B64: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=";
+  const TEST_KEY_HEX: &str =
+    "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f";
+
+  fn expected_test_key() -> [u8; 32] {
+    let mut key = [0u8; 32];
+    for (i, byte) in key.iter_mut().enumerate() {
+      *byte = i as u8;
+    }
+    key
+  }
+
+  #[test]
+  fn parse_totp_key_accepts_base64_and_hex() {
+    assert_eq!(
+      parse_totp_encryption_key(TEST_KEY_B64).expect("base64"),
+      expected_test_key()
+    );
+    assert_eq!(
+      parse_totp_encryption_key(TEST_KEY_HEX).expect("hex"),
+      expected_test_key()
+    );
+    // Uppercase hex and surrounding whitespace are tolerated.
+    assert_eq!(
+      parse_totp_encryption_key(&format!(
+        "  {}  \n",
+        TEST_KEY_HEX.to_ascii_uppercase()
+      ))
+      .expect("hex upper"),
+      expected_test_key()
+    );
+  }
+
+  #[test]
+  fn parse_totp_key_rejects_bad_values_without_echoing_them() {
+    for raw in [
+      "",
+      "   ",
+      "not-a-key",
+      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", // unpadded base64
+      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==", // 33 bytes
+      "00",                                          // short hex
+      "zz".repeat(32).as_str(),
+    ] {
+      let err =
+        parse_totp_encryption_key(raw).expect_err("must reject {raw:?}");
+      assert!(
+        matches!(
+          err,
+          ConfigError::InvalidTotpEncryptionKey
+            | ConfigError::MissingTotpEncryptionKey
+        ),
+        "unexpected error: {err:?}"
+      );
+      let rendered = format!("{err}");
+      // Empty inputs have nothing to echo; non-empty ones must not appear.
+      assert!(
+        raw.trim().is_empty() || !rendered.contains(raw.trim()),
+        "error must not echo key material: {rendered}"
+      );
+    }
+  }
+
+  #[test]
+  fn totp_key_prefers_direct_env_over_file() {
+    let _lock = ENV_LOCK.lock().expect("env lock");
+    let dir = std::env::temp_dir();
+    let path = dir.join(format!("lindaflor-totp-key-{}", std::process::id()));
+    std::fs::write(&path, format!("{TEST_KEY_HEX}\n")).expect("write key file");
+    let _env = set_env("APP_ENV", "development");
+    let _direct = set_env("TOTP_ENCRYPTION_KEY", TEST_KEY_B64);
+    unsafe {
+      std::env::set_var(
+        "TOTP_ENCRYPTION_KEY_FILE",
+        path.to_str().expect("utf8"),
+      );
+    }
+    let key = totp_encryption_key().expect("direct env wins");
+    unsafe { std::env::remove_var("TOTP_ENCRYPTION_KEY_FILE") };
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(*key, expected_test_key());
+  }
+
+  #[test]
+  fn totp_key_reads_file_when_env_unset() {
+    let _lock = ENV_LOCK.lock().expect("env lock");
+    let dir = std::env::temp_dir();
+    let path = dir.join(format!("lindaflor-totp-key2-{}", std::process::id()));
+    std::fs::write(&path, format!("{TEST_KEY_B64}\n")).expect("write key file");
+    let _env = set_env("APP_ENV", "development");
+    let _unset = remove_env("TOTP_ENCRYPTION_KEY");
+    unsafe {
+      std::env::set_var(
+        "TOTP_ENCRYPTION_KEY_FILE",
+        path.to_str().expect("utf8"),
+      );
+    }
+    let key = totp_encryption_key().expect("file fallback");
+    unsafe { std::env::remove_var("TOTP_ENCRYPTION_KEY_FILE") };
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(*key, expected_test_key());
+  }
+
+  #[test]
+  fn totp_key_ephemeral_in_dev_and_required_in_production() {
+    let _lock = ENV_LOCK.lock().expect("env lock");
+    let _key = remove_env("TOTP_ENCRYPTION_KEY");
+    let _key_file = remove_env("TOTP_ENCRYPTION_KEY_FILE");
+    let _dev = set_env("APP_ENV", "development");
+    let first = totp_encryption_key().expect("ephemeral dev key");
+    let second = totp_encryption_key().expect("ephemeral dev key");
+    // Stable per process (single OnceLock): encrypt then decrypt works.
+    assert_eq!(*first, *second);
+    assert_ne!(*first, [0u8; 32]);
+    let _prod = set_env("APP_ENV", "production");
+    let err = totp_encryption_key().expect_err("prod requires key");
+    assert!(
+      matches!(err, ConfigError::MissingTotpEncryptionKey),
+      "unexpected error: {err:?}"
+    );
+  }
+
+  #[test]
+  fn totp_key_debug_never_leaks_material() {
+    let _lock = ENV_LOCK.lock().expect("env lock");
+    let _env = set_env("APP_ENV", "development");
+    let _direct = set_env("TOTP_ENCRYPTION_KEY", TEST_KEY_B64);
+    let _file = remove_env("TOTP_ENCRYPTION_KEY_FILE");
+    let key = totp_encryption_key().expect("key");
+    // `Zeroizing` redacts `Debug` (`Zeroizing(..)`): a `{:?}` log or panic
+    // never leaks the key.
+    let rendered = format!("{key:?}");
+    assert!(!rendered.contains("AAEC"), "leaked key: {rendered}");
+    assert!(!rendered.contains("000102"), "leaked key bytes: {rendered}");
+    let err = ConfigError::InvalidTotpEncryptionKey;
+    assert!(!format!("{err:?}").contains("AAEC"));
   }
 
   #[test]

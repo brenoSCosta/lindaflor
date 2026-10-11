@@ -1,6 +1,11 @@
-use rand::{Rng, RngCore};
-use sha2::{Digest, Sha256};
-use totp_rs::{Algorithm, Builder, Secret};
+use argon2::password_hash::{
+  PasswordHasher, PasswordVerifier, phc::PasswordHash,
+};
+use argon2::{Algorithm, Argon2, Params, Version};
+use rand::Rng;
+use totp_rs::{Algorithm as TotpAlgorithm, Builder, Secret};
+
+use crate::auth::password::PasswordError;
 
 pub const ISSUER: &str = "lindaflor";
 const BACKUP_CODE_COUNT: usize = 10;
@@ -10,7 +15,7 @@ pub fn generate_secret(account: &str) -> Result<(String, String), String> {
   let secret = Secret::generate();
   let secret_b32 = secret.to_base32();
   let totp = Builder::new()
-    .with_algorithm(Algorithm::SHA1)
+    .with_algorithm(TotpAlgorithm::SHA1)
     .with_digits(6)
     .with_skew(1)
     .with_step_duration(30)
@@ -32,7 +37,7 @@ pub fn verify_code(secret_b32: &str, code: &str) -> Result<bool, String> {
   let secret =
     Secret::try_from_base32(secret_b32).map_err(|e| e.to_string())?;
   let totp = Builder::new()
-    .with_algorithm(Algorithm::SHA1)
+    .with_algorithm(TotpAlgorithm::SHA1)
     .with_digits(6)
     .with_skew(1)
     .with_step_duration(30)
@@ -54,82 +59,97 @@ pub fn generate_backup_codes() -> Vec<String> {
     .collect()
 }
 
-/// Hash backup codes for storage: `hex(salt)$hex(SHA-256(salt || normalized))`, comma-joined.
-pub fn hash_backup_codes(codes: &[String]) -> String {
-  let mut rng = rand::thread_rng();
+/// Argon2id instance for backup-code hashing.
+///
+/// Parameters `m=8192 KiB, t=2, p=1`: lighter than [`Argon2::default()`]
+/// (`m=19456, t=2, p=1`) on purpose. Hashing consumes 10 codes at
+/// enable/regen time and verifying scans up to 10 entries in the worst
+/// case, so full-strength defaults would push p99 past what a single
+/// `spawn_blocking` slot plus a 5s route timeout comfortably covers —
+/// a DoS amplifier. Online guessing is already capped by
+/// `guard_pending_2fa` (`PENDING_MAX_ATTEMPTS = 5`), so `m=8192` keeps
+/// offline brute force far beyond fast `SHA-256` while staying servable.
+/// `p=1` avoids oversubscribing the blocking pool when consumes run
+/// concurrently. Verification reads cost params from the PHC string, so
+/// this instance also verifies hashes created with different params.
+fn backup_argon2() -> Result<Argon2<'static>, PasswordError> {
+  let params = Params::new(8192, 2, 1, None)
+    .map_err(|e| PasswordError::Hash(e.to_string()))?;
+  Ok(Argon2::new(Algorithm::Argon2id, Version::V0x13, params))
+}
+
+/// Hash backup codes for storage: newline-joined Argon2id PHC strings.
+///
+/// Each entry is `$argon2id$...` — entries are newline-joined (PHC params
+/// contain commas, so comma-join would corrupt entries on split).
+/// Blocking CPU work: callers must run this via
+/// `tokio::task::spawn_blocking`. Never log the inputs.
+pub fn hash_backup_codes(codes: &[String]) -> Result<String, PasswordError> {
+  let argon2 = backup_argon2()?;
   codes
     .iter()
     .map(|code| {
       let normalized = normalize_backup_code(code);
-      let mut salt = [0u8; 16];
-      rng.fill_bytes(&mut salt);
-      let mut hasher = Sha256::new();
-      hasher.update(salt);
-      hasher.update(normalized.as_bytes());
-      let hash = hasher.finalize();
-      format!("{}${}", hex::encode(salt), hex::encode(hash))
+      argon2
+        .hash_password(normalized.as_bytes())
+        .map(|h| h.to_string())
+        .map_err(|e| PasswordError::Hash(e.to_string()))
     })
-    .collect::<Vec<_>>()
-    .join(",")
+    .collect::<Result<Vec<_>, _>>()
+    .map(|entries| entries.join("\n"))
 }
 
-/// Consume one matching backup code. Returns remaining stored entries on match.
+/// Consume one matching backup code. Returns remaining stored entries on
+/// match, `None` on mismatch.
+///
+/// Argon2id PHC only: every entry is one `$argon2id$` PHC string per line.
+/// Malformed entries are skipped so one bad row never fails the other 9.
+/// Blocking CPU work (Argon2): callers must `spawn_blocking` + timeout
+/// *after* `guard_pending_2fa`.
 pub fn consume_backup_code(stored: &str, presented: &str) -> Option<String> {
   let needle = normalize_backup_code(presented);
   if needle.is_empty() {
     return None;
   }
-  let mut entries: Vec<(Vec<u8>, Vec<u8>, String)> = Vec::new();
-  for part in stored.split(',') {
-    let part = part.trim();
-    if part.is_empty() {
+  let mut entries: Vec<String> = Vec::new();
+  for line in stored.split('\n') {
+    let line = line.trim();
+    if line.is_empty() {
       continue;
     }
-    let (salt_hex, hash_hex) = match part.split_once('$') {
-      Some(pair) => pair,
-      None => continue,
-    };
-    let salt = match hex::decode(salt_hex.trim()) {
-      Ok(s) => s,
-      Err(_) => continue,
-    };
-    let expected = match hex::decode(hash_hex.trim()) {
-      Ok(h) => h,
-      Err(_) => continue,
-    };
-    if salt.len() != 16 || expected.len() != 32 {
-      continue;
-    }
-    entries.push((salt, expected, part.to_owned()));
+    entries.push(line.to_owned());
   }
-  let mut match_idx: Option<usize> = None;
-  for (idx, (salt, expected, _)) in entries.iter().enumerate() {
-    let mut hasher = Sha256::new();
-    hasher.update(salt);
-    hasher.update(needle.as_bytes());
-    let candidate = hasher.finalize();
-    if candidate.len() != expected.len() {
+  for (idx, entry) in entries.iter().enumerate() {
+    if !verify_argon2_entry(entry, &needle) {
       continue;
     }
-    let mut diff = 0u8;
-    for (a, b) in candidate.iter().zip(expected.iter()) {
-      diff |= a ^ b;
-    }
-    if diff == 0 {
-      match_idx = Some(idx);
-      break;
-    }
+    let mut remaining = entries.clone();
+    remaining.remove(idx);
+    return Some(remaining.join("\n"));
   }
-  let idx = match_idx?;
-  entries.remove(idx);
-  Some(
-    entries
-      .into_iter()
-      .map(|(_, _, raw)| raw)
-      .collect::<Vec<_>>()
-      .join(","),
-  )
+  None
 }
+
+/// Argon2id verify for one PHC entry. `false` on mismatch *and* on any
+/// parse/param error (malformed entries are skipped, never fatal).
+/// [`Argon2::verify_password`] is constant-time; no manual compare here.
+fn verify_argon2_entry(entry: &str, needle: &str) -> bool {
+  let parsed = match PasswordHash::new(entry) {
+    Ok(parsed) => parsed,
+    Err(_) => return false,
+  };
+  let argon2 = match backup_argon2() {
+    Ok(argon2) => argon2,
+    Err(_) => return false,
+  };
+  // Cost params come from the PHC string itself, so entries hashed with
+  // different params (e.g. a future upgrade) still verify.
+  match argon2.verify_password(needle.as_bytes(), &parsed) {
+    Ok(()) => true,
+    Err(_) => false,
+  }
+}
+
 fn normalize_backup_code(code: &str) -> String {
   code
     .chars()
@@ -157,10 +177,43 @@ mod tests {
   use super::*;
 
   #[test]
+  fn generated_codes_keep_dddd_dddd_format() {
+    for code in generate_backup_codes() {
+      assert_eq!(code.len(), 9, "unexpected code: {code}");
+      let (a, b) = code.split_once('-').expect("dash");
+      assert_eq!(a.len(), 4, "unexpected code: {code}");
+      assert_eq!(b.len(), 4, "unexpected code: {code}");
+      assert!(a.chars().all(|c| c.is_ascii_digit()), "{code}");
+      assert!(b.chars().all(|c| c.is_ascii_digit()), "{code}");
+    }
+  }
+
+  #[test]
+  fn stored_entries_are_argon2id_phc() {
+    let codes = vec!["ABCD-1234".to_string(), "0000-0001".to_string()];
+    let stored = hash_backup_codes(&codes).expect("hash");
+    assert!(
+      !stored.contains("ABCD"),
+      "plaintext must not leak into storage"
+    );
+    let entries: Vec<&str> = stored.split('\n').collect();
+    assert_eq!(entries.len(), 2);
+    for entry in entries {
+      let entry = entry.trim();
+      assert!(entry.starts_with("$argon2id$"), "entry must be PHC");
+      assert!(PasswordHash::new(entry).is_ok(), "entry must parse as PHC");
+      assert!(!entry.contains('\n'), "entries are newline-separated");
+    }
+    // PHC params contain commas — entries must survive a comma split
+    // only when parsed line-wise, never field-wise.
+    assert!(stored.contains(','), "PHC params embed commas");
+  }
+
+  #[test]
   fn round_trip_consume_each_once() {
     let codes = generate_backup_codes();
     assert_eq!(codes.len(), 10);
-    let mut stored = hash_backup_codes(&codes);
+    let mut stored = hash_backup_codes(&codes).expect("hash");
     for code in &codes {
       let remaining = consume_backup_code(&stored, code);
       assert!(remaining.is_some(), "code {code} should match");
@@ -177,7 +230,7 @@ mod tests {
   #[test]
   fn normalization_variants_match() {
     let codes = vec!["ABCD-1234".to_string()];
-    let stored = hash_backup_codes(&codes);
+    let stored = hash_backup_codes(&codes).expect("hash");
     // lowercase + no dash
     assert!(consume_backup_code(&stored, "abcd1234").is_some());
     assert!(consume_backup_code(&stored, "abcd-1234").is_some());
@@ -188,7 +241,7 @@ mod tests {
   #[test]
   fn wrong_code_returns_none() {
     let codes = vec!["ABCD-1234".to_string()];
-    let stored = hash_backup_codes(&codes);
+    let stored = hash_backup_codes(&codes).expect("hash");
     assert!(consume_backup_code(&stored, "ZZZZ-9999").is_none());
     assert!(consume_backup_code(&stored, "").is_none());
     assert!(consume_backup_code(&stored, "---").is_none());
@@ -197,25 +250,69 @@ mod tests {
   }
 
   #[test]
-  fn tampered_stored_hash_does_not_match() {
+  fn tampered_phc_does_not_match() {
     let codes = vec!["ABCD-1234".to_string()];
-    let stored = hash_backup_codes(&codes);
-    let (salt_hex, hash_hex) =
-      stored.split_once('$').expect("stored entry has salt$hash");
-    assert_eq!(salt_hex.len(), 32);
-    assert_eq!(hash_hex.len(), 64);
-    // Flip last hex char of the hash.
-    let mut tampered_hash = hash_hex.to_owned();
-    let last = tampered_hash.pop().unwrap();
-    tampered_hash.push(if last == '0' { '1' } else { '0' });
-    let tampered = format!("{salt_hex}${tampered_hash}");
+    let stored = hash_backup_codes(&codes).expect("hash");
+    assert!(stored.starts_with("$argon2id$"));
+    // Flip last char of the PHC string.
+    let mut tampered = stored.clone();
+    let last = tampered.pop().expect("non-empty");
+    tampered.push(if last == 'A' { 'B' } else { 'A' });
     assert!(consume_backup_code(&tampered, "ABCD-1234").is_none());
+    // Untouched entry still verifies.
+    assert!(consume_backup_code(&stored, "ABCD-1234").is_some());
+  }
 
-    // Malformed entries are skipped.
-    assert!(
-      consume_backup_code("not-valid, ,no-dollar", "ABCD-1234").is_none()
-    );
+  #[test]
+  fn malformed_entries_are_skipped_not_fatal() {
+    let codes = vec!["ABCD-1234".to_string()];
+    let stored = hash_backup_codes(&codes).expect("hash");
+    // Garbage-only stores never match (and never panic).
+    assert!(consume_backup_code("not-valid\nno-dollar", "ABCD-1234").is_none());
     assert!(consume_backup_code("", "ABCD-1234").is_none());
+    // A truncated PHC entry is skipped, not fatal.
+    assert!(
+      consume_backup_code("$argon2id$v=19$m=8192,t=2,p=1,broken", "ABCD-1234")
+        .is_none()
+    );
+    // One valid entry among garbage still consumes.
+    let mixed = format!("garbage-no-dollar\n{stored}\n   \n$argon2id$broken");
+    let remaining =
+      consume_backup_code(&mixed, "ABCD-1234").expect("valid entry matches");
+    // Matched PHC entry removed; garbage + truncated PHC preserved.
+    let lines: Vec<&str> = remaining.lines().collect();
+    assert_eq!(lines, vec!["garbage-no-dollar", "$argon2id$broken"]);
+  }
+
+  #[test]
+  fn non_phc_entries_never_verify() {
+    // PHC-only store: hex$salt-style rows and comma-joined fragments are
+    // just malformed lines — they never match and never corrupt parsing.
+    let stored = hash_backup_codes(&["ABCD-1234".to_string()]).expect("hash");
+    assert!(
+      consume_backup_code(
+        "00112233445566778899aabbccddeeff$fc21e2dc2665f7e70258365faaac64fd04b9d327395956095b4bfdc4982a492d",
+        "1234-5678"
+      )
+      .is_none()
+    );
+    assert!(consume_backup_code(&stored, "ZZZZ-9999").is_none());
+    // Commas are data (PHC params), never a separator: a comma-joined
+    // rewrite of a valid store must not verify.
+    let comma_joined = stored.replace('\n', ",");
+    if comma_joined != stored {
+      assert!(consume_backup_code(&comma_joined, "ABCD-1234").is_none());
+    }
+  }
+
+  #[test]
+  fn empty_store_or_empty_code_returns_none() {
+    let codes = vec!["ABCD-1234".to_string()];
+    let stored = hash_backup_codes(&codes).expect("hash");
+    assert!(consume_backup_code("", "ABCD-1234").is_none());
+    assert!(consume_backup_code("\n", "ABCD-1234").is_none());
+    assert!(consume_backup_code(&stored, "").is_none());
+    assert!(consume_backup_code(&stored, "   ").is_none());
   }
 
   #[test]

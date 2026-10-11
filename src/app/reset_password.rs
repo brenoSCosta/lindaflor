@@ -10,7 +10,8 @@ use topcoat::{
   view::{View, view},
 };
 
-use crate::auth::service::{self, MIN_PASSWORD_LEN, portuguese_error_message};
+use crate::auth::password::{MAX_PASSWORD_LEN, MIN_PASSWORD_LEN};
+use crate::auth::service::{self, portuguese_error_message};
 use crate::components::button::{
   ButtonSize, ButtonVariant, button, button_variants,
 };
@@ -42,6 +43,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let has_token = !token.is_empty();
 
   let min_password_len = MIN_PASSWORD_LEN as f64;
+  let max_password_len = MAX_PASSWORD_LEN as f64;
   let new_password = signal(cx, String::new);
   let new_password_touched = signal(cx, || false);
   let new_password_error = expr!({
@@ -51,6 +53,8 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
       "Informe a nova senha.".to_owned()
     } else if new_password.get().len() < min_password_len {
       "A senha deve ter pelo menos 8 caracteres.".to_owned()
+    } else if new_password.get().len() > max_password_len {
+      "A senha deve ter no máximo 128 caracteres.".to_owned()
     } else {
       "".to_owned()
     }
@@ -73,6 +77,8 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     if new_password.get().is_empty() {
       true
     } else if new_password.get().len() < min_password_len {
+      true
+    } else if new_password.get().len() > max_password_len {
       true
     } else if confirm_password.get().is_empty() {
       true
@@ -134,6 +140,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                           name="new_password"
                                           type="password"
                                           autocomplete="new-password"
+                                          maxlength="128"
                                           aria-describedby="new_password-error"
                                       }
                                   )

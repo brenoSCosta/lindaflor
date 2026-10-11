@@ -8,14 +8,13 @@ use topcoat::{
 use uuid::Uuid;
 
 use crate::auth::CREDENTIAL_PROVIDER_ID;
-use crate::auth::password::hash_password;
+use crate::auth::password::{hash_password, validate_password};
 use crate::auth::routes::dto::{normalize_email, random_token};
 use crate::auth::service::{
   verification_token_hash, verification_token_hash_prefix,
 };
 use crate::auth::session_store;
 
-const MIN_PASSWORD_LEN: usize = 8;
 const RESET_TOKEN_TTL_SECS: i64 = 60 * 60;
 const RESET_IDENTIFIER_PREFIX: &str = "reset-password:";
 
@@ -125,13 +124,11 @@ pub async fn reset_password(
   if body.token.trim().is_empty() {
     return Err(bad_request("token is required").into());
   }
-  if body.new_password.len() < MIN_PASSWORD_LEN {
-    return Err(
-      bad_request(format!(
-        "password must be at least {MIN_PASSWORD_LEN} characters"
-      ))
-      .into(),
-    );
+  // Defense-in-depth: the service re-validates authoritatively with the
+  // account email once the token resolves. The site name alone is enough
+  // for an early weak-input reject here.
+  if let Err(err) = validate_password(&body.new_password, &["lindaflor"]) {
+    return Err(bad_request(err.to_string()).into());
   }
 
   let pool = app_context::<PgPool>(cx);

@@ -7,9 +7,9 @@ use topcoat::{
   icon::{icon, iconify::iconify_icon},
   router::{
     content::{Form, multipart::Multipart},
-    error::bad_request,
+    error::{bad_request, see_other},
     href, page, query_params,
-    response::Response,
+    response::{IntoResponse, Response},
     route,
   },
   runtime::{Event, expr, procedure, signal},
@@ -25,9 +25,12 @@ use crate::auth::avatar::{self as auth_avatar};
 use crate::auth::google::GOOGLE_PROVIDER_ID;
 use crate::auth::password::verify_password;
 use crate::auth::service::{
-  self, LinkedAccount, ListedSession, portuguese_error_message,
+  self, EnableTwoFactorResult, LinkedAccount, ListedSession,
+  portuguese_error_message,
 };
+use crate::auth::session_store;
 use crate::auth::totp::verify_code;
+use crate::auth::totp_crypto::decrypt_row_secret;
 use crate::auth::user::User;
 use crate::components::avatar::{
   AvatarSize, avatar, avatar_fallback, avatar_image,
@@ -37,6 +40,7 @@ use crate::components::button::{ButtonSize, ButtonVariant, button};
 use crate::components::card::{
   card, card_content, card_description, card_header, card_title,
 };
+use crate::components::checkbox::checkbox;
 use crate::components::container::container;
 use crate::components::dialog::{
   dialog, dialog_content, dialog_description, dialog_footer, dialog_header,
@@ -66,12 +70,16 @@ pub struct SettingsInput {
   confirm_email: Option<String>,
   code: Option<String>,
   password: Option<String>,
+  /// Change-password opt-out flag (`revoke_other_sessions=false` keeps
+  /// other sessions). Absent (or any other value) revokes, matching the
+  /// JSON API default. The form renders an unchecked "keep" checkbox whose
+  /// `value="false"` is only sent when the user opts out.
+  revoke_other_sessions: Option<String>,
 }
 
 #[query_params(error = bad_request)]
 struct SettingsQuery {
   tab: Option<String>,
-  setup: Option<String>,
 }
 
 fn initials(name: &str) -> String {
@@ -101,7 +109,7 @@ fn normalize_tab(raw: &str) -> String {
 }
 
 /// Build a `data:image/svg+xml` URI for a TOTP `otpauth://` URI so the
-/// settings page can show a scannable QR code with a plain `<img>`.
+/// setup page can show a scannable QR code with a plain `<img>`.
 /// Returns `None` when the payload cannot be encoded as a QR code.
 fn totp_qr_image_uri(totp_uri: &str) -> Option<String> {
   use qrcode::{QrCode, render::svg};
@@ -109,9 +117,6 @@ fn totp_qr_image_uri(totp_uri: &str) -> Option<String> {
   let svg_xml: String =
     code.render::<svg::Color>().min_dimensions(192, 192).build();
   let mut uri = String::from("data:image/svg+xml,");
-  // Percent-encode characters that cannot appear in a double-quoted
-  // HTML attribute / CSS url(), mirroring `checkmark_style` in
-  // `components/select.rs` plus `<`/`>` for `src` attributes.
   for c in svg_xml.chars() {
     match c {
       '%' => uri.push_str("%25"),
@@ -125,20 +130,50 @@ fn totp_qr_image_uri(totp_uri: &str) -> Option<String> {
   Some(uri)
 }
 
+async fn store_enrollment_flash(cx: &Cx, result: &EnableTwoFactorResult) {
+  let Ok(Some(hash)) = session::token_hash(cx).await else {
+    return;
+  };
+  let Ok(json) = serde_json::to_string(result) else {
+    return;
+  };
+  crate::valkey::totp_enrollment_flash_put(
+    crate::valkey::conn_from(cx),
+    &session_store::token_hash_hex(&hash),
+    &json,
+  )
+  .await;
+}
+
+async fn take_enrollment_flash(cx: &Cx) -> Option<EnableTwoFactorResult> {
+  let hash = session::token_hash(cx).await.ok().flatten()?;
+  let json = crate::valkey::totp_enrollment_flash_take(
+    crate::valkey::conn_from(cx),
+    &session_store::token_hash_hex(&hash),
+  )
+  .await?;
+  serde_json::from_str(&json).ok()
+}
+
+/// Strict one-time display: the TOTP secret is never re-read from the DB.
+/// JSON enable returns it in that response; HTML enable stores it in a
+/// session-scoped flash consumed by [`two_factor_setup`]. `GET /settings`
+/// (including `?setup=1`) never renders secret material.
 #[page(GET "/settings")]
 pub async fn page(cx: &Cx) -> Result<impl View> {
   let su = require_user(cx).await?;
   let pool = app_context::<PgPool>(cx);
   let query = query_params::<SettingsQuery>(cx)?;
   let tab = query.tab.as_deref().unwrap_or("profile").to_string();
-  let setup_mode = query.setup.as_deref() == Some("1");
 
   let sessions = service::list_user_sessions(cx, pool, su.user.id).await?;
   let accounts = service::list_linked_accounts(pool, su.user.id).await?;
-  let pending_setup = if setup_mode || !su.user.two_factor_enabled {
-    service::pending_two_factor_setup(pool, su.user.id).await?
+  // Row-id only: whether a confirm-code form can complete an enrollment.
+  // No secret material is selected here.
+  let pending_enrollment = if !su.user.two_factor_enabled {
+    service::has_unverified_two_factor(pool, su.user.id).await?
   } else {
-    None
+    false
   };
 
   let user_name = su.user.name.clone();
@@ -240,7 +275,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                   <div :hidden=$(active.get() != "security")>
                       security_tab(
                           two_factor_enabled: two_factor_enabled,
-                          pending: pending_setup.clone()
+                          pending_enrollment: pending_enrollment
                       )
                   </div>
                   <div :hidden=$(active.get() != "linked-accounts")>
@@ -258,6 +293,59 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
           <script src=(AVATAR_CROPPER_SCRIPT) defer=""></script>
       )
   })
+}
+
+/// One-time HTML enrollment: consumes the session flash from `enable_2fa`.
+/// A second GET cannot re-read the encrypted DB row.
+#[page(GET "/settings/two-factor")]
+pub async fn two_factor_setup(cx: &Cx) -> Result<impl View> {
+  let su = require_user(cx).await?;
+  let pool = app_context::<PgPool>(cx);
+  let enabled = su.user.two_factor_enabled;
+  let flash = if enabled {
+    None
+  } else {
+    take_enrollment_flash(cx).await
+  };
+  let pending = if !enabled {
+    service::has_unverified_two_factor(pool, su.user.id).await?
+  } else {
+    false
+  };
+  let qr_uri = flash.as_ref().and_then(|f| totp_qr_image_uri(&f.totp_uri));
+  Ok(view! {
+      container(
+          <h1 class="text-2xl font-bold">"Ativar autenticação de dois fatores"</h1>
+          two_factor_setup_card(
+              enabled: enabled,
+              pending: pending,
+              flash: flash,
+              qr_uri: qr_uri
+          )
+      )
+  })
+}
+
+async fn begin_two_factor_enrollment(cx: &Cx) -> Result<Response> {
+  let su = require_user(cx).await?;
+  let pool = app_context::<PgPool>(cx);
+  match service::enable_two_factor(pool, &su.user).await {
+    Ok(result) => {
+      store_enrollment_flash(cx, &result).await;
+      see_other(href!(two_factor_setup).resolve(cx)).into_response(cx)
+    }
+    Err(err) => {
+      set_toast(cx, Toast::error(portuguese_error_message(&err)));
+      toast_redirect(cx, href!(page).query([("tab", "security")]).resolve(cx))
+    }
+  }
+}
+
+/// HTML enable posts here so the browser 303s to a different pathname
+/// (the one-time QR page) with no toast.
+#[route(POST "/settings/two-factor")]
+pub async fn two_factor_setup_enable(cx: &Cx) -> Result<Response> {
+  begin_two_factor_enrollment(cx).await
 }
 
 #[component]
@@ -472,7 +560,8 @@ async fn profile_tab(
 
 #[component]
 async fn account_tab(cx: &Cx, email: String) -> Result<impl View> {
-  let min_password_len = crate::auth::service::MIN_PASSWORD_LEN as f64;
+  let min_password_len = crate::auth::password::MIN_PASSWORD_LEN as f64;
+  let max_password_len = crate::auth::password::MAX_PASSWORD_LEN as f64;
   let new_email = signal(cx, String::new);
   let new_email_touched = signal(cx, || false);
   let new_email_error = expr!({
@@ -508,6 +597,8 @@ async fn account_tab(cx: &Cx, email: String) -> Result<impl View> {
       "Informe a nova senha.".to_owned()
     } else if new_password.get().len() < min_password_len {
       "A senha deve ter pelo menos 8 caracteres.".to_owned()
+    } else if new_password.get().len() > max_password_len {
+      "A senha deve ter no máximo 128 caracteres.".to_owned()
     } else {
       "".to_owned()
     }
@@ -541,6 +632,8 @@ async fn account_tab(cx: &Cx, email: String) -> Result<impl View> {
     } else if new_password.get().is_empty() {
       true
     } else if new_password.get().len() < min_password_len {
+      true
+    } else if new_password.get().len() > max_password_len {
       true
     } else if confirm_password.get().is_empty() {
       true
@@ -650,6 +743,7 @@ async fn account_tab(cx: &Cx, email: String) -> Result<impl View> {
                               name="new_password"
                               type="password"
                               autocomplete="new-password"
+                              maxlength="128"
                               aria-describedby="new_password-error"
                           }
                       )
@@ -680,6 +774,16 @@ async fn account_tab(cx: &Cx, email: String) -> Result<impl View> {
                           attrs: attributes! { id="confirm_password-error" }
                       )
                   )
+                  <div class="flex items-center gap-2">
+                      checkbox(attrs: attributes! {
+                          id="revoke_other_sessions"
+                          name="revoke_other_sessions"
+                          value="false"
+                      })
+                      <label for="revoke_other_sessions" class="text-sm text-muted-foreground">
+                          "Manter outros dispositivos conectados"
+                      </label>
+                  </div>
                   button(
                       blocked: password_blocked,
                       attrs: attributes! { type="submit" class="w-fit" },
@@ -701,6 +805,30 @@ async fn sessions_tab(sessions: Vec<ListedSession>) -> Result<impl View> {
           )
           card_content(
               <div class="flex flex-col gap-3">
+                  if sessions.len() > 1 {
+                      <form
+                          method="post"
+                          action=(href!(settings_post).query([("tab", "sessions")]))
+                          data-toast-promise=""
+                          data-toast-loading="Encerrando outras sessões…"
+                      >
+                          <input type="hidden" name="action" value="revoke_other_sessions">
+                          button(
+                              variant: ButtonVariant::Outline,
+                              size: ButtonSize::Sm,
+                              attrs: attributes! {
+                                  type="submit"
+                                  class="w-fit"
+                                  @click=$(async |e: Event| {
+                                      e.prevent_default();
+                                      revoke_other_sessions_proc().await;
+                                      raw!("location.reload()");
+                                  })
+                              },
+                              "Sair de todos os outros dispositivos"
+                          )
+                      </form>
+                  }
                   for session in sessions {
                       <div class="flex items-center justify-between rounded-lg border border-border p-4">
                           <div>
@@ -754,12 +882,184 @@ async fn sessions_tab(sessions: Vec<ListedSession>) -> Result<impl View> {
 }
 
 #[component]
+async fn two_factor_setup_card(
+  cx: &Cx,
+  enabled: bool,
+  pending: bool,
+  flash: Option<EnableTwoFactorResult>,
+  qr_uri: Option<String>,
+) -> Result<impl View> {
+  let totp_code = signal(cx, String::new);
+  let totp_code_touched = signal(cx, || false);
+  let totp_code_error = expr!({
+    if !totp_code_touched.get() {
+      "".to_owned()
+    } else if totp_code.get().trim().is_empty() {
+      "Informe o código de 6 dígitos.".to_owned()
+    } else if totp_code.get().trim().len() != 6.0 {
+      "O código deve ter 6 dígitos.".to_owned()
+    } else {
+      "".to_owned()
+    }
+  });
+  let totp_blocked = expr!({
+    if totp_code.get().trim().is_empty() {
+      true
+    } else if totp_code.get().trim().len() != 6.0 {
+      true
+    } else {
+      false
+    }
+  });
+  let settings_security = href!(page).query([("tab", "security")]);
+  Ok(view! {
+      card(
+          card_header(
+              card_title("Aplicativo autenticador")
+              card_description(
+                  "Escaneie o QR, guarde os códigos de recuperação e confirme com um código de 6 dígitos. O segredo é exibido só nesta página, uma vez."
+              )
+          )
+          card_content(
+              if enabled {
+                  <div class="flex flex-col gap-3">
+                      <p class="text-sm text-muted-foreground">"A 2FA já está ativada."</p>
+                      <a href=(settings_security) class="text-sm underline">"Voltar às configurações"</a>
+                  </div>
+              } else if let Some(flash) = flash {
+                  <div class="flex flex-col gap-4">
+                      <p class="text-sm text-muted-foreground">
+                          "Escaneie o código no app autenticador ou digite o segredo manualmente, depois confirme com um código de 6 dígitos."
+                      </p>
+                      if let Some(uri) = qr_uri {
+                          <div class="flex flex-col items-center gap-2">
+                              <div class="rounded-lg border border-border bg-white p-3">
+                                  <img src=(uri) alt="QR code para aplicativo autenticador" width="192" height="192" class="size-48">
+                              </div>
+                          </div>
+                      }
+                      <div class="flex flex-col gap-2">
+                          <p class="text-sm font-medium">"Códigos de recuperação"</p>
+                          <p class="text-xs text-muted-foreground">
+                              "Guarde estes códigos em um lugar seguro. Cada um funciona uma vez se você perder o autenticador."
+                          </p>
+                          <ul class="grid grid-cols-2 gap-1 font-mono text-sm">
+                              for code in flash.backup_codes {
+                                  <li>(code.as_str())</li>
+                              }
+                          </ul>
+                      </div>
+                      <form
+                          method="post"
+                          action=(href!(settings_post).query([("tab", "security")]))
+                          class="flex flex-col gap-4"
+                          novalidate=""
+                      >
+                          <input type="hidden" name="action" value="confirm_2fa">
+                          field(
+                              attrs: attributes! {
+                                  :data-invalid=$( (!totp_code_error.is_empty()).then_some("true") )
+                              },
+                              field_label(attrs: attributes! { for="setup-code" }, "Código de 6 dígitos")
+                              input(
+                                  value: totp_code,
+                                  touched: totp_code_touched.clone(),
+                                  error: totp_code_error.clone(),
+                                  attrs: attributes! {
+                                      id="setup-code"
+                                      name="code"
+                                      type="text"
+                                      inputmode="numeric"
+                                      maxlength="6"
+                                      autocomplete="one-time-code"
+                                      aria-describedby="setup-code-error"
+                                  }
+                              )
+                              field_error(
+                                  message: totp_code_error,
+                                  attrs: attributes! { id="setup-code-error" }
+                              )
+                          )
+                          button(
+                              blocked: totp_blocked,
+                              attrs: attributes! { type="submit" class="w-fit" },
+                              "Confirmar 2FA"
+                          )
+                      </form>
+                  </div>
+              } else if pending {
+                  <div class="flex flex-col gap-4">
+                      <p class="text-sm text-muted-foreground">
+                          "O segredo já foi exibido. Confirme com um código do aplicativo, ou gere um novo QR se você o perdeu."
+                      </p>
+                      <form
+                          method="post"
+                          action=(href!(settings_post).query([("tab", "security")]))
+                          class="flex flex-col gap-4"
+                          novalidate=""
+                      >
+                          <input type="hidden" name="action" value="confirm_2fa">
+                          field(
+                              attrs: attributes! {
+                                  :data-invalid=$( (!totp_code_error.is_empty()).then_some("true") )
+                              },
+                              field_label(attrs: attributes! { for="setup-code" }, "Código de 6 dígitos")
+                              input(
+                                  value: totp_code,
+                                  touched: totp_code_touched.clone(),
+                                  error: totp_code_error.clone(),
+                                  attrs: attributes! {
+                                      id="setup-code"
+                                      name="code"
+                                      type="text"
+                                      inputmode="numeric"
+                                      maxlength="6"
+                                      autocomplete="one-time-code"
+                                      aria-describedby="setup-code-error"
+                                  }
+                              )
+                              field_error(
+                                  message: totp_code_error,
+                                  attrs: attributes! { id="setup-code-error" }
+                              )
+                          )
+                          button(
+                              blocked: totp_blocked,
+                              attrs: attributes! { type="submit" class="w-fit" },
+                              "Confirmar 2FA"
+                          )
+                      </form>
+                      <form
+                          method="post"
+                          action=(href!(two_factor_setup_enable))
+                      >
+                          button(
+                              variant: ButtonVariant::Outline,
+                              size: ButtonSize::Sm,
+                              attrs: attributes! { type="submit" class="w-fit" },
+                              "Gerar novo QR"
+                          )
+                      </form>
+                  </div>
+              } else {
+                  <div class="flex flex-col gap-3">
+                      <p class="text-sm text-muted-foreground">
+                          "Nenhum cadastro de 2FA em andamento."
+                      </p>
+                      <a href=(settings_security) class="text-sm underline">"Voltar às configurações"</a>
+                  </div>
+              }
+          )
+      )
+  })
+}
+
+#[component]
 async fn security_tab(
   cx: &Cx,
   two_factor_enabled: bool,
-  pending: Option<(String, String)>,
+  pending_enrollment: bool,
 ) -> Result<impl View> {
-  let qr_uri = pending.as_ref().and_then(|(_, uri)| totp_qr_image_uri(uri));
   let totp_code = signal(cx, String::new);
   let totp_code_touched = signal(cx, || false);
   let totp_code_error = expr!({
@@ -803,30 +1103,18 @@ async fn security_tab(
               )
           )
           card_content(
-              if let Some((secret, totp_uri)) = pending {
+              if !two_factor_enabled && pending_enrollment {
+                  // Confirm-only: secret/QR live on `/settings/two-factor`
+                  // (one-time flash). Re-POST enable rotates the secret.
                   <div class="flex flex-col gap-4">
                       <p class="text-sm text-muted-foreground">
-                          "Escaneie o código no app autenticador ou digite o segredo manualmente, depois confirme com um código de 6 dígitos."
+                          "Cadastro da 2FA iniciado. Confirme com um código de 6 dígitos do aplicativo autenticador. Se não tiver o QR, gere um novo segredo."
                       </p>
-                      if let Some(uri) = qr_uri {
-                          <div class="flex flex-col items-center gap-2">
-                              <div class="rounded-lg border border-border bg-white p-3">
-                                  <img src=(uri) alt="QR code para aplicativo autenticador" width="192" height="192" class="size-48">
-                              </div>
-                          </div>
-                      }
-                      <p class="break-all font-mono text-xs">(secret.as_str())</p>
-                      <details class="text-xs text-muted-foreground">
-                          <summary class="cursor-pointer">"Detalhes para configuração manual"</summary>
-                          <p class="mt-1 break-all">(totp_uri.as_str())</p>
-                      </details>
                       <form
                               method="post"
                               action=(href!(settings_post).query([("tab", "security")]))
                               class="flex flex-col gap-4"
                               novalidate=""
-                              data-toast-promise=""
-                              data-toast-loading="Confirmando…"
                           >
                           <input type="hidden" name="action" value="confirm_2fa">
                           field(
@@ -857,6 +1145,17 @@ async fn security_tab(
                               blocked: totp_blocked,
                               attrs: attributes! { type="submit" class="w-fit" },
                               "Confirmar 2FA"
+                          )
+                      </form>
+                      <form
+                          method="post"
+                          action=(href!(two_factor_setup_enable))
+                      >
+                          button(
+                              variant: ButtonVariant::Outline,
+                              size: ButtonSize::Sm,
+                              attrs: attributes! { type="submit" class="w-fit" },
+                              "Gerar novo QR"
                           )
                       </form>
                   </div>
@@ -915,11 +1214,8 @@ async fn security_tab(
                       } else {
                           <form
                               method="post"
-                                  action=(href!(settings_post).query([("tab", "security")]))
-                                  data-toast-promise=""
-                                  data-toast-loading="Ativando…"
+                              action=(href!(two_factor_setup_enable))
                               >
-                              <input type="hidden" name="action" value="enable_2fa">
                               button(
                                   variant: ButtonVariant::Primary,
                                   size: ButtonSize::Sm,
@@ -1178,6 +1474,18 @@ async fn revoke_session_proc(cx: &Cx, session_id: String) -> Result<bool> {
   Ok(true)
 }
 
+/// JS fast-path for the `revoke_other_sessions` form above. The hidden
+/// `action` input stays as the no-JS fallback; the browser calls this
+/// directly instead of posting the form.
+#[procedure("/settings/revoke-other-sessions")]
+async fn revoke_other_sessions_proc(cx: &Cx) -> Result<bool> {
+  let su = require_user(cx).await?;
+  let pool = app_context::<PgPool>(cx);
+  session_store::delete_all_for_user_except(pool, su.user.id, su.session_id)
+    .await?;
+  Ok(true)
+}
+
 /// JS fast-path for the `unlink` form above. Hidden `provider_id`/`account_id`
 /// inputs stay as the no-JS fallback.
 #[procedure("/settings/unlink-account")]
@@ -1301,15 +1609,15 @@ async fn authorize_immediate_delete(
     .is_some_and(|h| !h.is_empty());
 
   let tf = sqlx::query!(
-    r#"SELECT secret, verified FROM two_factor WHERE user_id = $1"#,
+    r#"SELECT secret_nonce, secret_ciphertext, secret_key_version, verified FROM two_factor WHERE user_id = $1"#,
     user.id,
   )
   .fetch_optional(pool)
   .await
   .map_err(|_| "Não foi possível verificar a conta.".to_string())?;
-  let totp_secret = tf.filter(|row| row.verified).map(|row| row.secret);
+  let verified_row = tf.filter(|row| row.verified);
 
-  if !has_password && totp_secret.is_none() {
+  if !has_password && verified_row.is_none() {
     // OAuth-only account without 2FA: nothing else to check; the e-mail
     // confirmation handled by `delete_user_confirmed` is the only factor.
     return Ok(());
@@ -1342,10 +1650,18 @@ async fn authorize_immediate_delete(
   }
 
   let code = code.trim();
-  if let Some(secret) = totp_secret.as_deref()
+  if let Some(row) = verified_row
     && !code.is_empty()
   {
-    let ok = verify_code(secret, code)
+    // Any decrypt failure fails hard here (the password path above stays
+    // available).
+    let secret = decrypt_row_secret(
+      row.secret_nonce,
+      row.secret_ciphertext,
+      row.secret_key_version,
+    )
+    .map_err(|_| "Não foi possível verificar o código.".to_string())?;
+    let ok = verify_code(secret.as_str(), code)
       .map_err(|_| "Não foi possível verificar o código.".to_string())?;
     if ok {
       return Ok(());
@@ -1360,6 +1676,28 @@ async fn authorize_immediate_delete(
     "Informe sua senha atual ou o código do autenticador para excluir a conta."
       .to_string(),
   )
+}
+
+/// Whether an HTML `change_password` submission revokes other sessions.
+///
+/// Secure default: absent (or any value other than an explicit opt-out)
+/// revokes, matching `POST /api/auth/change-password` where an omitted
+/// `revokeOtherSessions` now defaults to true. The settings form renders an
+/// unchecked "keep connected" checkbox with `value="false"`, so only an
+/// explicit opt-out keeps the other sessions.
+fn html_revoke_other_sessions(raw: Option<&str>) -> bool {
+  match raw.map(str::trim) {
+    None => true,
+    Some(v)
+      if matches!(
+        v.to_ascii_lowercase().as_str(),
+        "false" | "0" | "off" | "no" | "n"
+      ) =>
+    {
+      false
+    }
+    _ => true,
+  }
 }
 
 #[route(POST "/settings")]
@@ -1414,7 +1752,21 @@ pub async fn settings_post(
       )
       .await
       {
-        Ok(()) => ok_redirect(),
+        Ok(()) => {
+          // Credential change: drop other sessions, keep the authorizing one.
+          match session_store::delete_all_for_user_except(
+            pool,
+            su.user.id,
+            su.session_id,
+          )
+          .await
+          {
+            Ok(()) => ok_redirect(),
+            Err(_) => err_redirect(
+              "E-mail atualizado, mas não foi possível encerrar as outras sessões.",
+            ),
+          }
+        }
         Err(err) => err_redirect(&portuguese_error_message(&err)),
       }
     }
@@ -1425,13 +1777,15 @@ pub async fn settings_post(
       if new_password != confirm {
         return err_redirect("As senhas não conferem.");
       }
+      let revoke =
+        html_revoke_other_sessions(body.revoke_other_sessions.as_deref());
       match service::change_password(
         pool,
         su.user.id,
         su.session_id,
         current,
         new_password,
-        true,
+        revoke,
       )
       .await
       {
@@ -1460,26 +1814,29 @@ pub async fn settings_post(
         Err(err) => err_redirect(&portuguese_error_message(&err)),
       }
     }
-    "enable_2fa" => match service::enable_two_factor(pool, &su.user).await {
-      Ok(_) => toast_redirect(
-        cx,
-        href!(page)
-          .query([("tab", "security"), ("setup", "1")])
-          .resolve(cx),
-      ),
-      Err(err) => err_redirect(&portuguese_error_message(&err)),
+    "revoke_other_sessions" => match session_store::delete_all_for_user_except(
+      pool,
+      su.user.id,
+      su.session_id,
+    )
+    .await
+    {
+      Ok(()) => ok_redirect(),
+      Err(_) => err_redirect("Não foi possível encerrar as outras sessões."),
     },
+    "enable_2fa" => begin_two_factor_enrollment(cx).await,
     "confirm_2fa" => {
       let code = body.code.as_deref().unwrap_or("");
       match service::confirm_enable_two_factor(cx, pool, &su.user, code).await {
-        Ok(()) => ok_redirect(),
+        Ok(()) => {
+          set_toast(cx, Toast::success("2FA ativada."));
+          toast_redirect(cx, href!(page).query([("tab", "security")]).resolve(cx))
+        }
         Err(err) => {
           set_toast(cx, Toast::error(portuguese_error_message(&err)));
           toast_redirect(
             cx,
-            href!(page)
-              .query([("tab", "security"), ("setup", "1")])
-              .resolve(cx),
+            href!(page).query([("tab", "security")]).resolve(cx),
           )
         }
       }

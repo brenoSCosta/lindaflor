@@ -182,8 +182,18 @@ fn admin_error_message(err: &topcoat::Error) -> String {
   let msg = err.to_string().to_ascii_lowercase();
   if msg.contains("cannot ban yourself") {
     "Você não pode banir a si mesmo.".into()
+  } else if msg.contains("cannot unban yourself") {
+    "Você não pode desbanir a si mesmo.".into()
   } else if msg.contains("cannot remove yourself") {
     "Você não pode remover a si mesmo.".into()
+  } else if msg.contains("cannot change own role") {
+    "Você não pode alterar seu próprio papel.".into()
+  } else if msg.contains("cannot revoke own session") {
+    "Você não pode revogar sua própria sessão.".into()
+  } else if msg.contains("cannot revoke own sessions") {
+    "Você não pode revogar suas próprias sessões.".into()
+  } else if msg.contains("does not belong") {
+    "Sessão não pertence ao usuário.".into()
   } else if msg.contains("cannot impersonate yourself") {
     "Você não pode atuar como si mesmo.".into()
   } else if msg.contains("already impersonating") {
@@ -923,10 +933,13 @@ async fn revoke_session(
   let Some(session_id) = parse_uuid(&body.session_id) else {
     return invalid_id(cx, &q, page_num);
   };
+  let Some(user_id) = parse_uuid(&body.user_id) else {
+    return invalid_id(cx, &q, page_num);
+  };
   let pool = app_context::<PgPool>(cx);
   let back_to =
     users_url(cx, &q, page_num, Some(("sessoes", body.user_id.trim())));
-  match service::revoke_admin_session(pool, &actor, session_id).await {
+  match service::revoke_admin_session(pool, &actor, session_id, user_id).await {
     Ok(_) => toast_redirect(cx, back_to),
     Err(err) => {
       set_toast(cx, Toast::error(admin_error_message(&err)));

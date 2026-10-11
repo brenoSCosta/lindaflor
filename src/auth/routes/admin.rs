@@ -53,6 +53,7 @@ pub struct UserIdBody {
 #[serde(rename_all = "camelCase")]
 pub struct RevokeUserSessionBody {
   pub session_id: String,
+  pub user_id: String,
 }
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
@@ -347,8 +348,10 @@ pub async fn revoke_user_session(
 ) -> Result<Json<AdminOkStatus>> {
   let actor = admin_actor(cx).await?;
   let session_id = parse_session_id(&body.session_id)?;
+  let expected_user_id = parse_user_id(&body.user_id)?;
   let pool = app_context::<PgPool>(cx);
-  service::revoke_admin_session(pool, &actor, session_id).await?;
+  service::revoke_admin_session(pool, &actor, session_id, expected_user_id)
+    .await?;
   Ok(ok_status())
 }
 

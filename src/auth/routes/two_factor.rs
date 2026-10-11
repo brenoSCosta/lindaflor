@@ -1,4 +1,4 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
@@ -24,6 +24,7 @@ use crate::auth::totp::{
   consume_backup_code, generate_backup_codes, generate_secret,
   hash_backup_codes, verify_code,
 };
+use crate::auth::totp_crypto::{decrypt_row_secret, encrypt_secret};
 use crate::auth::user::{SessionUser, User, current_user, is_currently_banned};
 
 pub const PENDING_2FA_PREFIX: &str = "2fa-pending:";
@@ -243,6 +244,40 @@ async fn verify_account_password(
   Ok(verify_password(password, &stored)?)
 }
 
+/// Argon2id hashing/verification is blocking CPU work: run it on the
+/// blocking pool with a 5s bound. `guard_pending_2fa` (attempt cap) must
+/// already have run before any verify call so expensive hashes cannot be
+/// used as a DoS amplifier. Hash failures are 500s (server-side); verify
+/// timeouts fail closed as 401 without leaking which entry matched.
+async fn hash_backup_codes_async(codes: Vec<String>) -> Result<String> {
+  tokio::time::timeout(
+    Duration::from_secs(5),
+    tokio::task::spawn_blocking(move || hash_backup_codes(&codes)),
+  )
+  .await
+  .map_err(|_| {
+    topcoat::Error::from(std::io::Error::other("backup code hashing timed out"))
+  })?
+  .map_err(|_| {
+    topcoat::Error::from(std::io::Error::other("backup code task failed"))
+  })?
+  .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))
+}
+
+async fn consume_backup_code_async(
+  stored: String,
+  code: String,
+) -> Result<String> {
+  let remaining = tokio::time::timeout(
+    Duration::from_secs(5),
+    tokio::task::spawn_blocking(move || consume_backup_code(&stored, &code)),
+  )
+  .await
+  .map_err(|_| unauthorized())?
+  .map_err(|_| unauthorized())?;
+  remaining.ok_or_else(unauthorized).map_err(Into::into)
+}
+
 // --- DTOs ---
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
@@ -292,8 +327,10 @@ pub struct BackupCodesResponse {
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GenerateBackupCodesBody {
-  /// Optional password re-check.
+  /// Password re-check (required unless a TOTP `code` is supplied).
   pub password: Option<String>,
+  /// TOTP code (alternative to password; for OAuth/passwordless users).
+  pub code: Option<String>,
 }
 
 // --- Routes ---
@@ -303,7 +340,7 @@ pub struct GenerateBackupCodesBody {
     path = "/api/auth/two-factor/enable",
     tag = "auth",
     responses(
-        (status = 200, description = "TOTP enrollment started (unverified)", body = EnableTwoFactorResponse)
+        (status = 200, description = "TOTP enrollment started (unverified). The secret is shown ONCE here — it is stored encrypted and never returned again; re-POST to rotate.", body = EnableTwoFactorResponse)
     )
 )]
 #[route(POST "/api/auth/two-factor/enable")]
@@ -319,7 +356,11 @@ pub async fn enable(cx: &Cx) -> Result<Json<EnableTwoFactorResponse>> {
   let (secret, totp_uri) =
     generate_secret(&su.user.email).map_err(bad_request)?;
   let backup_codes = generate_backup_codes();
-  let backup_stored = hash_backup_codes(&backup_codes);
+  let backup_stored = hash_backup_codes_async(backup_codes.clone()).await?;
+  // Encrypt at enrollment: only this one-time response ever carries the
+  // plaintext. Re-POST rotates via DELETE+INSERT below.
+  let encrypted = encrypt_secret(&secret)
+    .map_err(|e| topcoat::Error::from(std::io::Error::other(e.to_string())))?;
   let id = Uuid::now_v7();
 
   sqlx::query!(r#"DELETE FROM two_factor WHERE user_id = $1"#, su.user.id)
@@ -328,13 +369,15 @@ pub async fn enable(cx: &Cx) -> Result<Json<EnableTwoFactorResponse>> {
 
   sqlx::query!(
     r#"
-        INSERT INTO two_factor (id, secret, backup_codes, user_id, verified)
-        VALUES ($1, $2, $3, $4, false)
+        INSERT INTO two_factor (id, backup_codes, user_id, verified, secret_nonce, secret_ciphertext, secret_key_version)
+        VALUES ($1, $2, $3, false, $4, $5, $6)
         "#,
     id,
-    secret,
     backup_stored,
     su.user.id,
+    encrypted.nonce,
+    encrypted.ciphertext,
+    encrypted.key_version,
   )
   .execute(pool)
   .await?;
@@ -372,7 +415,7 @@ pub async fn verify_totp(
     let (verification_id, user_id) =
       resolve_pending_user_id(pool, token.trim()).await?;
     let tf = sqlx::query!(
-      r#"SELECT secret, verified FROM two_factor WHERE user_id = $1"#,
+      r#"SELECT secret_nonce, secret_ciphertext, secret_key_version, verified FROM two_factor WHERE user_id = $1"#,
       user_id,
     )
     .fetch_optional(pool)
@@ -383,7 +426,15 @@ pub async fn verify_totp(
       return Err(unauthorized().into());
     }
     guard_pending_2fa(cx, pool, token.trim(), user_id, verification_id).await?;
-    if !verify_code(&tf.secret, &code).map_err(bad_request)? {
+    // Fail closed on any decrypt error: indistinguishable from a wrong
+    // code here.
+    let secret = decrypt_row_secret(
+      tf.secret_nonce,
+      tf.secret_ciphertext,
+      tf.secret_key_version,
+    )
+    .map_err(|_| unauthorized())?;
+    if !verify_code(secret.as_str(), &code).map_err(bad_request)? {
       return Err(unauthorized().into());
     }
     reject_totp_replay(cx, user_id, &code).await?;
@@ -411,7 +462,7 @@ pub async fn verify_totp(
   }
 
   let tf = sqlx::query!(
-    r#"SELECT id, secret, verified FROM two_factor WHERE user_id = $1"#,
+    r#"SELECT id, secret_nonce, secret_ciphertext, secret_key_version, verified FROM two_factor WHERE user_id = $1"#,
     su.user.id,
   )
   .fetch_optional(pool)
@@ -423,7 +474,13 @@ pub async fn verify_totp(
       bad_request("two-factor authentication is already verified").into(),
     );
   }
-  if !verify_code(&tf.secret, &code).map_err(bad_request)? {
+  let secret = decrypt_row_secret(
+    tf.secret_nonce,
+    tf.secret_ciphertext,
+    tf.secret_key_version,
+  )
+  .map_err(|_| unauthorized())?;
+  if !verify_code(secret.as_str(), &code).map_err(bad_request)? {
     return Err(unauthorized().into());
   }
   reject_totp_replay(cx, su.user.id, &code).await?;
@@ -481,14 +538,20 @@ pub async fn disable(
     body.code.as_deref().filter(|c| !c.trim().is_empty())
   {
     let tf = sqlx::query!(
-      r#"SELECT secret, verified FROM two_factor WHERE user_id = $1"#,
+      r#"SELECT secret_nonce, secret_ciphertext, secret_key_version, verified FROM two_factor WHERE user_id = $1"#,
       su.user.id,
     )
     .fetch_optional(pool)
     .await?;
     match tf {
       Some(tf) if tf.verified => {
-        let ok = verify_code(&tf.secret, code).map_err(bad_request)?;
+        let secret = decrypt_row_secret(
+          tf.secret_nonce,
+          tf.secret_ciphertext,
+          tf.secret_key_version,
+        )
+        .map_err(|_| unauthorized())?;
+        let ok = verify_code(secret.as_str(), code).map_err(bad_request)?;
         if ok {
           reject_totp_replay(cx, su.user.id, code).await?;
         }
@@ -555,8 +618,9 @@ pub async fn verify_backup_code(
     }
     guard_pending_2fa(cx, pool, token.trim(), user_id, verification_id).await?;
 
+    // Rate-limit guard above runs BEFORE the Argon2 work below.
     let stored =
-      consume_backup_code(&tf.backup_codes, &code).ok_or_else(unauthorized)?;
+      consume_backup_code_async(tf.backup_codes, code.clone()).await?;
     sqlx::query!(
       r#"UPDATE two_factor SET backup_codes = $2 WHERE id = $1"#,
       tf.id,
@@ -593,8 +657,7 @@ pub async fn verify_backup_code(
     return Err(bad_request("two-factor is not verified").into());
   }
 
-  let stored =
-    consume_backup_code(&tf.backup_codes, &code).ok_or_else(unauthorized)?;
+  let stored = consume_backup_code_async(tf.backup_codes, code.clone()).await?;
   sqlx::query!(
     r#"UPDATE two_factor SET backup_codes = $2 WHERE id = $1"#,
     tf.id,
@@ -627,9 +690,43 @@ pub async fn generate_backup_codes_route(
 
   let pool = app_context::<PgPool>(cx);
 
-  if let Some(pw) = body.password.as_deref()
-    && (pw.is_empty() || !verify_account_password(pool, su.user.id, pw).await?)
+  let password_ok = match body.password.as_deref().filter(|p| !p.is_empty()) {
+    Some(pw) => verify_account_password(pool, su.user.id, pw).await?,
+    None => false,
+  };
+
+  let totp_ok = if password_ok {
+    false
+  } else if let Some(code) =
+    body.code.as_deref().filter(|c| !c.trim().is_empty())
   {
+    let tf = sqlx::query!(
+      r#"SELECT secret_nonce, secret_ciphertext, secret_key_version, verified FROM two_factor WHERE user_id = $1"#,
+      su.user.id,
+    )
+    .fetch_optional(pool)
+    .await?;
+    match tf {
+      Some(tf) if tf.verified => {
+        let secret = decrypt_row_secret(
+          tf.secret_nonce,
+          tf.secret_ciphertext,
+          tf.secret_key_version,
+        )
+        .map_err(|_| unauthorized())?;
+        let ok = verify_code(secret.as_str(), code).map_err(bad_request)?;
+        if ok {
+          reject_totp_replay(cx, su.user.id, code).await?;
+        }
+        ok
+      }
+      _ => false,
+    }
+  } else {
+    false
+  };
+
+  if !password_ok && !totp_ok {
     return Err(unauthorized().into());
   }
 
@@ -642,7 +739,8 @@ pub async fn generate_backup_codes_route(
   .ok_or_else(|| bad_request("two-factor is not configured"))?;
 
   let backup_codes = generate_backup_codes();
-  let stored = hash_backup_codes(&backup_codes);
+  // Regen overwrites the whole column with fresh Argon2id PHC.
+  let stored = hash_backup_codes_async(backup_codes.clone()).await?;
   sqlx::query!(
     r#"UPDATE two_factor SET backup_codes = $2 WHERE id = $1"#,
     tf.id,

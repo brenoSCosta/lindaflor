@@ -6,6 +6,7 @@ pub mod service;
 pub mod session_config;
 pub mod session_store;
 pub mod totp;
+pub mod totp_crypto;
 pub mod user;
 
 pub use password::{hash_password, verify_password};

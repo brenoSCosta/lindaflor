@@ -7,7 +7,7 @@ use crate::config;
 
 /// Build a Postgres pool from env (`PG_MAX_CONN`, acquire/idle timeouts).
 ///
-/// Schema changes are **not** applied by the web process in production. 
+/// Schema changes are **not** applied by the web process in production.
 /// Set `MIGRATE_ON_BOOT=1` in development (the default outside
 /// production) or run `scripts/migrate.sh` / `sqlx migrate run` as a
 /// separate migrate job. When boot-migrate is off, pending (or missing)

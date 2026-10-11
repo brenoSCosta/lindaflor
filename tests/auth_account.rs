@@ -1,7 +1,7 @@
 use http::StatusCode;
 use test_support::{
   json_get, json_post, pool_and_router, sign_in, sign_up, unique_email,
-  verification_token,
+  verification_token_like,
 };
 use uuid::Uuid;
 
@@ -9,7 +9,7 @@ use uuid::Uuid;
 async fn update_user_change_password_list_accounts() {
   let (pool, router) = pool_and_router().await;
   let email = unique_email("account");
-  let password = "password123";
+  let password = "Harbor-Violet-Tiger-4821-Lantern!";
 
   let signed_up = sign_up(&router, "Account User", &email, password).await;
   assert_eq!(signed_up.status, StatusCode::OK);
@@ -31,7 +31,7 @@ async fn update_user_change_password_list_accounts() {
     cookie.as_deref(),
     serde_json::json!({
         "currentPassword": password,
-        "newPassword": "password456",
+        "newPassword": "Quilt-Mango-Brave-Pixel-7395?",
     }),
   )
   .await;
@@ -83,7 +83,7 @@ async fn update_user_change_password_list_accounts() {
 async fn delete_user_with_token() {
   let (pool, router) = pool_and_router().await;
   let email = unique_email("delete");
-  let password = "password123";
+  let password = "Harbor-Violet-Tiger-4821-Lantern!";
 
   let signed_up = sign_up(&router, "Delete Me", &email, password).await;
   assert_eq!(signed_up.status, StatusCode::OK);
@@ -99,7 +99,8 @@ async fn delete_user_with_token() {
   .await;
   assert_eq!(request.status, StatusCode::OK, "{:?}", request.json);
 
-  let token = verification_token(&pool, "delete-user:").await;
+  let token =
+    verification_token_like(&pool, &format!("delete-user:{user_id}")).await;
 
   let deleted = json_post(
     &router,
@@ -162,7 +163,13 @@ async fn link_social_unavailable_without_google_env() {
 
   let (_pool, router) = pool_and_router().await;
   let email = unique_email("link");
-  let signed_up = sign_up(&router, "Link User", &email, "password123").await;
+  let signed_up = sign_up(
+    &router,
+    "Link User",
+    &email,
+    "Harbor-Violet-Tiger-4821-Lantern!",
+  )
+  .await;
   assert_eq!(signed_up.status, StatusCode::OK);
   let cookie = signed_up.next_cookie.clone();
 

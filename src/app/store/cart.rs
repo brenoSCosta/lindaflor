@@ -15,6 +15,13 @@ use crate::auth::user::current_user_owned;
 use crate::config::app_env;
 
 pub const CART_COOKIE: &str = "lindaflor_cart";
+/// `__Host-` variant used outside development. `__Host-` requires
+/// `Secure` + `Path=/` + no `Domain`, all of which the cart cookie already
+/// sets (see [`write_cart_token`]); the prefix additionally keeps a
+/// network attacker from planting a sibling-domain cart token. Safe to
+/// rename per env: only the server reads this cookie (`HttpOnly`, never
+/// touched by JS), following the `pending_2fa` pattern.
+pub const CART_COOKIE_HOST: &str = "__Host-lindaflor_cart";
 const CART_COOKIE_MAX_AGE_DAYS: i64 = 30;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -118,33 +125,47 @@ fn is_development() -> bool {
   matches!(app_env().as_str(), "development" | "dev")
 }
 
+fn cart_cookie_secure() -> bool {
+  !is_development()
+}
+
+fn cart_cookie_name() -> &'static str {
+  if cart_cookie_secure() {
+    CART_COOKIE_HOST
+  } else {
+    CART_COOKIE
+  }
+}
+
 pub fn write_cart_token(cx: &Cx, token: Uuid) {
   cookies(cx)
     .override_same_site(SameSite::Lax)
     .override_http_only(true)
-    .override_secure(!is_development())
+    .override_secure(cart_cookie_secure())
     .override_path("/")
     .override_max_age(topcoat::cookie::time::Duration::days(
       CART_COOKIE_MAX_AGE_DAYS,
     ))
-    .add(Cookie::new(CART_COOKIE, token.to_string()));
+    .add(Cookie::new(cart_cookie_name(), token.to_string()));
 }
 
 /// Expire the cart cookie (e.g. on logout) so the header badge falls back
 /// to the guest state instead of stalling on the previous owner's count.
 /// The user's cart rows stay in the DB and are re-attached on next login.
+/// Attributes mirror [`write_cart_token`] (same name/path/`Secure`) so the
+/// expiry overwrites the cookie in every env.
 pub fn clear_cart_token(cx: &Cx) {
   cookies(cx)
     .override_same_site(SameSite::Lax)
     .override_http_only(true)
-    .override_secure(!is_development())
+    .override_secure(cart_cookie_secure())
     .override_path("/")
-    .remove(Cookie::new(CART_COOKIE, ""));
+    .remove(Cookie::new(cart_cookie_name(), ""));
 }
 
 fn read_cookie_value(cx: &Cx) -> Option<String> {
   cookies(cx)
-    .get(CART_COOKIE)
+    .get(cart_cookie_name())
     .map(|cookie| cookie.value().to_string())
     .filter(|value| !value.is_empty())
 }
@@ -228,8 +249,7 @@ async fn get_or_create_user_or_guest(
   insert_cart(pool, user_id).await
 }
 
-/// Read the cart token cookie, create a guest/user cart if needed, and
-/// import a legacy JSON cookie once.
+/// Read the cart token cookie, creating a guest/user cart if needed.
 pub async fn load_or_create_cart(
   cx: &Cx,
   pool: &PgPool,
@@ -252,43 +272,12 @@ pub async fn load_or_create_cart(
     }
   }
 
-  if let Some(ref value) = cookie
-    && parse_token(value).is_none()
-    && let Ok(legacy) = serde_json::from_str::<Vec<CartItem>>(value)
-  {
-    let cart = get_or_create_user_or_guest(pool, user_id).await?;
-    import_legacy_items(pool, cart.id, &legacy).await?;
-    write_cart_token(cx, cart.token);
-    return Ok(CartRef {
-      id: cart.id,
-      token: cart.token,
-    });
-  }
-
   let cart = get_or_create_user_or_guest(pool, user_id).await?;
   write_cart_token(cx, cart.token);
   Ok(CartRef {
     id: cart.id,
     token: cart.token,
   })
-}
-
-async fn import_legacy_items(
-  pool: &PgPool,
-  cart_id: Uuid,
-  items: &[CartItem],
-) -> Result<(), sqlx::Error> {
-  for item in items {
-    let Ok(variant_id) = Uuid::parse_str(&item.variant_id) else {
-      continue;
-    };
-    let quantity = item.quantity.max(1);
-    match add_item_to_cart(pool, cart_id, variant_id, quantity).await {
-      Ok(()) | Err(CartError::InvalidVariant | CartError::OutOfStock) => {}
-      Err(CartError::Db(error)) => return Err(error),
-    }
-  }
-  Ok(())
 }
 
 async fn variant_availability(
