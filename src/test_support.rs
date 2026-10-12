@@ -65,6 +65,33 @@ pub async fn empty_database_url() -> String {
   db._postgres.server().settings().url(&name)
 }
 
+/// Pool on a new, migrated database of its own. Use for tests that act on
+/// every row of a table — e.g. the reservation sweep, which locks other
+/// tests' expired orders with `FOR UPDATE SKIP LOCKED` and makes their own
+/// sweep skip them — so parallel tests can't interfere.
+pub async fn isolated_pool() -> PgPool {
+  let _ = pool().await;
+  let db = DB.get().expect("test db");
+  let name = format!("lindaflor_iso_{}", Uuid::now_v7().simple());
+  db._postgres
+    .server()
+    .create_database(&name)
+    .await
+    .expect("create isolated database");
+  let url = db._postgres.server().settings().url(&name);
+  let pool = PgPoolOptions::new()
+    .max_connections(3)
+    .acquire_timeout(Duration::from_secs(30))
+    .connect(&url)
+    .await
+    .expect("connect isolated pool");
+  sqlx::migrate!("./migrations")
+    .run(&pool)
+    .await
+    .expect("migrate isolated database");
+  pool
+}
+
 /// Pool bound to the current Tokio runtime. Use in `#[tokio::test]` when the
 /// shared [`pool`] connections may have been created on a previous runtime.
 pub async fn fresh_pool() -> PgPool {

@@ -1554,7 +1554,8 @@ mod tests {
 
   #[tokio::test]
   async fn expired_reservation_is_released() {
-    let pool = crate::test_support::fresh_pool().await;
+    // Runs the global reservation sweep: needs a database of its own.
+    let pool = crate::test_support::isolated_pool().await;
     let (_product_id, variant_id) =
       seed_variant(&pool, UNIT_PRICE_CENTS, 2).await;
     let cart_id = seed_cart(&pool, variant_id, 1).await;
@@ -1681,7 +1682,8 @@ mod tests {
 
   #[tokio::test]
   async fn expiry_restores_unique_coupon() {
-    let pool = crate::test_support::fresh_pool().await;
+    // Runs the global reservation sweep: needs a database of its own.
+    let pool = crate::test_support::isolated_pool().await;
     let (_product_id, variant_id) =
       seed_variant(&pool, UNIT_PRICE_CENTS, 2).await;
     let coupon_id = Uuid::now_v7();
