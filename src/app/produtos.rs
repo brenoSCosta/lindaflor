@@ -10,9 +10,13 @@ use topcoat::{
   view::{View, attributes, view},
 };
 
+use crate::app::store::catalog_filters::{
+  catalog_toolbar, repeated_query_values,
+};
 use crate::app::store::queries::{
   CatalogFilters, STOREFRONT_PAGE_SIZE, category_label, clamp_catalog_page,
-  count_products_with_filters, format_price, list_products_with_filters,
+  count_products_with_filters, format_price, list_filter_colors,
+  list_products_with_filters,
 };
 use crate::components::badge::{BadgeVariant, badge};
 use crate::components::breadcrumb::{
@@ -35,8 +39,8 @@ struct ProductsQuery {
   esgotados: Option<bool>,
   page: Option<i64>,
   sort: Option<String>,
-  tamanho: Option<Vec<String>>,
-  cor: Option<Vec<String>>,
+  // `tamanho` / `cor` repeat (one per checkbox); query_params can't read
+  // sequences, so they come from `repeated_query_values` instead.
   preco_min: Option<String>,
   preco_max: Option<String>,
   disponivel: Option<bool>,
@@ -76,7 +80,7 @@ fn price_param_cents(raw: Option<&str>) -> Option<i64> {
 }
 
 /// Normalizes the facet params, which are request input like category/search.
-fn catalog_filters(
+pub(crate) fn catalog_filters(
   sizes: Vec<String>,
   colors: Vec<String>,
   preco_min: Option<&str>,
@@ -125,8 +129,8 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let include_out_of_stock = query.esgotados.unwrap_or(false);
   let page = clamp_catalog_page(query.page.unwrap_or(1));
   let sort = query.sort.clone().unwrap_or_else(|| "destaque".to_string());
-  let tamanho = query.tamanho.clone().unwrap_or_default();
-  let cor = query.cor.clone().unwrap_or_default();
+  let tamanho = repeated_query_values(cx, "tamanho");
+  let cor = repeated_query_values(cx, "cor");
   let preco_min = query.preco_min.as_deref();
   let preco_max = query.preco_max.as_deref();
   let disponivel = query.disponivel.unwrap_or(false);
@@ -198,8 +202,8 @@ async fn catalog_results(
   let search_filter = (!term.is_empty()).then_some(term.as_str());
 
   let filters = catalog_filters(
-    tamanho,
-    cor,
+    tamanho.clone(),
+    cor.clone(),
     preco_min.as_deref(),
     preco_max.as_deref(),
     disponivel,
@@ -246,12 +250,31 @@ async fn catalog_results(
   let products =
     crate::app::admin::produtos::resolve_summary_images(&store, products).await;
 
-  let heading = if term.is_empty() {
+  let available_colors =
+    list_filter_colors(pool, category_filter, None).await?;
+
+  // Update heading for special cases
+  let heading = if sale {
+    "Liquida".to_string()
+  } else if sort_str == "novos" {
+    "Novidades".to_string()
+  } else if term.is_empty() {
     "Catálogo".to_string()
   } else {
     format!("Busca: {term}")
   };
-  let count = total;
+
+  // Prepare toolbar parameters (clone before view! macro to avoid ownership issues)
+  let toolbar_category = active.to_string();
+  let toolbar_search = term.to_string();
+  let toolbar_sort = sort_str.clone();
+  let toolbar_tamanho = tamanho.clone();
+  let toolbar_cor = cor.clone();
+  let toolbar_preco_min = preco_min.map(|s| s.to_string());
+  let toolbar_preco_max = preco_max.map(|s| s.to_string());
+  let toolbar_colors = available_colors.clone();
+
+  let _count = total;
   let is_empty = products.is_empty();
   let show_pagination = total_pages > 1;
   let has_prev = page_num > 1;
@@ -355,80 +378,31 @@ async fn catalog_results(
                   })
               })
 
+          // Filter toolbar
+          catalog_toolbar(
+              category: toolbar_category,
+              search: toolbar_search,
+              sort: toolbar_sort,
+              tamanho: toolbar_tamanho,
+              cor: toolbar_cor,
+              preco_min: toolbar_preco_min,
+              preco_max: toolbar_preco_max,
+              disponivel: disponivel,
+              sale: sale,
+              available_colors: toolbar_colors,
+          )
+
           if is_empty {
               <p class="text-muted-foreground">
                   "Nenhum produto encontrado. "
-                  <button
-                      type="button"
+                  <a
+                      href="/produtos"
                       class="text-primary underline"
-                      @click=$(|_e: Event| {
-                          category.set("all".to_owned());
-                          search.set("".to_owned());
-                          current_page.set(1i64);
-                          let featured_flag = featured_flag.get();
-                          let sold_out_flag = sold_out_flag.get();
-                          raw!(
-                              r#"const params = new URLSearchParams();
-                                 if (String(${featured_flag}) === "true") params.set("destaque", "true");
-                                 if (String(${sold_out_flag}) === "true") params.set("esgotados", "true");
-                                 const qs = params.toString();
-                                 history.replaceState(null, "", qs ? "/produtos?" + qs : "/produtos");"#,
-                              {
-                                  let _ = (featured_flag, sold_out_flag);
-                              }
-                          );
-                      })
                   >
                       "Limpar filtros"
-                  </button>
+                  </a>
               </p>
           } else {
-              <div class="flex items-center justify-between gap-4 mb-6">
-                  <p class="text-sm text-muted-foreground">(count) " peças"</p>
-                  <div>
-                      <label for="sort-select" class="mr-2 text-sm font-medium">
-                          "Ordenar:"
-                      </label>
-                      <select
-                          id="sort-select"
-                          class="rounded border border-input bg-background px-3 py-2 text-sm"
-                          @change=$(|e: Event| {
-                              sort_signal.set(e.target.value);
-                              current_page.set(1i64);
-                              let sort = sort_signal.get();
-                              let category = category.get();
-                              let search = search.get();
-                              let featured_flag = featured_flag.get();
-                              let sold_out_flag = sold_out_flag.get();
-                              raw!(
-                                  r#"const params = new URLSearchParams();
-                                     const sort = String(${sort});
-                                     const category = String(${category});
-                                     const term = String(${search}).trim();
-                                     if (sort !== "destaque") params.set("sort", sort);
-                                     if (category !== "all") params.set("category", category);
-                                     if (term) params.set("search", term);
-                                     if (String(${featured_flag}) === "true") params.set("destaque", "true");
-                                     if (String(${sold_out_flag}) === "true") params.set("esgotados", "true");
-                                     const qs = params.toString();
-                                     history.replaceState(null, "", qs ? "/produtos?" + qs : "/produtos");"#,
-                                  {
-                                      let _ = (sort, category, search, featured_flag, sold_out_flag);
-                                  }
-                              );
-                          })
-                      >
-                          <option value="destaque" selected=(sort_signal.get() == "destaque")>"Em destaque"</option>
-                          <option value="relevantes" selected=(sort_signal.get() == "relevantes")>"Mais relevantes"</option>
-                          <option value="mais_vendidos" selected=(sort_signal.get() == "mais_vendidos")>"Mais vendidos"</option>
-                          <option value="maior_desconto" selected=(sort_signal.get() == "maior_desconto")>"Maior desconto"</option>
-                          <option value="menor_preco" selected=(sort_signal.get() == "menor_preco")>"Menor preço"</option>
-                          <option value="maior_preco" selected=(sort_signal.get() == "maior_preco")>"Maior preço"</option>
-                          <option value="novos" selected=(sort_signal.get() == "novos")>"Mais novos"</option>
-                          <option value="antigos" selected=(sort_signal.get() == "antigos")>"Mais antigos"</option>
-                      </select>
-                  </div>
-              </div>
               <div class="grid gap-4 @sm/page:grid-cols-2 @2xl/page:grid-cols-3">
                   #[key(product.id.to_string())]
                   for product in products {

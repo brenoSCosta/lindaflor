@@ -73,19 +73,19 @@ const SIZES: [ProductSize; 5] = [
   ProductSize::Gg,
 ];
 
-const COLORS: [&str; 12] = [
-  "Verde Tropical",
-  "Floral",
-  "Azul Escandinavo",
-  "Branco",
-  "Preto",
-  "Vermelho",
-  "Rosa",
-  "Amarelo",
-  "Terracota",
-  "Maré",
-  "Areia",
-  "Geométrico",
+const COLORS: [(&str, &str); 12] = [
+  ("Verde Tropical", "#2D5016"),
+  ("Floral", "#E8A0BF"),
+  ("Azul Escandinavo", "#4A90E2"),
+  ("Branco", "#F5F5F5"),
+  ("Preto", "#111111"),
+  ("Vermelho", "#E63946"),
+  ("Rosa", "#FFB4D1"),
+  ("Amarelo", "#FFD60A"),
+  ("Terracota", "#C84E00"),
+  ("Maré", "#0A9FB5"),
+  ("Areia", "#D4B896"),
+  ("Geométrico", "#7B68EE"),
 ];
 
 fn env_str(key: &str, default: &str) -> String {
@@ -151,30 +151,67 @@ async fn seed_warehouse(pool: &PgPool) -> Result<Uuid, SeedError> {
   Ok(id)
 }
 
+const FIRST_PURCHASE_COUPON: &str = "BEMVINDA10";
+
 async fn seed_settings(pool: &PgPool) -> Result<(), SeedError> {
   let existing = sqlx::query!("SELECT id FROM store_settings LIMIT 1")
     .fetch_optional(pool)
     .await?;
 
   if existing.is_some() {
-    return Ok(());
-  }
-
-  sqlx::query!(
-        "INSERT INTO store_settings (id, pix_key, pix_key_type, pix_merchant_name, pix_merchant_city, whatsapp_number, whatsapp_message_template, created_at, updated_at)
-         VALUES ($1, $2, 'phone', 'Linda Flor Moda Praia', 'Aracaju', $3, $4, now(), now())",
-        Uuid::now_v7(),
-        env_str("SEED_PIX_KEY", "79998165115"),
-        env_str("SEED_WHATSAPP_NUMBER", "557998165115"),
-        env_str(
-            "SEED_WHATSAPP_MESSAGE_TEMPLATE",
-            "Olá! Fiz o pedido {{order_id}} no valor de {{total}} e quero confirmar o pagamento via PIX.",
-        ),
+    // Leave an existing row alone: admins may have cleared or changed these.
+    tracing::info!("Store settings already present, leaving unchanged");
+  } else {
+    sqlx::query(
+        "INSERT INTO store_settings (id, pix_key, pix_key_type, pix_merchant_name, pix_merchant_city, pix_discount_percent, announcement_text, first_purchase_coupon_code, whatsapp_number, whatsapp_message_template, created_at, updated_at)
+         VALUES ($1, $2, 'phone', 'Linda Flor Moda Praia', 'Aracaju', 5, NULL, $5, $3, $4, now(), now())",
     )
+    .bind(Uuid::now_v7())
+    .bind(env_str("SEED_PIX_KEY", "79998165115"))
+    .bind(env_str("SEED_WHATSAPP_NUMBER", "557998165115"))
+    .bind(env_str(
+        "SEED_WHATSAPP_MESSAGE_TEMPLATE",
+        "Olá! Fiz o pedido {{order_id}} no valor de {{total}} e quero confirmar o pagamento via PIX.",
+    ))
+    .bind(FIRST_PURCHASE_COUPON)
     .execute(pool)
     .await?;
 
-  tracing::info!("Store settings created");
+    tracing::info!("Store settings created");
+  }
+
+  // The storefront advertises this code, so it must exist as a real coupon:
+  // 10% off, once per customer.
+  sqlx::query(
+    "INSERT INTO coupons (id, code, discount_type, discount_value, min_subtotal_cents, active, usage_type, per_user_limit, created_at, updated_at)
+     VALUES ($1, $2, 'percent', 10, 0, true, 'unlimited', 1, now(), now())
+     ON CONFLICT (code) DO NOTHING",
+  )
+  .bind(Uuid::now_v7())
+  .bind(FIRST_PURCHASE_COUPON)
+  .execute(pool)
+  .await?;
+
+  // Insert home banners if empty
+  let banner_count: i64 =
+    sqlx::query_scalar("SELECT COUNT(*) FROM home_banners")
+      .fetch_one(pool)
+      .await?;
+
+  if banner_count == 0 {
+    sqlx::query(
+        "INSERT INTO home_banners (id, title, subtitle, cta_label, link_url, image_url, sort_order, active, created_at)
+         VALUES
+         ($1, 'Verão 2027', 'Coleção Nova', 'Explorar', '/produtos?sort=novos', 'https://images.unsplash.com/photo-1519046904884-53103b34b206?w=1200&h=600&fit=crop', 0, true, now()),
+         ($2, 'Liquida', '20% OFF', 'Ver Liquida', '/produtos?sale=true', 'https://images.unsplash.com/photo-1505252585461-04db1267ae5b?w=1200&h=600&fit=crop', 1, true, now())",
+    )
+    .bind(Uuid::now_v7())
+    .bind(Uuid::now_v7())
+    .execute(pool)
+    .await?;
+    tracing::info!("Home banners created");
+  }
+
   Ok(())
 }
 
@@ -223,6 +260,8 @@ async fn seed_products(
   let stock_min = env_num("SEED_STOCK_MIN", 5)?;
   let stock_max = env_num("SEED_STOCK_MAX", 30)?;
   let mut rng = rand::thread_rng();
+  let mut top_biquini_ids = Vec::new();
+  let mut calcinha_biquini_ids = Vec::new();
 
   for i in 0..count {
     let name = PRODUCT_NAMES[i as usize % PRODUCT_NAMES.len()];
@@ -247,6 +286,13 @@ async fn seed_products(
     } else {
       price_min
     };
+    // Set compare_at_price_in_cents on ~1/3 of products (20-40% above price)
+    let compare_at_price = if (i + 1) % 3 == 0 {
+      let markup = (120 + rng.gen_range(0..=20)) as i64; // 120-140% of price
+      Some((price as i64 * markup) / 100)
+    } else {
+      None
+    };
     let featured = (i + 1) % 3 == 0;
     let collection_id = if collection_ids.is_empty() {
       None
@@ -254,66 +300,109 @@ async fn seed_products(
       Some(collection_ids[i as usize % collection_ids.len()])
     };
 
-    sqlx::query!(
-            "INSERT INTO products (id, name, slug, description, price_in_cents, category, collection_id, active, featured, created_at, updated_at)
-             VALUES ($1, $2, $3, NULL, $4, $5, $6, true, $7, now(), now())",
-            id,
-            name,
-            slug,
-            price,
-            category as _,
-            collection_id,
-            featured,
+    sqlx::query(
+            "INSERT INTO products (id, name, slug, description, price_in_cents, compare_at_price_in_cents, category, collection_id, active, featured, created_at, updated_at)
+             VALUES ($1, $2, $3, NULL, $4, $5, $6::product_category, $7, true, $8, now(), now())",
         )
+        .bind(id)
+        .bind(name)
+        .bind(&slug)
+        .bind(price)
+        .bind(compare_at_price)
+        .bind(match category {
+          ProductCategory::Biquini => "biquini",
+          ProductCategory::TopBiquini => "top_biquini",
+          ProductCategory::CalchinhaBiquini => "calcinha_biquini",
+          ProductCategory::Maio => "maio",
+          ProductCategory::SaidaPraia => "saida_praia",
+          ProductCategory::Acessorio => "acessorio",
+        })
+        .bind(collection_id)
+        .bind(featured)
         .execute(pool)
         .await?;
+
+    // Track top_biquini and calcinha_biquini IDs for linking
+    match category {
+      ProductCategory::TopBiquini => top_biquini_ids.push(id),
+      ProductCategory::CalchinhaBiquini => calcinha_biquini_ids.push(id),
+      _ => {}
+    }
 
     let mut sizes = SIZES.to_vec();
     sizes.shuffle(&mut rng);
     let variant_count = rng.gen_range(1..=5);
 
     for size in sizes.iter().take(variant_count) {
-      let color = COLORS.choose(&mut rng).copied().unwrap();
+      let (color_name, color_hex) = COLORS.choose(&mut rng).copied().unwrap();
       let variant_id = Uuid::now_v7();
       let sku = format!("{}-{}", slug, size.as_str());
 
-      sqlx::query!(
-                "INSERT INTO product_variants (id, product_id, sku, size, color, price_in_cents, low_stock_threshold, created_at, updated_at)
-                 VALUES ($1, $2, $3, $4, $5, NULL, 5, now(), now())",
-                variant_id,
-                id,
-                sku,
-                size as _,
-                color,
+      sqlx::query(
+                "INSERT INTO product_variants (id, product_id, sku, size, color, color_hex, price_in_cents, low_stock_threshold, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4::product_size, $5, $6, NULL, 5, now(), now())",
             )
+            .bind(variant_id)
+            .bind(id)
+            .bind(&sku)
+            .bind(size.as_str())
+            .bind(color_name)
+            .bind(color_hex)
             .execute(pool)
             .await?;
 
       let quantity = rng.gen_range(stock_min..=stock_max);
-      sqlx::query!(
+      sqlx::query(
                 "INSERT INTO inventory (id, variant_id, warehouse_id, quantity, reserved, updated_at)
                  VALUES ($1, $2, $3, $4, 0, now())",
-                Uuid::now_v7(),
-                variant_id,
-                warehouse_id,
-                quantity,
             )
+            .bind(Uuid::now_v7())
+            .bind(variant_id)
+            .bind(warehouse_id)
+            .bind(quantity)
             .execute(pool)
             .await?;
     }
 
-    sqlx::query!(
+    sqlx::query(
             "INSERT INTO product_images (id, product_id, url, alt, sort_order, created_at)
              VALUES ($1, $2, $3, $4, 0, now())",
-            Uuid::now_v7(),
-            id,
-            format!("https://picsum.photos/seed/{}/1200/1200", slug),
-            name,
         )
+        .bind(Uuid::now_v7())
+        .bind(id)
+        .bind(format!("https://picsum.photos/seed/{}/1200/1200", slug))
+        .bind(name)
         .execute(pool)
         .await?;
 
     tracing::info!("Product created: {} ({})", name, slug);
+  }
+
+  // Link top_biquini and calcinha_biquini products (both directions)
+  for top_id in &top_biquini_ids {
+    for calcinha_id in &calcinha_biquini_ids {
+      // Link top to calcinha
+      sqlx::query(
+        "INSERT INTO product_looks (product_id, related_product_id, sort_order)
+         VALUES ($1, $2, 0)
+         ON CONFLICT DO NOTHING",
+      )
+      .bind(top_id)
+      .bind(calcinha_id)
+      .execute(pool)
+      .await?;
+
+      // Link calcinha to top (both directions)
+      sqlx::query(
+        "INSERT INTO product_looks (product_id, related_product_id, sort_order)
+         VALUES ($1, $2, 0)
+         ON CONFLICT DO NOTHING",
+      )
+      .bind(calcinha_id)
+      .bind(top_id)
+      .execute(pool)
+      .await?;
+    }
   }
 
   Ok(())

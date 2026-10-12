@@ -12,8 +12,9 @@ use uuid::Uuid;
 use super::{
   MAX_IMAGES_PER_PRODUCT, MSG_COUNT, collect_multipart, db_error_message,
   ensure_default_warehouse, first_text, optional_description,
-  parse_price_cents, parse_quantity, save_product_image, validate_category,
-  validate_image, validate_name, validate_size, validate_slug,
+  parse_compare_at_price, parse_price_cents, parse_quantity,
+  save_product_image, validate_category, validate_color_hex, validate_image,
+  validate_name, validate_size, validate_slug,
 };
 use crate::app::auth_helpers::require_admin;
 use crate::app::utils::object_store;
@@ -76,6 +77,18 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                               })
                           </div>
                           <div class="space-y-2">
+                              label(attrs: attributes! { for="compare_at_price" }, "Preço original (de)")
+                              input(attrs: attributes! {
+                                  type="text"
+                                  name="compare_at_price"
+                                  id="compare_at_price"
+                                  placeholder="249.90"
+                              })
+                          </div>
+                      </div>
+
+                      <div class="grid gap-4 @sm/page:grid-cols-2">
+                          <div class="space-y-2">
                               label(attrs: attributes! { for="category" }, "Categoria")
                               select(
                                   attrs: attributes! { name="category" id="category" },
@@ -109,7 +122,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                       <fieldset class="space-y-4 rounded-xl border border-border p-2">
                           <legend class="px-2 font-medium">"Variantes"</legend>
                           <div class="flex flex-col gap-4">
-                              <div class="grid grid-cols-1 gap-4 rounded-lg border border-border p-4 @sm/page:grid-cols-2 @lg/page:grid-cols-4">
+                              <div class="grid grid-cols-1 gap-4 rounded-lg border border-border p-4 @sm/page:grid-cols-2 @lg/page:grid-cols-6">
                                   <div class="space-y-2">
                                       label("SKU")
                                       input(attrs: attributes! {
@@ -137,6 +150,14 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                           name="variant_color[]"
                                           placeholder="Cor"
                                           required=""
+                                      })
+                                  </div>
+                                  <div class="space-y-2">
+                                      label("Cor (hex)")
+                                      input(attrs: attributes! {
+                                          type="text"
+                                          name="variant_color_hex[]"
+                                          placeholder="#000000"
                                       })
                                   </div>
                                   <div class="space-y-2">
@@ -171,6 +192,7 @@ struct NewVariant {
   sku: String,
   size: String,
   color: String,
+  color_hex: Option<String>,
   quantity: i32,
 }
 
@@ -200,6 +222,13 @@ async fn create_product(cx: &Cx, multipart: Multipart) -> Result<Response> {
       Ok(price) => price,
       Err(message) => return fail(message),
     };
+  let compare_at_price = match parse_compare_at_price(
+    &first_text(&form.texts, "compare_at_price"),
+    price_in_cents as i64,
+  ) {
+    Ok(price) => price,
+    Err(message) => return fail(message),
+  };
   let category = match validate_category(&first_text(&form.texts, "category")) {
     Ok(category) => category,
     Err(message) => return fail(message),
@@ -217,6 +246,11 @@ async fn create_product(cx: &Cx, multipart: Multipart) -> Result<Response> {
   let colors = form
     .texts
     .get("variant_color[]")
+    .cloned()
+    .unwrap_or_default();
+  let color_hexes = form
+    .texts
+    .get("variant_color_hex[]")
     .cloned()
     .unwrap_or_default();
   let quantities = form
@@ -245,6 +279,12 @@ async fn create_product(cx: &Cx, multipart: Multipart) -> Result<Response> {
     if color.is_empty() {
       return fail("Toda variante precisa de uma cor.");
     }
+    let color_hex = match validate_color_hex(
+      color_hexes.get(index).map(|s| s.as_str()).unwrap_or(""),
+    ) {
+      Ok(hex) => hex,
+      Err(message) => return fail(message),
+    };
     let quantity = match parse_quantity(&quantities[index]) {
       Ok(quantity) => quantity,
       Err(message) => return fail(message),
@@ -253,6 +293,7 @@ async fn create_product(cx: &Cx, multipart: Multipart) -> Result<Response> {
       sku: sku.to_string(),
       size,
       color: color.to_string(),
+      color_hex,
       quantity,
     });
   }
@@ -282,14 +323,15 @@ async fn create_product(cx: &Cx, multipart: Multipart) -> Result<Response> {
 
   let product_id = Uuid::now_v7();
   if let Err(err) = sqlx::query(
-    "INSERT INTO products (id, name, slug, description, price_in_cents, category, active, featured, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6::product_category, true, $7, now(), now())",
+    "INSERT INTO products (id, name, slug, description, price_in_cents, compare_at_price_in_cents, category, active, featured, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::product_category, true, $8, now(), now())",
   )
   .bind(product_id)
   .bind(&name)
   .bind(&slug)
   .bind(&description)
   .bind(price_in_cents)
+  .bind(compare_at_price)
   .bind(&category)
   .bind(featured)
   .execute(pool)
@@ -301,14 +343,15 @@ async fn create_product(cx: &Cx, multipart: Multipart) -> Result<Response> {
   for variant in &variants {
     let variant_id = Uuid::now_v7();
     let inserted = sqlx::query(
-      "INSERT INTO product_variants (id, product_id, sku, size, color, price_in_cents, low_stock_threshold, created_at, updated_at)
-       VALUES ($1, $2, $3, $4::product_size, $5, NULL, 5, now(), now())",
+      "INSERT INTO product_variants (id, product_id, sku, size, color, color_hex, price_in_cents, low_stock_threshold, created_at, updated_at)
+       VALUES ($1, $2, $3, $4::product_size, $5, $6, NULL, 5, now(), now())",
     )
     .bind(variant_id)
     .bind(product_id)
     .bind(&variant.sku)
     .bind(&variant.size)
     .bind(&variant.color)
+    .bind(&variant.color_hex)
     .execute(pool)
     .await;
     if let Err(err) = inserted {

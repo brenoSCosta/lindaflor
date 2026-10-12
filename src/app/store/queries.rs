@@ -34,10 +34,12 @@ pub struct ProductDetail {
   pub slug: String,
   pub description: Option<String>,
   pub price_in_cents: i64,
+  pub compare_at_price_in_cents: Option<i64>,
   pub category: String,
 
   pub images: Vec<ProductImage>,
   pub variants: Vec<ProductVariant>,
+  pub colors: Vec<(String, Option<String>)>,
 }
 
 #[derive(Clone)]
@@ -209,6 +211,7 @@ fn append_product_filters(
   }
 }
 
+#[derive(Clone)]
 pub struct CatalogFilters {
   pub sizes: Vec<String>,
   pub colors: Vec<String>,
@@ -669,7 +672,7 @@ pub async fn get_product_by_slug(
   slug: &str,
 ) -> Result<Option<ProductDetail>, sqlx::Error> {
   let row = sqlx::query!(
-        "SELECT id, name, slug, description, price_in_cents, category::text AS \"category!\"
+        "SELECT id, name, slug, description, price_in_cents, compare_at_price_in_cents, category::text AS \"category!\"
          FROM products WHERE slug = $1 AND active = true",
         slug
     )
@@ -701,12 +704,30 @@ pub async fn get_product_by_slug(
     .fetch_all(pool)
     .await?;
 
+  let colors_row = sqlx::query_scalar::<_, String>(
+    "SELECT COALESCE(
+              (SELECT json_agg(json_build_array(pv.color, pv.color_hex) ORDER BY pv.color ASC)
+               FROM (SELECT DISTINCT ON (pv.color) pv.color, pv.color_hex
+                     FROM product_variants pv
+                     WHERE pv.product_id = $1
+                     ORDER BY pv.color ASC, pv.color_hex ASC) pv),
+              '[]'::json
+            )::text"
+  )
+  .bind(product.id)
+  .fetch_one(pool)
+  .await?;
+
+  let colors: Vec<(String, Option<String>)> =
+    serde_json::from_str(&colors_row).unwrap_or_default();
+
   Ok(Some(ProductDetail {
     id: product.id,
     name: product.name,
     slug: product.slug,
     description: product.description,
     price_in_cents: product.price_in_cents,
+    compare_at_price_in_cents: product.compare_at_price_in_cents,
     category: product.category,
     images: images.into_iter().map(|i| i.into()).collect(),
     variants: variants
@@ -720,6 +741,7 @@ pub async fn get_product_by_slug(
         available: v.available.unwrap_or(0),
       })
       .collect(),
+    colors,
   }))
 }
 
@@ -861,4 +883,46 @@ impl From<ProductImageRow> for ProductImage {
       alt: r.alt,
     }
   }
+}
+
+/// Related products from the product_looks table, ordered by sort_order.
+pub async fn list_product_looks(
+  pool: &PgPool,
+  product_id: Uuid,
+) -> Result<Vec<ProductSummary>, sqlx::Error> {
+  let rows = sqlx::query_as::<_, ProductSummaryRow>(&format!(
+    "SELECT {PRODUCT_SUMMARY_COLUMNS}
+       FROM product_looks pl
+       INNER JOIN products p ON p.id = pl.related_product_id
+       WHERE pl.product_id = $1 AND p.active = true
+       ORDER BY pl.sort_order ASC"
+  ))
+  .bind(product_id)
+  .fetch_all(pool)
+  .await?;
+  Ok(rows.into_iter().map(|r| r.into()).collect())
+}
+
+/// Distinct colors (one hex per name) among active products, for the filter
+/// panel; optionally narrowed to a category or collection.
+pub async fn list_filter_colors(
+  pool: &PgPool,
+  category: Option<&str>,
+  collection_slug: Option<&str>,
+) -> Result<Vec<(String, Option<String>)>, sqlx::Error> {
+  sqlx::query_as::<_, (String, Option<String>)>(
+    "SELECT DISTINCT ON (pv.color) pv.color, pv.color_hex
+     FROM product_variants pv
+     INNER JOIN products p ON p.id = pv.product_id
+     LEFT JOIN collections c ON c.id = p.collection_id
+     WHERE p.active = true
+       AND ($1::text IS NULL OR p.category::text = $1)
+       AND ($2::text IS NULL OR c.slug = $2)
+     ORDER BY pv.color ASC, pv.color_hex ASC NULLS LAST
+     LIMIT 30",
+  )
+  .bind(category)
+  .bind(collection_slug)
+  .fetch_all(pool)
+  .await
 }

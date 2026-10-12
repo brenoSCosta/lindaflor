@@ -64,7 +64,7 @@ fn parse_page(raw: &Option<String>) -> i64 {
     .unwrap_or(1)
 }
 
-fn category_labels(cat: &str) -> &str {
+pub(crate) fn category_labels(cat: &str) -> &str {
   match cat {
     "biquini" => "Biquíni",
     "top_biquini" => "Top de Biquíni",
@@ -415,6 +415,51 @@ pub(crate) fn parse_price_cents(raw: &str) -> Result<i32, &'static str> {
     return Err("Preço inválido. Use 199.90.");
   }
   Ok((value * 100.0).round() as i32)
+}
+
+/// Parse optional compare_at_price_in_cents (must be empty or greater than main price).
+pub(crate) fn parse_compare_at_price(
+  raw: &str,
+  main_price_cents: i64,
+) -> Result<Option<i64>, &'static str> {
+  let trimmed = raw.trim();
+  if trimmed.is_empty() {
+    return Ok(None);
+  }
+  let normalized = if trimmed.contains(',') {
+    trimmed.replace('.', "").replace(',', ".")
+  } else {
+    trimmed.to_string()
+  };
+  let value: f64 = normalized
+    .parse()
+    .map_err(|_| "Preço original inválido. Use 199.90.")?;
+  if !value.is_finite() || value <= 0.0 || value > 9_999_999.0 {
+    return Err("Preço original inválido. Use 199.90.");
+  }
+  let compare_cents = (value * 100.0).round() as i64;
+  if compare_cents <= main_price_cents {
+    return Err("Preço original deve ser maior que o preço do produto.");
+  }
+  Ok(Some(compare_cents))
+}
+
+/// Validate hex color code (must match `^#[0-9A-Fa-f]{6}$` or be empty).
+pub(crate) fn validate_color_hex(
+  raw: &str,
+) -> Result<Option<String>, &'static str> {
+  let trimmed = raw.trim();
+  if trimmed.is_empty() {
+    return Ok(None);
+  }
+  if trimmed.len() != 7 || !trimmed.starts_with('#') {
+    return Err("Cor (hex) inválida. Use o formato #RRGGBB.");
+  }
+  let hex_part = &trimmed[1..];
+  if !hex_part.chars().all(|c| c.is_ascii_hexdigit()) {
+    return Err("Cor (hex) inválida. Use o formato #RRGGBB.");
+  }
+  Ok(Some(trimmed.to_uppercase()))
 }
 
 pub(crate) fn parse_quantity(raw: &str) -> Result<i32, &'static str> {

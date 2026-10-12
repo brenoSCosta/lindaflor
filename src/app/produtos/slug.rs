@@ -13,10 +13,13 @@ use uuid::Uuid;
 use crate::app::store::cart::{
   CartError, add_item, add_to_cart_proc, load_or_create_cart,
 };
+use crate::app::store::pricing::{discount_percent, pix_price};
+use crate::app::store::product_card::product_card;
 use crate::app::store::queries::{
   DEFAULT_WHATSAPP_NUMBER, category_label, format_price, get_product_by_slug,
   get_store_settings, size_label, whatsapp_link,
 };
+use crate::app::store::wishlist::{liked_product_ids, wishlist_button};
 use crate::auth::user::current_user_owned;
 use crate::components::accordion::{
   accordion, accordion_content, accordion_item, accordion_trigger,
@@ -34,6 +37,7 @@ use crate::components::card::{
 };
 use crate::components::container::container;
 use crate::components::separator::separator;
+use topcoat::icon::{icon, iconify::iconify_icon};
 
 path_param!(pub(crate) slug);
 
@@ -195,6 +199,23 @@ pub async fn page(
   let add_variant_id = selected_variant_id_attr.clone();
   let empty_error = String::new();
 
+  let pix_discount_percent = settings.pix_discount_percent;
+  let pix_price_cents = if pix_discount_percent > 0 {
+    pix_price(price, pix_discount_percent)
+  } else {
+    0
+  };
+  let discount_badge_text =
+    discount_percent(product.compare_at_price_in_cents, product.price_in_cents)
+      .map(|pct| format!("-{pct}%"));
+
+  let looks =
+    crate::app::store::queries::list_product_looks(pool, product.id).await?;
+  let looks = resolve_summaries(&store, looks).await;
+
+  let liked = liked_product_ids(cx).await.contains(&product.id);
+  let product_id = product.id.to_string();
+
   Ok(view! {
         container(
             breadcrumb(
@@ -209,11 +230,16 @@ pub async fn page(
 
             <div class="grid gap-4 @3xl/page:grid-cols-2">
                 <div class="space-y-4">
-                    <div class="overflow-hidden rounded-xl border border-border">
-                        <div class="aspect-[4/5]">
+                    <div class="relative overflow-hidden rounded-xl border border-border">
+                        <div class="aspect-[4/5] bg-foreground/5 flex items-center justify-center">
                             if let Some(url) = main_image_url {
                                 <img src=(url) alt=(main_image_alt) class="h-full w-full object-cover">
+                            } else {
+                                icon(data: iconify_icon!("lucide:image"))
                             }
+                        </div>
+                        <div class="absolute right-4 top-4 z-10">
+                            wishlist_button(product_id: product_id.clone(), liked: liked, next: String::new())
                         </div>
                     </div>
                     if product_images.len() > 1 {
@@ -237,20 +263,85 @@ pub async fn page(
                 <div class="space-y-4">
                     card(
                         card_header(
-                            badge(variant: BadgeVariant::Secondary, (product_category))
-                            card_title((product_name.clone()))
+                            <div class="flex items-start justify-between">
+                                <div class="space-y-2">
+                                    badge(variant: BadgeVariant::Secondary, (product_category))
+                                    card_title((product_name.clone()))
+                                </div>
+                                if let Some(discount_text) = discount_badge_text.clone() {
+                                    badge(
+                                        variant: BadgeVariant::Primary,
+                                        (discount_text)
+                                    )
+                                }
+                            </div>
                         )
                         card_content(
-                            <p class="text-2xl font-medium text-primary">(format_price(price))</p>
+                            <div class="space-y-2">
+                                if let Some(compare_at) = product.compare_at_price_in_cents {
+                                    <p class="text-sm text-muted-foreground line-through">
+                                        (format_price(compare_at))
+                                    </p>
+                                }
+                                if pix_discount_percent > 0 {
+                                    <p class="text-2xl font-bold text-primary">
+                                        (format!("{} no Pix", format_price(pix_price_cents)))
+                                    </p>
+                                    <p class="text-sm text-muted-foreground">
+                                        "ou " (format_price(price))
+                                    </p>
+                                } else {
+                                    <p class="text-2xl font-medium text-primary">(format_price(price))</p>
+                                }
+                            </div>
                             if let Some(description) = product_description {
-                                <p class="text-muted-foreground">(description)</p>
+                                <p class="text-muted-foreground mt-4">(description)</p>
                             }
                         )
                     )
 
+                    if !product.colors.is_empty() {
+                        card(
+                            card_header(
+                                card_title("Cores disponíveis")
+                            )
+                            card_content(
+                                <div class="flex gap-3 flex-wrap items-center">
+                                    for (color_name, color_hex) in product.colors.iter().take(12) {
+                                        if let Some(hex) = color_hex {
+                                            <div
+                                                class="w-8 h-8 rounded-full border-2 border-border cursor-help"
+                                                style=(format!("background-color: {hex}"))
+                                                title=(color_name)
+                                            ></div>
+                                        } else {
+                                            <div
+                                                class="w-8 h-8 rounded-full border-2 border-border bg-foreground/10 cursor-help"
+                                                title=(color_name)
+                                            ></div>
+                                        }
+                                    }
+                                    if product.colors.len() > 12 {
+                                        <span class="text-sm text-muted-foreground">
+                                            (format!("+{} cores", product.colors.len() - 12))
+                                        </span>
+                                    }
+                                </div>
+                            )
+                        )
+                    }
+
                     card(
                         card_header(
-                            card_title("Selecione tamanho e cor")
+                            <div class="flex items-center justify-between">
+                                card_title("Selecione tamanho e cor")
+                                <a
+                                    href=(href!(crate::app::guia_de_medidas::page))
+                                    class="text-xs text-primary hover:underline"
+                                >
+                                    "Guia de medidas"
+                                </a>
+                            </div>
                         )
                         card_content(
                             <div class="grid gap-2">
@@ -369,36 +460,50 @@ pub async fn page(
                 </div>
             </div>
 
+            if !looks.is_empty() {
+                <section>
+                    separator(attrs: attributes! { class="my-4" })
+                    <p class="text-sm font-medium tracking-tight text-primary uppercase">"Complementos"</p>
+                    <h2 class="mt-2 mb-4 text-4xl font-bold tracking-tight">"Complete o look"</h2>
+                    <div class="grid gap-8 @sm/page:grid-cols-2 @lg/page:grid-cols-4">
+                        #[key(item.id.to_string())]
+                        for item in looks {
+                            product_card(product: item)
+                        }
+                    </div>
+                </section>
+            }
+
             if !related.is_empty() {
                 <section>
                     separator(attrs: attributes! { class="my-4" })
                     <p class="text-sm font-medium tracking-tight text-primary uppercase">"Você também pode gostar"</p>
-                    <h2 class="mt-2 mb-4 text-4xl font-bold tracking-tight">"Complete o look"</h2>
+                    <h2 class="mt-2 mb-4 text-4xl font-bold tracking-tight">"Produtos relacionados"</h2>
                     <div class="grid gap-8 @sm/page:grid-cols-2 @lg/page:grid-cols-4">
                         #[key(item.id.to_string())]
                         for item in related {
-                            let image_url = item
-                                .image_url
-                                .clone()
-                                .unwrap_or_else(|| "/static/product-fallback.svg".to_string());
-                            let name = item.name.clone();
                             let item_url = href!(page, Slug(item.slug.clone()));
                             let category_text = category_label(&item.category).to_string();
                             let price_text = format_price(item.price_in_cents);
+                            let name = item.name.clone();
 
                             card(
                                 attrs: attributes! { class="group overflow-hidden" },
                                 <a href=(item_url) class="block">
-                                    <div class="aspect-[4/5] overflow-hidden">
-                                        <img
-                                            src=(image_url)
-                                            alt=(name.clone())
-                                            class="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
-                                        >
+                                    <div class="aspect-[4/5] overflow-hidden bg-foreground/5 flex items-center justify-center">
+                                        if let Some(image_url) = item.image_url.clone() {
+                                            <img
+                                                src=(image_url)
+                                                alt=(name.clone())
+                                                class="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                                            >
+                                        } else {
+                                            icon(data: iconify_icon!("lucide:image"))
+                                        }
                                     </div>
                                 </a>
                                 card_header(
-                                    card_title((name))
+                                    card_title((name.clone()))
                                     badge(variant: BadgeVariant::Secondary, (category_text))
                                 )
                                 card_footer(

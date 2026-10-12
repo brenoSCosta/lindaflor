@@ -16,17 +16,16 @@ use topcoat::{
   view::{Child, StaticClass, View, attributes, class, component, view},
 };
 
-use crate::app::auth_helpers::optional_user;
 use crate::app::store::cart::cart_item_count;
 use crate::app::store::cart_sheet::cart_sheet;
-use crate::app::store::queries::{format_price, get_store_settings};
+use crate::app::store::shell::{
+  announcement::announcement_bar, footer::footer, header::header,
+};
 use crate::app::utils::{object_store, resolve_storage_url};
 use crate::components::avatar::{
   AvatarSize, avatar, avatar_fallback, avatar_image,
 };
-use crate::components::button::{
-  ButtonSize, ButtonVariant, button, button_variants,
-};
+use crate::components::button::{ButtonSize, ButtonVariant, button};
 use crate::components::dropdown_menu::{
   dropdown_menu, dropdown_menu_label, dropdown_menu_separator,
   dropdown_menu_trigger,
@@ -470,83 +469,15 @@ pub async fn storefront_shell(
   cx: &Cx,
   #[default] child: Child<'_>,
 ) -> Result<impl View> {
-  let logged_in = optional_user(cx).await?.is_some();
   let pool = app_context::<PgPool>(cx);
-  let settings = get_store_settings(pool).await?;
-  let shipping_banner = if settings.free_shipping_threshold_cents <= 0 {
-    "Frete grátis · Aracaju, SE".to_string()
-  } else {
-    format!(
-      "Frete grátis acima de {} · Aracaju, SE",
-      format_price(settings.free_shipping_threshold_cents)
-    )
-  };
   let cart_count = cart_item_count(cx, pool).await?.max(0) as usize;
   let hide_footer = uri(cx).path() == "/login";
   let cart_open = signal(cx, || false);
 
   Ok(view! {
       <div class="flex min-h-screen flex-col bg-background text-foreground">
-          <div class="border-b border-border bg-background px-4 py-2 text-center text-[10px] tracking-widest text-muted-foreground uppercase">
-              (shipping_banner)
-          </div>
-          <header class="sticky top-0 z-50 border-b border-border bg-background backdrop-blur">
-              <div class="mx-auto grid h-20 max-w-7xl grid-cols-[1fr_auto] items-center gap-4 px-4 md:grid-cols-[1fr_auto_1fr] md:px-8">
-                  <a href=(href!(crate::app::page)) class="justify-self-start text-left md:col-start-2 md:justify-self-center md:text-center">
-                      <span class="font-serif text-2xl leading-none text-foreground">"Linda Flor"</span>
-                      <span class="block text-[10px] tracking-[0.24em] text-primary uppercase">"Moda Praia"</span>
-                  </a>
-                  <nav class="hidden items-center gap-6 md:col-start-1 md:row-start-1 md:flex">
-                      <a href=(href!(crate::app::produtos::page)) class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">"Catálogo"</a>
-                      <a href=(href!(crate::app::colecoes::page)) class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">"Coleções"</a>
-                      <a href=(href!(crate::app::page).fragment("sobre")) class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">"Sobre"</a>
-                      if logged_in {
-                          <a href=(href!(crate::app::favoritos::page)) class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">"Favoritos"</a>
-                      }
-                  </nav>
-                  <div class="flex items-center justify-end justify-self-end gap-2">
-                      if logged_in {
-                          <a
-                              href=(href!(crate::app::dashboard::page))
-                              class=(button_variants(ButtonVariant::Ghost, ButtonSize::Icon))
-                              aria-label="Conta"
-                              title="Conta"
-                          >
-                              icon(data: iconify_icon!("lucide:user"))
-                          </a>
-                      } else {
-                          <a
-                              href=(href!(crate::app::login::page))
-                              class=(button_variants(ButtonVariant::Ghost, ButtonSize::Icon))
-                              aria-label="Entrar"
-                              title="Entrar"
-                          >
-                              icon(data: iconify_icon!("lucide:user"))
-                          </a>
-                      }
-                      <button
-                          type="button"
-                          id="cart-open-btn"
-                          data-cart-open=""
-                          class=(class!(button_variants(ButtonVariant::Ghost, ButtonSize::Icon), "relative"))
-                          aria-label="Carrinho"
-                          title="Carrinho"
-                          @click=$(|_e: Event| cart_open.set(true))
-                      >
-                          icon(
-                              data: iconify_icon!("lucide:shopping-cart")
-                          )
-                          <span
-                              data-cart-count=""
-                              class="pointer-events-none absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] leading-none font-semibold text-white"
-                              hidden=(cart_count == 0)
-                          >
-                              (cart_count)
-                          </span>
-                      </button>
-                  </div>
-              </div>
-          </header>
+          announcement_bar()
+          header(cart_count: cart_count, cart_open: cart_open.clone())
           <main class="flex flex-1 flex-col">(child)</main>
           sheet(
               open: $(cart_open.get()),
@@ -570,36 +501,7 @@ pub async fn storefront_shell(
               )
           )
           if !hide_footer {
-          <footer class="border-t border-border bg-background">
-              <div class="mx-auto grid max-w-7xl gap-10 px-4 py-16 md:grid-cols-4 md:px-8">
-                  <div class="space-y-3 md:col-span-2">
-                      <p class="font-serif text-2xl text-foreground">"Linda Flor"</p>
-                      <p class="max-w-md text-sm leading-relaxed text-muted-foreground">
-                          "Moda praia feminina com qualidade e atendimento próximo. Da praia de Aracaju para você brilhar em qualquer verão."
-                      </p>
-                      <p class="text-[10px] tracking-wider text-primary uppercase">"@biquinislindaflor"</p>
-                  </div>
-                  <div class="space-y-3">
-                      <h3 class="text-[10px] tracking-widest uppercase">"Loja"</h3>
-                      <div class="flex flex-col gap-2 text-sm text-muted-foreground">
-                          <a href=(href!(crate::app::produtos::page)) class="transition-colors hover:text-foreground">"Catálogo"</a>
-                          <a href=(href!(crate::app::colecoes::page)) class="transition-colors hover:text-foreground">"Coleções"</a>
-                          <a href=(href!(crate::app::produtos::page).query([("category", "biquini")])) class="transition-colors hover:text-foreground">"Biquínis"</a>
-                          <a href=(href!(crate::app::produtos::page).query([("category", "maio")])) class="transition-colors hover:text-foreground">"Maiôs"</a>
-                      </div>
-                  </div>
-                  <div class="space-y-3">
-                      <h3 class="text-[10px] tracking-widest uppercase">"Contato"</h3>
-                      <div class="space-y-2 text-sm text-muted-foreground">
-                          <a href="https://wa.me/5579998165115" target="_blank" rel="noreferrer" class="transition-colors hover:text-foreground">"(79) 99816-5115"</a>
-                          <p>"Rua Capitão Isaias Alves de Souza, 1100 · Aracaju, SE"</p>
-                      </div>
-                  </div>
-              </div>
-              <div class="border-t border-border px-4 py-5 text-center text-[10px] tracking-wider text-muted-foreground uppercase">
-                  "© 2026 Linda Flor Moda Praia"
-              </div>
-          </footer>
+            footer()
           }
       </div>
   })

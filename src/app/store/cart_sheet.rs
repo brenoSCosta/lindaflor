@@ -23,6 +23,7 @@ use crate::app::store::cart::{
   remove_from_cart_proc, set_cart_coupon_proc, set_cart_quantity_proc,
 };
 use crate::app::store::coupons::{CouponReject, resolve_coupon};
+use crate::app::store::pricing::pix_price;
 use crate::app::store::queries::{format_price, get_store_settings};
 
 /// NOTE for the badge-patch `raw!` calls below: the JS must end with `;`.
@@ -293,14 +294,27 @@ pub async fn cart_sheet(cx: &Cx, open: Signal<bool>) -> Result<impl View> {
               </div>
 
               <div class="flex shrink-0 flex-col gap-3 rounded-lg border border-border p-4">
-                  if missing_for_free_shipping > 0 {
-                      <p class="text-sm text-muted-foreground">
-                          "Faltam "
-                          (format_price(missing_for_free_shipping))
-                          " para frete grátis."
-                      </p>
+                  // Free shipping progress bar
+                  if free_shipping_threshold > 0 {
+                      <div class="space-y-2">
+                          if missing_for_free_shipping > 0 {
+                              <p class="text-sm text-muted-foreground">
+                                  "Faltam "
+                                  (format_price(missing_for_free_shipping))
+                                  " para frete grátis"
+                              </p>
+                          } else {
+                              <p class="text-sm text-primary font-medium">"Você ganhou frete grátis!"</p>
+                          }
+                          <div class="h-2 bg-border rounded-full overflow-hidden">
+                              <div
+                                  class="h-full bg-primary transition-all"
+                                  style=(format!("width: {}%", ((subtotal.max(0) as f64 / free_shipping_threshold as f64) * 100.0).min(100.0) as i32))
+                              ></div>
+                          </div>
+                      </div>
                   } else {
-                      <p class="text-sm text-primary">"Você ganhou frete grátis!"</p>
+                      <p class="text-sm text-primary">"Frete grátis em todas as compras!"</p>
                   }
                   separator(attrs: attributes! { class="my-1" })
                   <div class="flex items-center justify-between">
@@ -317,6 +331,20 @@ pub async fn cart_sheet(cx: &Cx, open: Signal<bool>) -> Result<impl View> {
                               (format_price(discount))
                           </span>
                       </div>
+                  }
+                  // Pix pricing when discount > 0
+                  if settings.pix_discount_percent > 0 {
+                      let subtotal_after_coupon = (subtotal - discount).max(0);
+                      let pix_total = pix_price(subtotal_after_coupon, settings.pix_discount_percent);
+                      <div class="flex items-center justify-between text-sm">
+                          <span class="text-muted-foreground">"Total no Pix"</span>
+                          <span class="text-primary font-medium">
+                              (format_price(pix_total))
+                          </span>
+                      </div>
+                      <p class="text-xs text-muted-foreground text-right">
+                          "Estimativa (antes do frete)"
+                      </p>
                   }
                   field(
                       field_label(attrs: attributes! { for="cart-coupon" }, "Cupom")
@@ -380,6 +408,11 @@ pub async fn cart_sheet(cx: &Cx, open: Signal<bool>) -> Result<impl View> {
                               "Remover"
                           )
                       </div>
+                  } else if let Some(ref first_purchase_code) = settings.first_purchase_coupon_code {
+                      <p class="text-xs text-primary bg-primary/10 rounded px-3 py-2">
+                          "Primeira compra? Use o cupom "
+                          <strong>(first_purchase_code.as_str())</strong>
+                      </p>
                   }
                   <p class="text-xs text-muted-foreground">
                       (free_shipping_hint)

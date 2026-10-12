@@ -13,11 +13,12 @@ use topcoat::{
 use uuid::Uuid;
 
 use super::{
-  MAX_IMAGES_PER_PRODUCT, MSG_COUNT, collect_multipart, db_error_message,
-  delete_product_image, ensure_default_warehouse, first_text,
-  optional_description, parse_price_cents, resolve_storage_url,
-  save_product_image, validate_category, validate_image, validate_name,
-  validate_size, validate_slug,
+  MAX_IMAGES_PER_PRODUCT, MSG_COUNT, category_labels, collect_multipart,
+  db_error_message, delete_product_image, ensure_default_warehouse, first_text,
+  optional_description, parse_compare_at_price, parse_price_cents,
+  resolve_storage_url, save_product_image, validate_category,
+  validate_color_hex, validate_image, validate_name, validate_size,
+  validate_slug,
 };
 use crate::app::auth_helpers::require_admin;
 use crate::app::utils::object_store;
@@ -37,6 +38,7 @@ struct VariantRow {
   sku: String,
   size: String,
   color: String,
+  color_hex: Option<String>,
   low_stock_threshold: i32,
 }
 
@@ -53,7 +55,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let id = path_param::<Id>(cx)?;
 
   let product = sqlx::query!(
-        "SELECT id::text AS \"id!\", name, slug, description, price_in_cents, category::text AS \"category!\", featured, active FROM products WHERE id::text = $1",
+        "SELECT id::text AS \"id!\", name, slug, description, price_in_cents, compare_at_price_in_cents, category::text AS \"category!\", featured, active FROM products WHERE id::text = $1",
         id.to_string()
     )
     .fetch_optional(pool)
@@ -77,7 +79,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   };
 
   let variants = sqlx::query!(
-        "SELECT id::text AS \"id!\", sku, size::text AS \"size!\", color, price_in_cents, low_stock_threshold FROM product_variants WHERE product_id::text = $1 ORDER BY created_at",
+        "SELECT id::text AS \"id!\", sku, size::text AS \"size!\", color, color_hex, price_in_cents, low_stock_threshold FROM product_variants WHERE product_id::text = $1 ORDER BY created_at",
         id.to_string()
     )
     .fetch_all(pool)
@@ -95,8 +97,34 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     images.push(ImageRow { id: row.id, url });
   }
 
+  // Fetch other active products for "Complete o look" feature
+  #[derive(sqlx::FromRow)]
+  struct OtherProduct {
+    id: String,
+    name: String,
+    category: String,
+  }
+  let other_products: Vec<OtherProduct> = sqlx::query_as(
+        "SELECT id::text, name, category::text FROM products WHERE active = true AND id::text != $1 ORDER BY name"
+    )
+    .bind(id.to_string())
+    .fetch_all(pool)
+    .await?;
+
+  // Fetch existing product looks (related products linked to this product)
+  let existing_looks: Vec<String> = sqlx::query_scalar(
+        "SELECT related_product_id::text FROM product_looks WHERE product_id::text = $1"
+    )
+    .bind(id.to_string())
+    .fetch_all(pool)
+    .await?;
+
   let product_id = product.id.clone();
   let price_text = format_price_input(product.price_in_cents);
+  let compare_at_price_text = product
+    .compare_at_price_in_cents
+    .map(format_price_input)
+    .unwrap_or_default();
   let category = product.category.clone();
   let edit_action = href!(update_product);
 
@@ -152,6 +180,18 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                   value=(price_text)
                               })
                           </div>
+                          <div class="space-y-2">
+                              label(attrs: attributes! { for="compare_at_price" }, "Preço original (de)")
+                              input(attrs: attributes! {
+                                  type="text"
+                                  name="compare_at_price"
+                                  id="compare_at_price"
+                                  value=(compare_at_price_text)
+                              })
+                          </div>
+                      </div>
+
+                      <div class="grid gap-4 @sm/page:grid-cols-2">
                           <div class="space-y-2">
                               label(attrs: attributes! { for="category" }, "Categoria")
                               select(
@@ -223,7 +263,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                           <legend class="px-2 font-medium">"Variantes"</legend>
                           <div class="flex flex-col gap-4">
                               for variant in variants {
-                                  <div class="grid grid-cols-1 gap-4 rounded-lg border border-border p-4 @sm/page:grid-cols-2 @lg/page:grid-cols-4">
+                                  <div class="grid grid-cols-1 gap-4 rounded-lg border border-border p-4 @sm/page:grid-cols-2 @lg/page:grid-cols-6">
                                       <div class="space-y-2">
                                           label("SKU")
                                           input(attrs: attributes! {
@@ -249,6 +289,15 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                           })
                                       </div>
                                       <div class="space-y-2">
+                                          label("Cor (hex)")
+                                          input(attrs: attributes! {
+                                              type="text"
+                                              name="variant_color_hex[]"
+                                              value=(variant.color_hex.as_deref().unwrap_or(""))
+                                              placeholder="#000000"
+                                          })
+                                      </div>
+                                      <div class="space-y-2">
                                           label("Estoque baixo")
                                           input(attrs: attributes! {
                                               type="number"
@@ -260,6 +309,28 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                   </div>
                               }
                           </div>
+                      </fieldset>
+
+                      <fieldset class="space-y-4 rounded-xl border border-border p-2">
+                          <legend class="px-2 font-medium">"Complete o look"</legend>
+                          if other_products.is_empty() {
+                              <p class="text-sm text-muted-foreground">"Nenhum outro produto disponível."</p>
+                          } else {
+                              <div class="space-y-2">
+                                  for product in other_products {
+                                      let checked = existing_looks.contains(&product.id);
+                                      <label class="flex items-center gap-2">
+                                          <input
+                                              type="checkbox"
+                                              name="look_product_ids[]"
+                                              value=(product.id)
+                                              checked=(checked)
+                                          >
+                                          <span class="text-sm">(product.name) " — " (category_labels(&product.category))</span>
+                                      </label>
+                                  }
+                              </div>
+                          }
                       </fieldset>
 
                       button(
@@ -325,6 +396,13 @@ async fn update_product(cx: &Cx, multipart: Multipart) -> Result<Response> {
       Ok(price) => price,
       Err(message) => return fail(message),
     };
+  let compare_at_price = match parse_compare_at_price(
+    &first_text(&form.texts, "compare_at_price"),
+    price_in_cents as i64,
+  ) {
+    Ok(price) => price,
+    Err(message) => return fail(message),
+  };
   let category = match validate_category(&first_text(&form.texts, "category")) {
     Ok(category) => category,
     Err(message) => return fail(message),
@@ -343,6 +421,11 @@ async fn update_product(cx: &Cx, multipart: Multipart) -> Result<Response> {
   let colors = form
     .texts
     .get("variant_color[]")
+    .cloned()
+    .unwrap_or_default();
+  let color_hexes = form
+    .texts
+    .get("variant_color_hex[]")
     .cloned()
     .unwrap_or_default();
   let thresholds = form
@@ -370,6 +453,12 @@ async fn update_product(cx: &Cx, multipart: Multipart) -> Result<Response> {
     if color.is_empty() {
       return fail("Toda variante precisa de uma cor.");
     }
+    let color_hex = match validate_color_hex(
+      color_hexes.get(index).map(|s| s.as_str()).unwrap_or(""),
+    ) {
+      Ok(hex) => hex,
+      Err(message) => return fail(message),
+    };
     let threshold: i32 = match thresholds[index].trim().parse() {
       Ok(threshold) if (0..=1_000_000).contains(&threshold) => threshold,
       _ => return fail("Limite de estoque baixo inválido."),
@@ -378,6 +467,7 @@ async fn update_product(cx: &Cx, multipart: Multipart) -> Result<Response> {
       sku: sku.to_string(),
       size,
       color: color.to_string(),
+      color_hex,
       low_stock_threshold: threshold,
     });
   }
@@ -419,14 +509,15 @@ async fn update_product(cx: &Cx, multipart: Multipart) -> Result<Response> {
   }
 
   if let Err(err) = sqlx::query(
-    "UPDATE products SET name = $2, slug = $3, description = $4, price_in_cents = $5,
-     category = $6::product_category, featured = $7, active = $8, updated_at = now() WHERE id = $1",
+    "UPDATE products SET name = $2, slug = $3, description = $4, price_in_cents = $5, compare_at_price_in_cents = $6,
+     category = $7::product_category, featured = $8, active = $9, updated_at = now() WHERE id = $1",
   )
   .bind(product_id)
   .bind(&name)
   .bind(&slug)
   .bind(&description)
   .bind(price_in_cents)
+  .bind(compare_at_price)
   .bind(&category)
   .bind(featured)
   .bind(active)
@@ -439,6 +530,37 @@ async fn update_product(cx: &Cx, multipart: Multipart) -> Result<Response> {
   if let Err(message) = sync_variants(pool, product_id, &variants).await {
     return fail(&message);
   }
+
+  // Handle product looks (Complete o look feature)
+  let look_product_ids: Vec<Uuid> = form
+    .texts
+    .get("look_product_ids[]")
+    .cloned()
+    .unwrap_or_default()
+    .iter()
+    .filter_map(|raw| Uuid::parse_str(raw.trim()).ok())
+    .collect();
+
+  // Delete existing looks for this product
+  sqlx::query("DELETE FROM product_looks WHERE product_id = $1")
+    .bind(product_id)
+    .execute(pool)
+    .await?;
+
+  // Keep the submitted order; ids that aren't other existing products
+  // (self-links, stale or forged ids) are skipped instead of failing.
+  sqlx::query(
+    "INSERT INTO product_looks (product_id, related_product_id, sort_order)
+     SELECT $1, p.id, (ids.ord - 1)::int
+     FROM unnest($2::uuid[]) WITH ORDINALITY AS ids(id, ord)
+     INNER JOIN products p ON p.id = ids.id
+     WHERE p.id <> $1
+     ON CONFLICT DO NOTHING",
+  )
+  .bind(product_id)
+  .bind(&look_product_ids)
+  .execute(pool)
+  .await?;
 
   for image_id in delete_ids {
     let owner: Option<Uuid> =
@@ -511,12 +633,13 @@ async fn sync_variants(
   for variant in variants {
     if let Some(id) = by_sku.get(variant.sku.as_str()) {
       sqlx::query(
-        "UPDATE product_variants SET size = $2::product_size, color = $3,
-         low_stock_threshold = $4, updated_at = now() WHERE id = $1",
+        "UPDATE product_variants SET size = $2::product_size, color = $3, color_hex = $4,
+         low_stock_threshold = $5, updated_at = now() WHERE id = $1",
       )
       .bind(id)
       .bind(&variant.size)
       .bind(&variant.color)
+      .bind(&variant.color_hex)
       .bind(variant.low_stock_threshold)
       .execute(pool)
       .await
@@ -524,14 +647,15 @@ async fn sync_variants(
     } else {
       let id = Uuid::now_v7();
       sqlx::query(
-        "INSERT INTO product_variants (id, product_id, sku, size, color, price_in_cents, low_stock_threshold, created_at, updated_at)
-         VALUES ($1, $2, $3, $4::product_size, $5, NULL, $6, now(), now())",
+        "INSERT INTO product_variants (id, product_id, sku, size, color, color_hex, price_in_cents, low_stock_threshold, created_at, updated_at)
+         VALUES ($1, $2, $3, $4::product_size, $5, $6, NULL, $7, now(), now())",
       )
       .bind(id)
       .bind(product_id)
       .bind(&variant.sku)
       .bind(&variant.size)
       .bind(&variant.color)
+      .bind(&variant.color_hex)
       .bind(variant.low_stock_threshold)
       .execute(pool)
       .await

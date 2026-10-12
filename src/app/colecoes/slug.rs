@@ -7,10 +7,13 @@ use topcoat::{
   view::{View, ViewExt, attributes, class, view},
 };
 
+use crate::app::store::catalog_filters::{
+  catalog_toolbar, repeated_query_values,
+};
 use crate::app::store::queries::{
   STOREFRONT_PAGE_SIZE, category_label, clamp_catalog_page,
-  count_collection_products, count_products, format_price,
-  get_collection_by_slug, list_products,
+  count_collection_products, count_products_with_filters, format_price,
+  get_collection_by_slug, list_filter_colors, list_products_with_filters,
 };
 use crate::components::badge::{BadgeVariant, badge};
 use crate::components::breadcrumb::{
@@ -29,6 +32,13 @@ path_param!(pub(crate) slug);
 #[query_params(error = bad_request)]
 struct CollectionQuery {
   page: Option<i64>,
+  sort: Option<String>,
+  // `tamanho` / `cor` repeat (one per checkbox); query_params can't read
+  // sequences, so they come from `repeated_query_values` instead.
+  preco_min: Option<String>,
+  preco_max: Option<String>,
+  disponivel: Option<bool>,
+  sale: Option<bool>,
 }
 
 #[page]
@@ -56,9 +66,39 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let product_count = count_collection_products(pool, &collection.id).await?;
   let query = query_params::<CollectionQuery>(cx)
     .map_err(|err| bad_request(format!("consulta inválida: {err}")))?;
+
+  let sort = query.sort.clone().unwrap_or_else(|| "destaque".to_string());
+  let tamanho = repeated_query_values(cx, "tamanho");
+  let cor = repeated_query_values(cx, "cor");
+  let preco_min = query.preco_min.as_deref();
+  let preco_max = query.preco_max.as_deref();
+  let disponivel = query.disponivel.unwrap_or(false);
+  let sale = query.sale.unwrap_or(false);
+
+  let filters = crate::app::produtos::catalog_filters(
+    tamanho.clone(),
+    cor.clone(),
+    preco_min,
+    preco_max,
+    disponivel,
+    sale,
+  );
+  // Collections list sold-out pieces too, unless the shopper asks otherwise.
+  let include_out_of_stock = !filters.available_only;
+  let available_colors = list_filter_colors(pool, None, Some(slug)).await?;
+
   let mut page_num = clamp_catalog_page(query.page.unwrap_or(1));
   let page_size = STOREFRONT_PAGE_SIZE;
-  let total = count_products(pool, None, None, false, true, Some(slug)).await?;
+  let total = count_products_with_filters(
+    pool,
+    None,
+    None,
+    false,
+    include_out_of_stock,
+    Some(slug),
+    &filters,
+  )
+  .await?;
   let total_pages = if total == 0 {
     0
   } else {
@@ -67,13 +107,15 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   if total_pages > 0 && page_num > total_pages {
     page_num = total_pages;
   }
-  let products = list_products(
+  let products = list_products_with_filters(
     pool,
     None,
     None,
     false,
-    true,
+    include_out_of_stock,
     Some(slug),
+    &filters,
+    &sort,
     page_size,
     (page_num - 1) * page_size,
   )
@@ -95,6 +137,15 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let collection_name = collection.name.clone();
   let collection_description = collection.description.clone();
 
+  // Prepare toolbar parameters
+  let collection_url = href!(page, Slug(slug.to_string())).resolve(cx);
+  let toolbar_sort = sort.clone();
+  let toolbar_tamanho = tamanho.clone();
+  let toolbar_cor = cor.clone();
+  let toolbar_preco_min = preco_min.map(|s| s.to_string());
+  let toolbar_preco_max = preco_max.map(|s| s.to_string());
+  let toolbar_colors = available_colors.clone();
+
   Ok(view! {
         container(
             breadcrumb(
@@ -112,6 +163,21 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                 <p class="max-w-2xl text-muted-foreground">(description)</p>
             }
             <p class="text-sm text-muted-foreground">(product_count) " peças nesta coleção"</p>
+
+            // Filter toolbar
+            catalog_toolbar(
+                category: String::new(),
+                search: String::new(),
+                sort: toolbar_sort,
+                tamanho: toolbar_tamanho,
+                cor: toolbar_cor,
+                preco_min: toolbar_preco_min,
+                preco_max: toolbar_preco_max,
+                disponivel: disponivel,
+                sale: sale,
+                available_colors: toolbar_colors,
+                form_action: collection_url,
+            )
 
             <div class="grid gap-4 @sm/page:grid-cols-2 @2xl/page:grid-cols-3">
                 #[key(product.id.to_string())]
