@@ -28,7 +28,7 @@ pub async fn page() -> Result<impl View> {
               "Você pode solicitar troca ou devolução em até 7 dias corridos após o recebimento do pedido, conforme o Código de Defesa do Consumidor."
           </p>
           <p class="text-sm leading-relaxed text-muted-foreground">
-              "A peça deve estar sem uso, com etiquetas e na embalagem original. Para iniciar o processo, entre em contato pelo WhatsApp (79) 99816-5115 informando o número do pedido."
+              "A peça deve estar sem uso, com etiquetas e na embalagem original. Para iniciar o processo, entre em contato pelos nossos canais de atendimento informando o número do pedido."
           </p>
           <p class="text-sm leading-relaxed text-muted-foreground">
               "O frete de devolução por arrependimento é por conta do cliente, exceto em casos de defeito ou erro no envio. Após análise, o reembolso será feito via PIX em até 10 dias úteis."
@@ -38,7 +38,7 @@ pub async fn page() -> Result<impl View> {
               card_header(card_title("Como Solicitar uma Troca ou Devolução"))
               card_content(
                   <ol class="list-decimal space-y-2 pl-5 text-sm leading-relaxed text-muted-foreground">
-                      <li>"Entre em contato pelo WhatsApp (79) 99816-5115"</li>
+                      <li>"Entre em contato pelos nossos canais de atendimento"</li>
                       <li>"Informe o número do pedido e o motivo da troca/devolução"</li>
                       <li>"Envie a peça na embalagem original com todas as etiquetas"</li>
                       <li>"Após análise, o reembolso será feito via PIX em até 10 dias úteis"</li>

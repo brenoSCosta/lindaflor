@@ -928,9 +928,15 @@ async fn create_order_in_tx(
     let variant_id = Uuid::parse_str(&item.variant_id).map_err(|_| {
       CheckoutError::Form("Carrinho inválido. Atualize a página.".to_string())
     })?;
+    let set_id: Option<Uuid> = match item.set_id.as_deref() {
+      None => None,
+      Some(raw) => Some(Uuid::parse_str(raw).map_err(|_| {
+        CheckoutError::Form("Carrinho inválido. Atualize a página.".to_string())
+      })?),
+    };
     sqlx::query(
-            "INSERT INTO order_items (id, order_id, variant_id, product_name, variant_label, quantity, unit_price_cents)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            "INSERT INTO order_items (id, order_id, variant_id, product_name, variant_label, quantity, unit_price_cents, set_id, set_name)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         )
         .bind(Uuid::now_v7())
         .bind(order_id)
@@ -939,6 +945,8 @@ async fn create_order_in_tx(
         .bind(&item.variant_label)
         .bind(item.quantity)
         .bind(item.unit_price_cents)
+        .bind(set_id)
+        .bind(item.set_name.as_deref())
         .execute(&mut **tx)
         .await?;
     reserve_lines.push(ReserveLine {

@@ -3,7 +3,7 @@ pub mod app_sidebar;
 pub mod auth_helpers;
 pub mod check_email;
 pub mod checkout;
-pub mod colecoes;
+pub mod sets;
 pub mod conta;
 pub mod dashboard;
 pub mod favoritos;
@@ -32,6 +32,7 @@ use topcoat::{
   context::Cx,
   context::app_context,
   cookie::RouterBuilderCookieExt,
+  icon::{icon, iconify::iconify_icon},
   router::{
     BodyLimit, OriginPolicy, Router, RouterBuilderDiscoverExt, Slot,
     StatusCode,
@@ -48,7 +49,6 @@ use topcoat::{
 };
 
 use self::store::hero::hero_banners;
-use self::store::newsletter_form::newsletter_form;
 use self::store::pricing::storefront_settings;
 use self::store::product_card::product_card;
 use self::store::queries::{CatalogFilters, list_products_with_filters};
@@ -326,7 +326,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     None,
     false,
     true,
-    None,
     &empty_filters,
     "novos",
     8,
@@ -344,7 +343,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     None,
     false,
     true,
-    None,
     &empty_filters,
     "mais_vendidos",
     8,
@@ -364,7 +362,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     None,
     false,
     true,
-    None,
     &sale_filters,
     "maior_desconto",
     4,
@@ -374,10 +371,21 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let liquida =
     crate::app::admin::produtos::resolve_summary_images(&store, liquida).await;
 
+  let whatsapp_url = settings
+    .whatsapp_number
+    .as_deref()
+    .map(str::trim)
+    .filter(|s| !s.is_empty())
+    .map(|number| {
+      crate::app::store::queries::whatsapp_link(
+        number,
+        "Olá! Quero saber mais sobre as peças da Linda Flor.",
+      )
+    });
+
   Ok(view! {
       <script src=(SOBRE_SCRIPT) defer=""></script>
 
-      // Hero banners or static hero fallback
       hero_banners()
       if !has_banners {
         <section class="relative min-h-[85vh] overflow-hidden">
@@ -410,45 +418,28 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
         </section>
       }
 
-      // Benefits bar
       <section class="mx-auto max-w-7xl px-4 py-8 md:px-8">
-        <div class="grid gap-8 md:grid-cols-4">
+        <div class="grid gap-8 md:grid-cols-3">
           <div class="flex flex-col items-center text-center space-y-2">
-            <svg class="w-8 h-8 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-            </svg>
+            icon(data: iconify_icon!("lucide:truck"))
             <h3 class="font-semibold text-sm">"Frete grátis"</h3>
             <p class="text-xs text-muted-foreground">(if settings.free_shipping_threshold_cents > 0 { format!("Acima de {}", crate::app::store::queries::format_price(settings.free_shipping_threshold_cents)) } else { "Em todas as compras".to_string() })</p>
           </div>
           if settings.pix_discount_percent > 0 {
             <div class="flex flex-col items-center text-center space-y-2">
-              <svg class="w-8 h-8 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-              </svg>
+              icon(data: iconify_icon!("lucide:percent"))
               <h3 class="font-semibold text-sm">(settings.pix_discount_percent)"% OFF no Pix"</h3>
               <p class="text-xs text-muted-foreground">"Desconto imediato"</p>
             </div>
           }
-          if let Some(coupon_code) = &settings.first_purchase_coupon_code {
-            <div class="flex flex-col items-center text-center space-y-2">
-              <svg class="w-8 h-8 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 10h-2m0 0h-2m2 0v-2m0 2v2m-6-4h12a2 2 0 012 2v12a2 2 0 01-2 2H6a2 2 0 01-2-2V8a2 2 0 012-2z"></path>
-              </svg>
-              <h3 class="font-semibold text-sm">"Cupom 1ª compra"</h3>
-              <p class="text-xs text-muted-foreground">(coupon_code.as_str())</p>
-            </div>
-          }
           <div class="flex flex-col items-center text-center space-y-2">
-            <svg class="w-8 h-8 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path>
-            </svg>
+            icon(data: iconify_icon!("lucide:rotate-ccw"))
             <h3 class="font-semibold text-sm">"Troca fácil"</h3>
             <p class="text-xs text-muted-foreground">"Até 7 dias"</p>
           </div>
         </div>
       </section>
 
-      // Category cards (6 categories)
       <section class="mx-auto max-w-7xl px-4 py-20 md:px-8">
         <div class="mb-10">
           <p class="text-[10px] tracking-widest text-primary uppercase">"Categorias"</p>
@@ -464,7 +455,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
             <div class="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
             <p class="absolute bottom-6 left-6 font-serif text-3xl text-white">"Biquínis"</p>
           </a>
-          <a href=(href!(crate::app::produtos::page).query([("category", "top_biquini")])) class="group relative aspect-[4/5] overflow-hidden rounded-lg">
+          <a href=(href!(crate::app::produtos::page).query([("category", "biquini_top")])) class="group relative aspect-[4/5] overflow-hidden rounded-lg">
             <img
               src="https://images.unsplash.com/photo-1520997272473-74c1f3c6a699?auto=format&fit=crop&w=1200&q=80"
               alt="Tops"
@@ -473,7 +464,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
             <div class="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent"></div>
             <p class="absolute bottom-6 left-6 font-serif text-3xl text-white">"Tops"</p>
           </a>
-          <a href=(href!(crate::app::produtos::page).query([("category", "calcinha_biquini")])) class="group relative aspect-[4/5] overflow-hidden rounded-lg">
+          <a href=(href!(crate::app::produtos::page).query([("category", "biquini_bottom")])) class="group relative aspect-[4/5] overflow-hidden rounded-lg">
             <img
               src="https://images.unsplash.com/photo-1515241917366-8319c6f1af6d?auto=format&fit=crop&w=1200&q=80"
               alt="Calcinhas"
@@ -512,7 +503,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
         </div>
       </section>
 
-      // Lançamentos (new arrivals)
       if !lancamentos.is_empty() {
         <section class="border-y border-border bg-foreground/5 px-4 py-20 md:px-8">
           <div class="mx-auto max-w-7xl">
@@ -535,7 +525,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
         </section>
       }
 
-      // Mais vendidos (best sellers)
       if !mais_vendidos.is_empty() {
         <section class="mx-auto max-w-7xl px-4 py-20 md:px-8">
           <div class="mb-12 flex items-end justify-between gap-6">
@@ -556,7 +545,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
         </section>
       }
 
-      // Liquida (sale section)
       if !liquida.is_empty() {
         <section class="bg-red-50 dark:bg-red-950/20 px-4 py-20 md:px-8">
           <div class="mx-auto max-w-7xl">
@@ -600,33 +588,22 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
         </div>
       </section>
 
-      // Newsletter section
-      <section class="mx-auto max-w-2xl px-4 py-20 md:px-8">
-        <div class="text-center mb-8">
-          <p class="text-[10px] tracking-widest text-primary uppercase">"Fique conectada"</p>
-          <h2 class="font-serif mt-2 text-4xl text-foreground md:text-5xl">"Newsletter Linda Flor"</h2>
-          <p class="mt-4 text-muted-foreground">
-            "Receba novidades sobre nossas coleções, promoções e dicas de styling direto no seu email."
-          </p>
-        </div>
-        newsletter_form()
-      </section>
-
-      // WhatsApp CTA
       <section class="border-t border-border bg-foreground px-4 py-16 text-center text-background md:px-8">
         <p class="text-[10px] tracking-[0.24em] uppercase">"Atendimento personalizado"</p>
         <h2 class="font-serif mt-3 text-4xl md:text-5xl">"Fale com a gente no WhatsApp"</h2>
         <p class="mx-auto mt-4 max-w-xl text-sm leading-relaxed text-background/70">
           "Tire dúvidas sobre tamanhos, cores e disponibilidade. Estamos em Aracaju, de segunda a sexta, das 9h às 18h."
         </p>
-        <a
-          href="https://wa.me/5579998165115"
-          target="_blank"
-          rel="noreferrer"
-          class=(class!(button_variants(ButtonVariant::Primary, ButtonSize::Lg), "mt-8"))
-        >
-          "Chamar no WhatsApp"
-        </a>
+        if let Some(url) = whatsapp_url {
+          <a
+            href=(url)
+            target="_blank"
+            rel="noreferrer"
+            class=(class!(button_variants(ButtonVariant::Primary, ButtonSize::Lg), "mt-8"))
+          >
+            "Chamar no WhatsApp"
+          </a>
+        }
       </section>
   })
 }

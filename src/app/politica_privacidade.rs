@@ -31,7 +31,7 @@ pub async fn page() -> Result<impl View> {
               "Informações como nome, e-mail, endereço e telefone são utilizadas exclusivamente para entrega, suporte e cumprimento de obrigações legais. Não vendemos seus dados a terceiros."
           </p>
           <p class="text-sm leading-relaxed text-muted-foreground">
-              "Utilizamos cookies essenciais para manter sua sessão e preferências. Você pode solicitar acesso, correção ou exclusão dos seus dados entrando em contato pelo WhatsApp (79) 99816-5115."
+              "Utilizamos cookies essenciais para manter sua sessão e preferências. Você pode solicitar acesso, correção ou exclusão dos seus dados entrando em contato pelos nossos canais de atendimento."
           </p>
           separator(attrs: attributes! { class="my-8" })
           card(
@@ -70,7 +70,7 @@ pub async fn page() -> Result<impl View> {
                   card_header(card_title("5. Seus Direitos"))
                   card_content(
                       <p class="text-sm leading-relaxed text-muted-foreground">
-                          "Você tem direito a solicitar acesso, correção ou exclusão dos seus dados pessoais. Para exercer esses direitos, entre em contato conosco pelo WhatsApp (79) 99816-5115."
+                          "Você tem direito a solicitar acesso, correção ou exclusão dos seus dados pessoais. Para exercer esses direitos, entre em contato conosco pelos nossos canais de atendimento."
                       </p>
                   )
               )

@@ -162,7 +162,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                   name="whatsapp_number"
                                   id="whatsapp_number"
                                   value=(whatsapp_number)
-                                  placeholder="5579998165115"
+                                  placeholder="Somente números, com DDI e DDD"
                               })
                           </div>
                           <div class="space-y-2">

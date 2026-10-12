@@ -27,7 +27,7 @@ pub async fn page() -> Result<impl View> {
           )
           <h1 class="text-4xl font-bold tracking-tight">"Guia de medidas"</h1>
 
-          <section class="mt-8 space-y-4">
+          <section class="space-y-4">
               card(
                   card_header(
                       card_title("Como medir")
@@ -51,7 +51,7 @@ pub async fn page() -> Result<impl View> {
               )
           </section>
 
-          <section class="mt-8 space-y-4">
+          <section class="space-y-4">
               card(
                   card_header(
                       card_title("Tops")
@@ -91,7 +91,7 @@ pub async fn page() -> Result<impl View> {
               )
           </section>
 
-          <section class="mt-8 space-y-4">
+          <section class="space-y-4">
               card(
                   card_header(
                       card_title("Calcinhas")
@@ -137,7 +137,7 @@ pub async fn page() -> Result<impl View> {
               )
           </section>
 
-          <section class="mt-8 space-y-4">
+          <section class="space-y-4">
               card(
                   card_header(
                       card_title("Maiôs")
@@ -189,7 +189,7 @@ pub async fn page() -> Result<impl View> {
               )
           </section>
 
-          <section class="mt-8">
+          <section>
               card(
                   card_content(
                       <p class="text-sm text-muted-foreground">

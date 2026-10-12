@@ -6,15 +6,21 @@ use topcoat::{
   view::{View, attributes, component, view},
 };
 
-use crate::app::store::newsletter_form::newsletter_form;
 use crate::app::store::pricing::storefront_settings;
+use crate::app::store::queries::whatsapp_link;
 
 #[component]
 pub async fn footer(cx: &Cx) -> Result<impl View> {
   let settings = storefront_settings(cx).await;
 
-  // Same number the footer has always shown.
-  let whatsapp_link = "https://wa.me/5579998165115";
+  let whatsapp_url = settings
+    .whatsapp_number
+    .as_deref()
+    .map(str::trim)
+    .filter(|s| !s.is_empty())
+    .map(|number| {
+      whatsapp_link(number, "Olá! Quero saber mais sobre a Linda Flor.")
+    });
 
   let pix_text = if settings.pix_discount_percent > 0 {
     format!(
@@ -29,8 +35,8 @@ pub async fn footer(cx: &Cx) -> Result<impl View> {
       <footer class="border-t border-border bg-background">
           <div class="mx-auto max-w-7xl px-4 py-16 md:px-8">
             // Main footer content
-            <div class="grid gap-10 mb-10 md:grid-cols-2 lg:grid-cols-5">
-              <div class="space-y-3 lg:col-span-1 md:col-span-2">
+            <div class="grid gap-10 mb-10 sm:grid-cols-2 lg:grid-cols-4">
+              <div class="space-y-3">
                 <p class="font-serif text-2xl text-foreground">"Linda Flor"</p>
                 <p class="text-sm leading-relaxed text-muted-foreground">
                   "Moda praia feminina com qualidade e atendimento próximo. Da praia de Aracaju para você brilhar em qualquer verão."
@@ -64,15 +70,10 @@ pub async fn footer(cx: &Cx) -> Result<impl View> {
                 <div class="flex flex-col gap-2 text-sm text-muted-foreground">
                   <a href=(href!(crate::app::trocas_devolucoes::page)) class="transition-colors hover:text-foreground">"Trocas e devoluções"</a>
                   <a href=(href!(crate::app::guia_de_medidas::page)) class="transition-colors hover:text-foreground">"Guia de medidas"</a>
-                  <a href=(whatsapp_link) target="_blank" rel="noreferrer" class="transition-colors hover:text-foreground">"WhatsApp (79) 99816-5115"</a>
+                  if let Some(url) = whatsapp_url {
+                    <a href=(url) target="_blank" rel="noreferrer" class="transition-colors hover:text-foreground">"WhatsApp"</a>
+                  }
                 </div>
-              </div>
-
-              // Newsletter column
-              <div class="space-y-3">
-                <h3 class="text-[10px] tracking-widest uppercase font-semibold">"Newsletter"</h3>
-                <p class="text-sm text-muted-foreground">"Receba nossas novidades"</p>
-                newsletter_form()
               </div>
             </div>
 

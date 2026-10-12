@@ -160,6 +160,7 @@ pub async fn app_shell(
   let admin_active = path_active(&pathname, "/admin");
   let users_active = path_prefix(&pathname, "/admin/usuarios");
   let products_active = path_prefix(&pathname, "/admin/produtos");
+  let sets_active = path_prefix(&pathname, "/admin/sets");
   let orders_active = path_prefix(&pathname, "/admin/pedidos");
   let stock_active = path_prefix(&pathname, "/admin/estoque");
   let settings_active = path_prefix(&pathname, "/admin/configuracoes");
@@ -179,6 +180,7 @@ pub async fn app_shell(
   let admin_href = href!(crate::app::admin::page).resolve(cx);
   let users_href = href!(crate::app::admin::usuarios::page).resolve(cx);
   let products_href = href!(crate::app::admin::produtos::page).resolve(cx);
+  let sets_href = href!(crate::app::admin::sets::page).resolve(cx);
   let orders_href = href!(crate::app::admin::pedidos::page).resolve(cx);
   let stock_href = href!(crate::app::admin::estoque::page).resolve(cx);
   let store_settings_href =
@@ -300,6 +302,15 @@ pub async fn app_shell(
                                           tooltip: Some("Produtos"),
                                           icon(data: iconify_icon!("lucide:shirt"))
                                           <span>"Produtos"</span>
+                                      )
+                                  )
+                                  sidebar_menu_item(
+                                      sidebar_menu_button(
+                                          href: Some(sets_href.as_str()),
+                                          active: sets_active,
+                                          tooltip: Some("Conjuntos"),
+                                          icon(data: iconify_icon!("lucide:layers"))
+                                          <span>"Conjuntos"</span>
                                       )
                                   )
                                   sidebar_menu_item(

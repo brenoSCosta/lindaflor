@@ -9,7 +9,7 @@ use topcoat::{
 };
 
 use crate::app::auth_helpers::optional_user;
-use crate::app::store::queries::list_collections;
+use crate::app::store::queries::list_sets;
 use crate::components::button::{ButtonSize, ButtonVariant, button_variants};
 
 #[component]
@@ -21,8 +21,8 @@ pub async fn header(
   let logged_in = optional_user(cx).await?.is_some();
   let pool = app_context::<PgPool>(cx);
 
-  // Fetch collections (up to 6 will be shown in dropdown)
-  let collections = list_collections(pool)
+  // Fetch sets (up to 6 will be shown in dropdown)
+  let sets = list_sets(pool)
     .await?
     .into_iter()
     .take(6)
@@ -45,13 +45,13 @@ pub async fn header(
                   <div class="flex flex-col gap-1 text-sm">
                     <a href=(href!(crate::app::produtos::page).query([("sort", "novos")])) class="py-2">"Novidades"</a>
                     <p class="pt-2 text-[10px] tracking-widest uppercase text-muted-foreground">"Biquínis"</p>
-                    <a href=(href!(crate::app::produtos::page).query([("category", "top_biquini")])) class="py-2 pl-3">"Tops"</a>
-                    <a href=(href!(crate::app::produtos::page).query([("category", "calcinha_biquini")])) class="py-2 pl-3">"Calcinhas"</a>
+                    <a href=(href!(crate::app::produtos::page).query([("category", "biquini_top")])) class="py-2 pl-3">"Tops"</a>
+                    <a href=(href!(crate::app::produtos::page).query([("category", "biquini_bottom")])) class="py-2 pl-3">"Calcinhas"</a>
                     <a href=(href!(crate::app::produtos::page).query([("category", "biquini")])) class="py-2 pl-3">"Conjuntos"</a>
                     <a href=(href!(crate::app::produtos::page).query([("category", "maio")])) class="py-2">"Maiôs"</a>
                     <a href=(href!(crate::app::produtos::page).query([("category", "saida_praia")])) class="py-2">"Saídas de praia"</a>
                     <a href=(href!(crate::app::produtos::page).query([("category", "acessorio")])) class="py-2">"Acessórios"</a>
-                    <a href=(href!(crate::app::colecoes::page)) class="py-2">"Coleções"</a>
+                    <a href=(href!(crate::app::sets::page)) class="py-2">"Conjuntos"</a>
                     <a href=(href!(crate::app::produtos::page).query([("sale", "true")])) class="py-2 font-semibold text-red-600">"Liquida"</a>
                   </div>
                 </nav>
@@ -80,10 +80,10 @@ pub async fn header(
                     icon(data: iconify_icon!("lucide:chevron-down"), attrs: attributes! { class="size-3" })
                   </button>
                   <div class="absolute left-0 top-full hidden pt-2 group-hover:block group-focus-within:block bg-background border border-border rounded-lg shadow-lg min-w-[200px]">
-                    <a href=(href!(crate::app::produtos::page).query([("category", "top_biquini")])) class="block px-4 py-2 text-sm hover:bg-foreground/5 hover:text-primary">
+                    <a href=(href!(crate::app::produtos::page).query([("category", "biquini_top")])) class="block px-4 py-2 text-sm hover:bg-foreground/5 hover:text-primary">
                       "Tops"
                     </a>
-                    <a href=(href!(crate::app::produtos::page).query([("category", "calcinha_biquini")])) class="block px-4 py-2 text-sm hover:bg-foreground/5 hover:text-primary">
+                    <a href=(href!(crate::app::produtos::page).query([("category", "biquini_bottom")])) class="block px-4 py-2 text-sm hover:bg-foreground/5 hover:text-primary">
                       "Calcinhas"
                     </a>
                     <a href=(href!(crate::app::produtos::page).query([("category", "biquini")])) class="block px-4 py-2 text-sm hover:bg-foreground/5 hover:text-primary">
@@ -104,26 +104,26 @@ pub async fn header(
                   "Acessórios"
                 </a>
 
-                // Coleções dropdown
+                // Conjuntos dropdown
                 <div class="group relative">
                   <button
                     class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary flex items-center gap-1"
                     type="button"
                     aria-expanded="false"
                   >
-                    "Coleções"
+                    "Conjuntos"
                     icon(data: iconify_icon!("lucide:chevron-down"), attrs: attributes! { class="size-3" })
                   </button>
                   <div class="absolute left-0 top-full hidden pt-2 group-hover:block group-focus-within:block bg-background border border-border rounded-lg shadow-lg min-w-[200px]">
-                    #[key(col.slug.clone())]
-                    for col in collections.iter() {
-                      <a href=(href!(crate::app::colecoes::slug::page, crate::app::colecoes::slug::Slug(col.slug.clone()))) class="block px-4 py-2 text-sm hover:bg-foreground/5 hover:text-primary">
-                        (col.name.as_str())
+                    #[key(set.slug.clone())]
+                    for set in sets.iter() {
+                      <a href=(href!(crate::app::sets::slug::page, crate::app::sets::slug::Slug(set.slug.clone()))) class="block px-4 py-2 text-sm hover:bg-foreground/5 hover:text-primary">
+                        (set.name.as_str())
                       </a>
                     }
                     <div class="border-t border-border"></div>
-                    <a href=(href!(crate::app::colecoes::page)) class="block px-4 py-2 text-sm font-semibold hover:bg-foreground/5 hover:text-primary">
-                      "Ver todas"
+                    <a href=(href!(crate::app::sets::page)) class="block px-4 py-2 text-sm font-semibold hover:bg-foreground/5 hover:text-primary">
+                      "Ver todos"
                     </a>
                   </div>
                 </div>
@@ -133,19 +133,7 @@ pub async fn header(
                 </a>
               </nav>
 
-              // Right icons section
               <div class="flex items-center justify-end gap-2 md:order-3 md:flex-1">
-                // Search
-                <a
-                  href=(href!(crate::app::produtos::page))
-                  class=(button_variants(ButtonVariant::Ghost, ButtonSize::Icon))
-                  aria-label="Buscar"
-                  title="Buscar"
-                >
-                  icon(data: iconify_icon!("lucide:search"))
-                </a>
-
-                // Favorites
                 <a
                   href=(href!(crate::app::favoritos::page))
                   class=(button_variants(ButtonVariant::Ghost, ButtonSize::Icon))
@@ -155,7 +143,6 @@ pub async fn header(
                   icon(data: iconify_icon!("lucide:heart"))
                 </a>
 
-                // Account
                 if logged_in {
                   <a
                     href=(href!(crate::app::dashboard::page))
@@ -176,7 +163,6 @@ pub async fn header(
                   </a>
                 }
 
-                // Cart
                 <button
                   type="button"
                   id="cart-open-btn"

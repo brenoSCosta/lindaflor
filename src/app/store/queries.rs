@@ -50,12 +50,29 @@ pub struct ProductImage {
 }
 
 #[derive(Clone)]
-pub struct CollectionSummary {
+pub struct SetSummary {
   pub id: Uuid,
   pub name: String,
   pub slug: String,
   pub description: Option<String>,
+  pub active: bool,
+  pub cover_url: Option<String>,
   pub product_count: i64,
+  pub price_in_cents: Option<i64>,
+  pub compare_at_price_in_cents: Option<i64>,
+}
+
+#[derive(Clone)]
+pub struct SetImage {
+  pub id: Uuid,
+  pub url: String,
+  pub alt: Option<String>,
+}
+
+#[derive(Clone)]
+pub struct SetPriceSummary {
+  pub price_in_cents: Option<i64>,
+  pub compare_at_price_in_cents: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -91,7 +108,6 @@ impl Default for StoreSettings {
   }
 }
 
-pub const DEFAULT_WHATSAPP_NUMBER: &str = "5521992314267";
 pub const DEFAULT_FREE_SHIPPING_THRESHOLD_CENTS: i64 = 29_900;
 
 pub fn render_whatsapp_template(
@@ -151,8 +167,8 @@ pub fn format_price(cents: impl Into<i64>) -> String {
 pub fn category_label(category: &str) -> &'static str {
   match category {
     "biquini" => "Biquíni",
-    "top_biquini" => "Top de biquíni",
-    "calcinha_biquini" => "Calcinha de biquíni",
+    "biquini_top" => "Top de biquíni",
+    "biquini_bottom" => "Calcinha de biquíni",
     "maio" => "Maiô",
     "saida_praia" => "Saída de praia",
     "acessorio" => "Acessório",
@@ -177,7 +193,6 @@ fn append_product_filters(
   category: bool,
   search: bool,
   featured_only: bool,
-  collection_slug: bool,
   include_out_of_stock: bool,
 ) {
   if category {
@@ -198,13 +213,6 @@ fn append_product_filters(
   }
   if featured_only {
     sql.push_str(" AND p.featured = true");
-  }
-  if collection_slug {
-    sql.push_str(&format!(
-            " AND EXISTS (SELECT 1 FROM collections c WHERE c.id = p.collection_id AND c.slug = ${} AND c.active = true)",
-            param_index
-        ));
-    *param_index += 1;
   }
   if !include_out_of_stock {
     sql.push_str(" AND COALESCE((SELECT SUM(GREATEST(i.quantity - i.reserved, 0)) FROM inventory i INNER JOIN warehouses w ON w.id = i.warehouse_id WHERE i.variant_id IN (SELECT pv.id FROM product_variants pv WHERE pv.product_id = p.id) AND w.active = true), 0) > 0");
@@ -262,7 +270,6 @@ fn bind_product_filters<'q>(
   >,
   category: Option<&'q str>,
   search: Option<String>,
-  collection_slug: Option<&'q str>,
 ) -> sqlx::query::QueryAs<
   'q,
   sqlx::Postgres,
@@ -274,9 +281,6 @@ fn bind_product_filters<'q>(
   }
   if let Some(term) = search {
     query = query.bind(term.clone()).bind(term.clone()).bind(term);
-  }
-  if let Some(slug) = collection_slug {
-    query = query.bind(slug);
   }
   query
 }
@@ -323,7 +327,6 @@ pub async fn list_products_with_filters(
   search: Option<&str>,
   featured_only: bool,
   include_out_of_stock: bool,
-  collection_slug: Option<&str>,
   filters: &CatalogFilters,
   sort: &str,
   limit: i64,
@@ -357,7 +360,6 @@ pub async fn list_products_with_filters(
     category.is_some(),
     search.is_some(),
     featured_only,
-    collection_slug.is_some(),
     include_out_of_stock,
   );
 
@@ -416,7 +418,7 @@ pub async fn list_products_with_filters(
 
   let search_term = search.map(|s| format!("%{}%", s.trim()));
   let mut query = sqlx::query_as::<_, ProductSummaryRow>(&sql);
-  query = bind_product_filters(query, category, search_term, collection_slug);
+  query = bind_product_filters(query, category, search_term);
 
   if let Some(min_cents) = filters.price_min_cents {
     query = query.bind(min_cents);
@@ -443,7 +445,6 @@ pub async fn count_products_with_filters(
   search: Option<&str>,
   featured_only: bool,
   include_out_of_stock: bool,
-  collection_slug: Option<&str>,
   filters: &CatalogFilters,
 ) -> Result<i64, sqlx::Error> {
   let mut sql =
@@ -455,7 +456,6 @@ pub async fn count_products_with_filters(
     category.is_some(),
     search.is_some(),
     featured_only,
-    collection_slug.is_some(),
     include_out_of_stock,
   );
 
@@ -468,9 +468,6 @@ pub async fn count_products_with_filters(
   if let Some(s) = search {
     let term = format!("%{}%", s.trim());
     query = query.bind(term.clone()).bind(term.clone()).bind(term);
-  }
-  if let Some(slug) = collection_slug {
-    query = query.bind(slug);
   }
 
   if let Some(min_cents) = filters.price_min_cents {
@@ -495,7 +492,6 @@ pub async fn list_products(
   search: Option<&str>,
   featured_only: bool,
   include_out_of_stock: bool,
-  collection_slug: Option<&str>,
   limit: i64,
   offset: i64,
 ) -> Result<Vec<ProductSummary>, sqlx::Error> {
@@ -527,7 +523,6 @@ pub async fn list_products(
     category.is_some(),
     search.is_some(),
     featured_only,
-    collection_slug.is_some(),
     include_out_of_stock,
   );
   sql.push_str(&format!(
@@ -538,7 +533,7 @@ pub async fn list_products(
 
   let search_term = search.map(|s| format!("%{}%", s.trim()));
   let mut query = sqlx::query_as::<_, ProductSummaryRow>(&sql);
-  query = bind_product_filters(query, category, search_term, collection_slug);
+  query = bind_product_filters(query, category, search_term);
   query = query.bind(limit).bind(offset);
 
   let rows = query.fetch_all(pool).await?;
@@ -551,7 +546,6 @@ pub async fn count_products(
   search: Option<&str>,
   featured_only: bool,
   include_out_of_stock: bool,
-  collection_slug: Option<&str>,
 ) -> Result<i64, sqlx::Error> {
   let mut sql =
     String::from("SELECT COUNT(*) FROM products p WHERE p.active = true");
@@ -562,7 +556,6 @@ pub async fn count_products(
     category.is_some(),
     search.is_some(),
     featured_only,
-    collection_slug.is_some(),
     include_out_of_stock,
   );
 
@@ -573,9 +566,6 @@ pub async fn count_products(
   if let Some(s) = search {
     let term = format!("%{}%", s.trim());
     query = query.bind(term.clone()).bind(term.clone()).bind(term);
-  }
-  if let Some(slug) = collection_slug {
-    query = query.bind(slug);
   }
   query.fetch_one(pool).await
 }
@@ -636,11 +626,11 @@ mod tests {
       .await
       .unwrap();
     }
-    let page = list_products(&pool, None, None, false, true, None, 2, 0)
+    let page = list_products(&pool, None, None, false, true, 2, 0)
       .await
       .unwrap();
     assert_eq!(page.len(), 2);
-    let total = count_products(&pool, None, None, false, true, None)
+    let total = count_products(&pool, None, None, false, true)
       .await
       .unwrap();
     assert!(total >= 3);
@@ -745,63 +735,128 @@ pub async fn get_product_by_slug(
   }))
 }
 
-pub async fn list_collections(
-  pool: &PgPool,
-) -> Result<Vec<CollectionSummary>, sqlx::Error> {
-  let rows = sqlx::query!(
-        "SELECT c.id, c.name, c.slug, c.description,
-            (SELECT COUNT(*) FROM products p WHERE p.collection_id = c.id AND p.active = true) AS product_count
-         FROM collections c WHERE c.active = true ORDER BY c.name ASC"
-    )
-    .fetch_all(pool)
-    .await?;
-
-  Ok(
-    rows
-      .into_iter()
-      .map(|r| CollectionSummary {
-        id: r.id,
-        name: r.name,
-        slug: r.slug,
-        description: r.description,
-        product_count: r.product_count.unwrap_or(0),
-      })
-      .collect(),
+/// Active sets with cover image + member count (+ bundle price when set).
+pub async fn list_sets(pool: &PgPool) -> Result<Vec<SetSummary>, sqlx::Error> {
+  let rows = sqlx::query_as::<_, SetSummaryRow>(
+    "SELECT s.id, s.name, s.slug, s.description, s.active,
+            (SELECT si.url FROM set_images si WHERE si.set_id = s.id ORDER BY si.sort_order ASC LIMIT 1) AS cover_url,
+            (SELECT COUNT(*) FROM set_members sm INNER JOIN products p ON p.id = sm.product_id WHERE sm.set_id = s.id AND p.active = true) AS product_count,
+            s.price_in_cents, s.compare_at_price_in_cents
+         FROM sets s WHERE s.active = true ORDER BY s.name ASC",
   )
+  .fetch_all(pool)
+  .await?;
+
+  Ok(rows.into_iter().map(SetSummary::from).collect())
 }
 
-pub async fn get_collection_by_slug(
+pub async fn get_set_by_slug(
   pool: &PgPool,
   slug: &str,
-) -> Result<Option<CollectionSummary>, sqlx::Error> {
-  let row = sqlx::query!(
-        "SELECT id, name, slug, description FROM collections WHERE slug = $1 AND active = true",
-        slug
-    )
-    .fetch_optional(pool)
-    .await?;
+) -> Result<Option<SetSummary>, sqlx::Error> {
+  let row = sqlx::query_as::<_, SetSummaryRow>(
+    "SELECT s.id, s.name, s.slug, s.description, s.active,
+            (SELECT si.url FROM set_images si WHERE si.set_id = s.id ORDER BY si.sort_order ASC LIMIT 1) AS cover_url,
+            (SELECT COUNT(*) FROM set_members sm INNER JOIN products p ON p.id = sm.product_id WHERE sm.set_id = s.id AND p.active = true) AS product_count,
+            s.price_in_cents, s.compare_at_price_in_cents
+         FROM sets s WHERE s.slug = $1 AND s.active = true",
+  )
+  .bind(slug)
+  .fetch_optional(pool)
+  .await?;
 
-  Ok(row.map(|r| CollectionSummary {
-    id: r.id,
-    name: r.name,
-    slug: r.slug,
-    description: r.description,
-    product_count: 0,
-  }))
+  Ok(row.map(SetSummary::from))
 }
 
-pub async fn count_collection_products(
+/// Images for a set, ordered for display.
+pub async fn list_set_images(
   pool: &PgPool,
-  collection_id: &Uuid,
-) -> Result<i64, sqlx::Error> {
-  let count: i64 = sqlx::query_scalar!(
-    "SELECT COUNT(*) FROM products WHERE collection_id = $1 AND active = true",
-    collection_id
+  set_id: Uuid,
+) -> Result<Vec<SetImage>, sqlx::Error> {
+  let rows = sqlx::query_as::<_, SetImageRow>(
+    "SELECT id, url, alt FROM set_images WHERE set_id = $1 ORDER BY sort_order ASC",
   )
+  .bind(set_id)
+  .fetch_all(pool)
+  .await?;
+  Ok(rows.into_iter().map(SetImage::from).collect())
+}
+
+/// Active member products of a set, in `set_members.sort_order`.
+pub async fn list_set_members(
+  pool: &PgPool,
+  set_id: Uuid,
+) -> Result<Vec<ProductSummary>, sqlx::Error> {
+  let rows = sqlx::query_as::<_, ProductSummaryRow>(&format!(
+    "SELECT {PRODUCT_SUMMARY_COLUMNS}
+       FROM set_members sm
+       INNER JOIN products p ON p.id = sm.product_id
+       WHERE sm.set_id = $1 AND p.active = true
+       ORDER BY sm.sort_order ASC"
+  ))
+  .bind(set_id)
+  .fetch_all(pool)
+  .await?;
+  Ok(rows.into_iter().map(|r| r.into()).collect())
+}
+
+/// Number of active member products in a set.
+pub async fn count_set_members(
+  pool: &PgPool,
+  set_id: &Uuid,
+) -> Result<i64, sqlx::Error> {
+  sqlx::query_scalar::<_, i64>(
+    "SELECT COUNT(*) FROM set_members sm
+      INNER JOIN products p ON p.id = sm.product_id
+      WHERE sm.set_id = $1 AND p.active = true",
+  )
+  .bind(set_id)
   .fetch_one(pool)
-  .await?
-  .unwrap_or(0);
-  Ok(count)
+  .await
+}
+
+/// Sellable availability of a set: the MIN over its slots of the summed
+/// available quantity of each slot's option variants (active warehouses
+/// only). Returns 0 when the set has no slots.
+pub async fn set_available_quantity(
+  pool: &PgPool,
+  set_id: Uuid,
+) -> Result<i64, sqlx::Error> {
+  sqlx::query_scalar::<_, i64>(
+    "SELECT COALESCE(MIN(slot_qty), 0) FROM (
+       SELECT COALESCE(SUM(COALESCE((
+         SELECT SUM(GREATEST(i.quantity - i.reserved, 0))
+         FROM inventory i
+         INNER JOIN warehouses w ON w.id = i.warehouse_id
+         WHERE i.variant_id = o.variant_id AND w.active = true
+       ), 0)), 0) AS slot_qty
+       FROM set_slots s
+       LEFT JOIN set_slot_options o ON o.slot_id = s.id
+       WHERE s.set_id = $1
+       GROUP BY s.id
+     ) t",
+  )
+  .bind(set_id)
+  .fetch_one(pool)
+  .await
+}
+
+/// Bundle price snapshot for a set (`sets.price_in_cents` /
+/// `compare_at_price_in_cents` from migration 0015).
+pub async fn set_price_summary(
+  pool: &PgPool,
+  set_id: Uuid,
+) -> Result<Option<SetPriceSummary>, sqlx::Error> {
+  let row = sqlx::query_as::<_, SetPriceSummaryRow>(
+    "SELECT price_in_cents, compare_at_price_in_cents FROM sets WHERE id = $1",
+  )
+  .bind(set_id)
+  .fetch_optional(pool)
+  .await?;
+  Ok(row.map(|r| SetPriceSummary {
+    price_in_cents: r.price_in_cents,
+    compare_at_price_in_cents: r.compare_at_price_in_cents,
+  }))
 }
 
 pub async fn get_store_settings(
@@ -885,6 +940,58 @@ impl From<ProductImageRow> for ProductImage {
   }
 }
 
+#[derive(sqlx::FromRow)]
+struct SetSummaryRow {
+  id: Uuid,
+  name: String,
+  slug: String,
+  description: Option<String>,
+  active: bool,
+  cover_url: Option<String>,
+  product_count: Option<i64>,
+  price_in_cents: Option<i64>,
+  compare_at_price_in_cents: Option<i64>,
+}
+
+impl From<SetSummaryRow> for SetSummary {
+  fn from(r: SetSummaryRow) -> Self {
+    SetSummary {
+      id: r.id,
+      name: r.name,
+      slug: r.slug,
+      description: r.description,
+      active: r.active,
+      cover_url: r.cover_url,
+      product_count: r.product_count.unwrap_or(0),
+      price_in_cents: r.price_in_cents,
+      compare_at_price_in_cents: r.compare_at_price_in_cents,
+    }
+  }
+}
+
+#[derive(sqlx::FromRow)]
+struct SetImageRow {
+  id: Uuid,
+  url: String,
+  alt: Option<String>,
+}
+
+impl From<SetImageRow> for SetImage {
+  fn from(r: SetImageRow) -> Self {
+    SetImage {
+      id: r.id,
+      url: r.url,
+      alt: r.alt,
+    }
+  }
+}
+
+#[derive(sqlx::FromRow)]
+struct SetPriceSummaryRow {
+  price_in_cents: Option<i64>,
+  compare_at_price_in_cents: Option<i64>,
+}
+
 /// Related products from the product_looks table, ordered by sort_order.
 pub async fn list_product_looks(
   pool: &PgPool,
@@ -904,25 +1011,21 @@ pub async fn list_product_looks(
 }
 
 /// Distinct colors (one hex per name) among active products, for the filter
-/// panel; optionally narrowed to a category or collection.
+/// panel; optionally narrowed to a category.
 pub async fn list_filter_colors(
   pool: &PgPool,
   category: Option<&str>,
-  collection_slug: Option<&str>,
 ) -> Result<Vec<(String, Option<String>)>, sqlx::Error> {
   sqlx::query_as::<_, (String, Option<String>)>(
     "SELECT DISTINCT ON (pv.color) pv.color, pv.color_hex
      FROM product_variants pv
      INNER JOIN products p ON p.id = pv.product_id
-     LEFT JOIN collections c ON c.id = p.collection_id
      WHERE p.active = true
        AND ($1::text IS NULL OR p.category::text = $1)
-       AND ($2::text IS NULL OR c.slug = $2)
      ORDER BY pv.color ASC, pv.color_hex ASC NULLS LAST
      LIMIT 30",
   )
   .bind(category)
-  .bind(collection_slug)
   .fetch_all(pool)
   .await
 }

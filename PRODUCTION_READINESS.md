@@ -249,7 +249,7 @@ No `pg_dump`/`pg_basebackup`/PITR, no Valkey `BGSAVE` schedule, no S3 versioning
 Enum is `pending_payment | paid | processing | shipped | delivered | cancelled`. Admin only implements `pending_payment→paid/cancelled` and `paid→delivered`. `processing`/`shipped` are unreachable; no `paid→cancelled/refund` restock path. Double-POST safe (`FOR UPDATE` + re-check — good, keep).
 - [x] Fix: implement `pending_payment→paid→shipped→delivered` + `paid→refunded/cancelled` (restock via `convert/release` inverse + coupon restore) as the `order.apply` table in §2.0. Needed for MP refunds (§2). Manual DB work until then — document runbook.
 
-### 4.2 Catalog unbounded — `src/app/store/queries.rs:132-200`, `src/app.rs:221-227`, `src/app/produtos.rs:107-115`, `src/app/colecoes/slug.rs:49`, `src/app/produtos/slug.rs:112-120`
+### 4.2 Catalog unbounded — `src/app/store/queries.rs:132-200`, `src/app.rs:221-227`, `src/app/produtos.rs:107-115`, `src/app/sets/slug.rs:49`, `src/app/produtos/slug.rs:112-120`
 `list_products` has no `LIMIT/OFFSET`. Home runs **two** unbounded queries (`featured` + `all`, not the same catalog twice). Related products load the full category then `.take(4)` in memory. (Admin `pedidos/produtos/conta/pedidos` correctly use `COUNT+LIMIT/OFFSET` — keep as pattern.)
 - [x] Fix: paginate storefront (`LIMIT 24 + cursor/offset`, clamp `1..10_000` like admin); related via `WHERE id != $1 ... LIMIT 4` in SQL; add index on `(active, featured, created_at)`.
 

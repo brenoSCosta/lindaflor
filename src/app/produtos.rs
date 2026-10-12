@@ -13,18 +13,17 @@ use topcoat::{
 use crate::app::store::catalog_filters::{
   catalog_toolbar, repeated_query_values,
 };
+use crate::app::store::product_card::product_card;
 use crate::app::store::queries::{
-  CatalogFilters, STOREFRONT_PAGE_SIZE, category_label, clamp_catalog_page,
-  count_products_with_filters, format_price, list_filter_colors,
+  CatalogFilters, STOREFRONT_PAGE_SIZE, clamp_catalog_page,
+  count_products_with_filters, list_filter_colors,
   list_products_with_filters,
 };
-use crate::components::badge::{BadgeVariant, badge};
 use crate::components::breadcrumb::{
   breadcrumb, breadcrumb_item, breadcrumb_link, breadcrumb_list,
   breadcrumb_page, breadcrumb_separator,
 };
 use crate::components::button::{ButtonSize, ButtonVariant, button_variants};
-use crate::components::card::{card, card_footer, card_header, card_title};
 use crate::components::container::container;
 use crate::components::input::input;
 use crate::components::pagination::{
@@ -50,8 +49,8 @@ struct ProductsQuery {
 const CATEGORIES: [(&str, &str); 7] = [
   ("all", "Todos"),
   ("biquini", "Biquínis"),
-  ("top_biquini", "Tops"),
-  ("calcinha_biquini", "Cantinhas"),
+  ("biquini_top", "Tops"),
+  ("biquini_bottom", "Cantinhas"),
   ("maio", "Maiôs"),
   ("saida_praia", "Saídas"),
   ("acessorio", "Acessórios"),
@@ -61,7 +60,7 @@ const SEARCH_MAX: usize = 80;
 
 fn catalog_category(raw: &str) -> String {
   match raw.trim() {
-    "biquini" | "top_biquini" | "calcinha_biquini" | "maio" | "saida_praia"
+    "biquini" | "biquini_top" | "biquini_bottom" | "maio" | "saida_praia"
     | "acessorio" => raw.trim().to_string(),
     _ => "all".to_string(),
   }
@@ -217,7 +216,6 @@ async fn catalog_results(
     search_filter,
     featured_only,
     include_out_of_stock,
-    None,
     &filters,
   )
   .await?;
@@ -239,7 +237,6 @@ async fn catalog_results(
     search_filter,
     featured_only,
     include_out_of_stock,
-    None,
     &filters,
     &sort_str,
     page_size,
@@ -251,7 +248,7 @@ async fn catalog_results(
     crate::app::admin::produtos::resolve_summary_images(&store, products).await;
 
   let available_colors =
-    list_filter_colors(pool, category_filter, None).await?;
+    list_filter_colors(pool, category_filter).await?;
 
   // Update heading for special cases
   let heading = if sale {
@@ -403,44 +400,10 @@ async fn catalog_results(
                   </a>
               </p>
           } else {
-              <div class="grid gap-4 @sm/page:grid-cols-2 @2xl/page:grid-cols-3">
+              <div class="grid gap-8 @sm/page:grid-cols-2 @2xl/page:grid-cols-3">
                   #[key(product.id.to_string())]
                   for product in products {
-                      let image_url = product
-                          .image_url
-                          .clone()
-                          .unwrap_or_else(|| "/static/product-fallback.svg".to_string());
-                      let name = product.name.clone();
-                      let product_url = href!(
-                        slug::page,
-                        slug::Slug(product.slug.clone())
-                      );
-                      let category_text = category_label(&product.category).to_string();
-                      let price_text = format_price(product.price_in_cents);
-                      let sold_out = product.available_total == 0;
-
-                      card(
-                          attrs: attributes! { class="group overflow-hidden" },
-                          <a href=(product_url) class="block">
-                              <div class="aspect-[4/5] overflow-hidden">
-                                  <img
-                                      src=(image_url)
-                                      alt=(name.clone())
-                                      class="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
-                                  >
-                              </div>
-                          </a>
-                          card_header(
-                              card_title((name))
-                              badge(variant: BadgeVariant::Secondary, (category_text))
-                          )
-                          card_footer(
-                              <span class="text-sm font-medium">(price_text)</span>
-                              if sold_out {
-                                  badge(variant: BadgeVariant::Destructive, "Esgotado")
-                              }
-                          )
-                      )
+                      product_card(product: product)
                   }
               </div>
               if show_pagination {

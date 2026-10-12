@@ -197,8 +197,8 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                               select(
                                   attrs: attributes! { name="category" id="category" },
                                   <option value="biquini" selected=(category == "biquini")>"Biquíni"</option>
-                                  <option value="top_biquini" selected=(category == "top_biquini")>"Top de Biquíni"</option>
-                                  <option value="calcinha_biquini" selected=(category == "calcinha_biquini")>"Calcinha de Biquíni"</option>
+                                  <option value="biquini_top" selected=(category == "biquini_top")>"Top de Biquíni"</option>
+                                  <option value="biquini_bottom" selected=(category == "biquini_bottom")>"Calcinha de Biquíni"</option>
                                   <option value="maio" selected=(category == "maio")>"Maiô"</option>
                                   <option value="saida_praia" selected=(category == "saida_praia")>"Saída de Praia"</option>
                                   <option value="acessorio" selected=(category == "acessorio")>"Acessório"</option>

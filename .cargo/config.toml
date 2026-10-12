@@ -1,3 +1,0 @@
-# No global `jobs` limit: it throttled every build (2 of 12 cores). rust-analyzer
-# keeps its own limit via `check.extraArgs` in rust-analyzer.toml and
-# .vscode/settings.json.

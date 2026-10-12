@@ -22,8 +22,7 @@ use crate::components::table::{
 };
 
 use crate::app::store::queries::{
-  DEFAULT_WHATSAPP_NUMBER, format_price, get_store_settings,
-  render_whatsapp_template, whatsapp_link,
+  format_price, get_store_settings, render_whatsapp_template, whatsapp_link,
 };
 
 path_param!(pub(crate) id: Uuid, error = not_found);
@@ -272,13 +271,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let order_id_short = order.id.to_string().chars().take(8).collect::<String>();
   let order_total = format_price(order.total_cents);
   let settings = get_store_settings(pool).await?;
-  let whatsapp_number = settings
-    .whatsapp_number
-    .as_deref()
-    .map(str::trim)
-    .filter(|s| !s.is_empty())
-    .unwrap_or(DEFAULT_WHATSAPP_NUMBER)
-    .to_string();
   let whatsapp_fallback = format!(
     "Olá! Fiz o pedido {} no valor de {} e quero confirmar o pagamento via PIX.",
     order_id_short, order_total
@@ -291,7 +283,12 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     ],
     &whatsapp_fallback,
   );
-  let whatsapp_url = whatsapp_link(&whatsapp_number, &whatsapp_message);
+  let whatsapp_url = settings
+    .whatsapp_number
+    .as_deref()
+    .map(str::trim)
+    .filter(|s| !s.is_empty())
+    .map(|number| whatsapp_link(number, &whatsapp_message));
   let guest_email = order.guest_email.clone().unwrap_or_default();
   let address_display = order
     .shipping_address
@@ -395,14 +392,16 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                         }
                     )
                     card_footer(
-                        <a
-                            href=(whatsapp_url)
-                            target="_blank"
-                            rel="noreferrer"
-                            class=(button_variants(ButtonVariant::Primary, ButtonSize::Lg))
-                        >
-                            "Avise no WhatsApp"
-                        </a>
+                        if let Some(url) = whatsapp_url {
+                          <a
+                              href=(url)
+                              target="_blank"
+                              rel="noreferrer"
+                              class=(button_variants(ButtonVariant::Primary, ButtonSize::Lg))
+                          >
+                              "Avise no WhatsApp"
+                          </a>
+                        }
                     )
                 )
             }

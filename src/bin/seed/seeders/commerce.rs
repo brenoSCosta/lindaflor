@@ -24,10 +24,10 @@ const PRODUCT_NAMES: [&str; 12] = [
 #[sqlx(type_name = "product_category", rename_all = "lowercase")]
 enum ProductCategory {
   Biquini,
-  #[sqlx(rename = "top_biquini")]
-  TopBiquini,
-  #[sqlx(rename = "calcinha_biquini")]
-  CalchinhaBiquini,
+  #[sqlx(rename = "biquini_top")]
+  BiquiniTop,
+  #[sqlx(rename = "biquini_bottom")]
+  BiquiniBottom,
   Maio,
   #[sqlx(rename = "saida_praia")]
   SaidaPraia,
@@ -58,8 +58,8 @@ impl ProductSize {
 
 const CATEGORIES: [ProductCategory; 6] = [
   ProductCategory::Biquini,
-  ProductCategory::TopBiquini,
-  ProductCategory::CalchinhaBiquini,
+  ProductCategory::BiquiniTop,
+  ProductCategory::BiquiniBottom,
   ProductCategory::Maio,
   ProductCategory::SaidaPraia,
   ProductCategory::Acessorio,
@@ -168,7 +168,7 @@ async fn seed_settings(pool: &PgPool) -> Result<(), SeedError> {
     )
     .bind(Uuid::now_v7())
     .bind(env_str("SEED_PIX_KEY", "79998165115"))
-    .bind(env_str("SEED_WHATSAPP_NUMBER", "557998165115"))
+    .bind(env_str("SEED_WHATSAPP_NUMBER", "5579998165115"))
     .bind(env_str(
         "SEED_WHATSAPP_MESSAGE_TEMPLATE",
         "Olá! Fiz o pedido {{order_id}} no valor de {{total}} e quero confirmar o pagamento via PIX.",
@@ -215,44 +215,197 @@ async fn seed_settings(pool: &PgPool) -> Result<(), SeedError> {
   Ok(())
 }
 
-async fn seed_collections(pool: &PgPool) -> Result<Vec<Uuid>, SeedError> {
-  let names = env_str("SEED_COLLECTIONS", "Verão 2026,Clássicos,Pôr do Sol");
-  let mut ids = Vec::new();
+async fn seed_sets(pool: &PgPool) -> Result<(), SeedError> {
+  let max_sets = env_num("SEED_SET_COUNT", 4)?;
 
-  for name in names.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
-    let slug = slugify(name);
-    let existing =
-      sqlx::query!("SELECT id FROM collections WHERE slug = $1", slug)
+  // Pair tops with bottoms so each conjunto is a realistic top + calcinha
+  // bundle. Falls back to any active products when categories are missing.
+  struct SeedCandidate {
+    product_id: Uuid,
+    variant_id: Uuid,
+    price_in_cents: i64,
+  }
+
+  async fn candidates_for(
+    pool: &PgPool,
+    category: &str,
+  ) -> Result<Vec<SeedCandidate>, SeedError> {
+    let rows: Vec<(Uuid, Uuid, i64)> = sqlx::query_as(
+      "SELECT p.id, pv.id, p.price_in_cents
+       FROM products p
+       INNER JOIN LATERAL (
+         SELECT pv.id FROM product_variants pv
+         WHERE pv.product_id = p.id
+         ORDER BY pv.created_at ASC LIMIT 1
+       ) pv ON true
+       WHERE p.active = true AND p.category = $1::product_category
+       ORDER BY p.created_at ASC",
+    )
+    .bind(category)
+    .fetch_all(pool)
+    .await?;
+    Ok(
+      rows
+        .into_iter()
+        .map(|(product_id, variant_id, price_in_cents)| SeedCandidate {
+          product_id,
+          variant_id,
+          price_in_cents,
+        })
+        .collect(),
+    )
+  }
+
+  let tops = candidates_for(pool, "biquini_top").await?;
+  let bottoms = candidates_for(pool, "biquini_bottom").await?;
+
+  // (name, slug, description) pool; only as many as we can pair.
+  let demo = [
+    (
+      "Conjunto Verão Tropical",
+      "conjunto-verao-tropical",
+      "Top + calcinha estampados para os dias de sol.",
+    ),
+    (
+      "Conjunto Pôr do Sol",
+      "conjunto-por-do-sol",
+      "Peças lisas em tons quentes para combinar com tudo.",
+    ),
+    (
+      "Conjunto Maré Alta",
+      "conjunto-mare-alta",
+      "Top de amarração + calcinha fio dental.",
+    ),
+    (
+      "Conjunto Areia Dourada",
+      "conjunto-areia-dourada",
+      "Clássico neutro para o verão inteiro.",
+    ),
+  ];
+
+  // Fixed composition needs one top and one bottom per set.
+  let pairable = tops.len().min(bottoms.len());
+  if pairable == 0 {
+    tracing::info!(
+      "Skipping set seed: need biquini_top + biquini_bottom products"
+    );
+    return Ok(());
+  }
+  let count = (max_sets as usize).min(pairable).min(demo.len());
+
+  for (index, (name, slug, description)) in demo.iter().take(count).enumerate()
+  {
+    let top = &tops[index % tops.len()];
+    let bottom = &bottoms[index % bottoms.len()];
+    // Bundle price: ~10% off the summed member prices; compare_at = sum.
+    let sum = top.price_in_cents + bottom.price_in_cents;
+    let price = (sum * 90) / 100;
+
+    let existing: Option<Uuid> =
+      sqlx::query_scalar("SELECT id FROM sets WHERE slug = $1")
+        .bind(*slug)
         .fetch_optional(pool)
         .await?;
 
-    let id = match existing {
-      Some(row) => row.id,
+    let set_id = match existing {
+      Some(id) => id,
       None => {
         let id = Uuid::now_v7();
-        sqlx::query!(
-                    "INSERT INTO collections (id, name, slug, description, active, created_at, updated_at)
-                     VALUES ($1, $2, $3, NULL, true, now(), now())",
-                    id,
-                    name,
-                    slug,
-                )
-                .execute(pool)
-                .await?;
-        tracing::info!("Collection created: {}", name);
+        sqlx::query(
+          "INSERT INTO sets (id, name, slug, description, active, price_in_cents, compare_at_price_in_cents, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, true, $5, $6, now(), now())",
+        )
+        .bind(id)
+        .bind(*name)
+        .bind(*slug)
+        .bind(*description)
+        .bind(price)
+        .bind(sum)
+        .execute(pool)
+        .await?;
+        tracing::info!("Set created: {}", name);
         id
       }
     };
-    ids.push(id);
+
+    let image_count: i64 =
+      sqlx::query_scalar("SELECT COUNT(*) FROM set_images WHERE set_id = $1")
+        .bind(set_id)
+        .fetch_one(pool)
+        .await?;
+    if image_count == 0 {
+      for sort in 0..3 {
+        sqlx::query(
+          "INSERT INTO set_images (id, set_id, url, alt, sort_order, created_at)
+           VALUES ($1, $2, $3, $4, $5, now())",
+        )
+        .bind(Uuid::now_v7())
+        .bind(set_id)
+        .bind(format!("https://picsum.photos/seed/{slug}-{sort}/1200/1200"))
+        .bind(*name)
+        .bind(sort)
+        .execute(pool)
+        .await?;
+      }
+    }
+
+    for (order, product_id) in
+      [top.product_id, bottom.product_id].into_iter().enumerate()
+    {
+      sqlx::query(
+        "INSERT INTO set_members (set_id, product_id, sort_order)
+         VALUES ($1, $2, $3)
+         ON CONFLICT DO NOTHING",
+      )
+      .bind(set_id)
+      .bind(product_id)
+      .bind(order as i32)
+      .execute(pool)
+      .await?;
+    }
+
+    // Fixed composition: one slot per piece, one variant per slot.
+    let slot_count: i64 =
+      sqlx::query_scalar("SELECT COUNT(*) FROM set_slots WHERE set_id = $1")
+        .bind(set_id)
+        .fetch_one(pool)
+        .await?;
+    if slot_count == 0 {
+      for (order, (label, variant_id)) in
+        [("Top", top.variant_id), ("Calcinha", bottom.variant_id)]
+          .into_iter()
+          .enumerate()
+      {
+        let slot_id = Uuid::now_v7();
+        sqlx::query(
+          "INSERT INTO set_slots (id, set_id, label, sort_order)
+           VALUES ($1, $2, $3, $4)",
+        )
+        .bind(slot_id)
+        .bind(set_id)
+        .bind(label)
+        .bind(order as i32)
+        .execute(pool)
+        .await?;
+        sqlx::query(
+          "INSERT INTO set_slot_options (slot_id, variant_id, price_override_cents)
+           VALUES ($1, $2, NULL)
+           ON CONFLICT DO NOTHING",
+        )
+        .bind(slot_id)
+        .bind(variant_id)
+        .execute(pool)
+        .await?;
+      }
+    }
   }
 
-  Ok(ids)
+  Ok(())
 }
 
 async fn seed_products(
   pool: &PgPool,
   warehouse_id: Uuid,
-  collection_ids: &[Uuid],
 ) -> Result<(), SeedError> {
   let count = env_num("SEED_PRODUCT_COUNT", 12)?;
   let price_min = env_num("SEED_PRICE_MIN", 6990)?;
@@ -260,8 +413,8 @@ async fn seed_products(
   let stock_min = env_num("SEED_STOCK_MIN", 5)?;
   let stock_max = env_num("SEED_STOCK_MAX", 30)?;
   let mut rng = rand::thread_rng();
-  let mut top_biquini_ids = Vec::new();
-  let mut calcinha_biquini_ids = Vec::new();
+  let mut biquini_top_ids = Vec::new();
+  let mut biquini_bottom_ids = Vec::new();
 
   for i in 0..count {
     let name = PRODUCT_NAMES[i as usize % PRODUCT_NAMES.len()];
@@ -294,15 +447,10 @@ async fn seed_products(
       None
     };
     let featured = (i + 1) % 3 == 0;
-    let collection_id = if collection_ids.is_empty() {
-      None
-    } else {
-      Some(collection_ids[i as usize % collection_ids.len()])
-    };
 
     sqlx::query(
-            "INSERT INTO products (id, name, slug, description, price_in_cents, compare_at_price_in_cents, category, collection_id, active, featured, created_at, updated_at)
-             VALUES ($1, $2, $3, NULL, $4, $5, $6::product_category, $7, true, $8, now(), now())",
+            "INSERT INTO products (id, name, slug, description, price_in_cents, compare_at_price_in_cents, category, active, featured, created_at, updated_at)
+             VALUES ($1, $2, $3, NULL, $4, $5, $6::product_category, true, $7, now(), now())",
         )
         .bind(id)
         .bind(name)
@@ -311,21 +459,20 @@ async fn seed_products(
         .bind(compare_at_price)
         .bind(match category {
           ProductCategory::Biquini => "biquini",
-          ProductCategory::TopBiquini => "top_biquini",
-          ProductCategory::CalchinhaBiquini => "calcinha_biquini",
+          ProductCategory::BiquiniTop => "biquini_top",
+          ProductCategory::BiquiniBottom => "biquini_bottom",
           ProductCategory::Maio => "maio",
           ProductCategory::SaidaPraia => "saida_praia",
           ProductCategory::Acessorio => "acessorio",
         })
-        .bind(collection_id)
         .bind(featured)
         .execute(pool)
         .await?;
 
-    // Track top_biquini and calcinha_biquini IDs for linking
+    // Track biquini_top and biquini_bottom IDs for linking
     match category {
-      ProductCategory::TopBiquini => top_biquini_ids.push(id),
-      ProductCategory::CalchinhaBiquini => calcinha_biquini_ids.push(id),
+      ProductCategory::BiquiniTop => biquini_top_ids.push(id),
+      ProductCategory::BiquiniBottom => biquini_bottom_ids.push(id),
       _ => {}
     }
 
@@ -378,9 +525,9 @@ async fn seed_products(
     tracing::info!("Product created: {} ({})", name, slug);
   }
 
-  // Link top_biquini and calcinha_biquini products (both directions)
-  for top_id in &top_biquini_ids {
-    for calcinha_id in &calcinha_biquini_ids {
+  // Link biquini_top and biquini_bottom products (both directions)
+  for top_id in &biquini_top_ids {
+    for calcinha_id in &biquini_bottom_ids {
       // Link top to calcinha
       sqlx::query(
         "INSERT INTO product_looks (product_id, related_product_id, sort_order)
@@ -411,7 +558,7 @@ async fn seed_products(
 pub async fn seed(pool: &PgPool) -> Result<(), SeedError> {
   let warehouse_id = seed_warehouse(pool).await?;
   seed_settings(pool).await?;
-  let collection_ids = seed_collections(pool).await?;
-  seed_products(pool, warehouse_id, &collection_ids).await?;
+  seed_products(pool, warehouse_id).await?;
+  seed_sets(pool).await?;
   Ok(())
 }

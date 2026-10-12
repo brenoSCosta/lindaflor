@@ -34,8 +34,6 @@ const KNOWN_TEMPLATES: &[&str] = &[
   "/check-email",
   "/check-email/resend",
   "/checkout",
-  "/colecoes",
-  "/colecoes/{slug}",
   "/conta/pedidos",
   "/dashboard",
   "/forgot-password",
@@ -50,6 +48,8 @@ const KNOWN_TEMPLATES: &[&str] = &[
   "/produtos",
   "/produtos/{slug}",
   "/reset-password",
+  "/sets",
+  "/sets/{slug}",
   "/settings",
   "/settings/avatar",
   "/settings/two-factor",
@@ -100,7 +100,7 @@ fn templatize(pathname: &str) -> String {
     out.push('/');
     if looks_like_uuid(segment) || is_numeric_id(segment) {
       out.push_str("{id}");
-    } else if matches!(prev, "produtos" | "colecoes") {
+    } else if matches!(prev, "produtos" | "sets") {
       out.push_str("{slug}");
     } else {
       out.push_str(segment);

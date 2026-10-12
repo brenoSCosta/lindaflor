@@ -1,7 +1,7 @@
 //! Catalog sort select, "Filtros" panel and active-filter chips.
 //!
 //! Everything is one plain GET form: submitting reloads the page with query
-//! params that the catalog/collection pages already parse and normalize.
+//! params that the catalog/set pages already parse and normalize.
 
 use topcoat::{
   Result,
@@ -134,7 +134,7 @@ fn filter_href(base: &str, pairs: &[(&str, String)]) -> String {
 const CHIP_CLASS: &str = "inline-flex items-center gap-1 rounded-full bg-secondary px-3 py-1 text-sm hover:opacity-80";
 
 /// Sort + filters toolbar. `form_action` is the page path the form submits
-/// to (catalog or a collection), so chips and "Limpar" stay on that page.
+/// to (catalog or a set), so chips and "Limpar" stay on that page.
 #[component]
 pub async fn catalog_toolbar(
   category: String,
@@ -338,7 +338,7 @@ mod tests {
 
   fn state() -> FilterState {
     FilterState {
-      base: "/colecoes/verao".into(),
+      base: "/sets/verao".into(),
       category: "all".into(),
       search: "flor & mar".into(),
       sort: "novos".into(),
@@ -355,7 +355,7 @@ mod tests {
   fn href_encodes_values_and_keeps_base_path() {
     // `sale` is off in the fixture, so dropping it keeps every other param.
     let href = state().href(Drop::Sale);
-    assert!(href.starts_with("/colecoes/verao?"));
+    assert!(href.starts_with("/sets/verao?"));
     assert!(href.contains("search=flor+%26+mar"));
     assert!(href.contains("cor=Azul-marinho+%232"));
     // A crafted price can't smuggle in another param.
@@ -378,6 +378,6 @@ mod tests {
     assert!(href.contains("tamanho=m"));
     assert!(!href.contains("tamanho=p&"));
     let cleared = s.href(Drop::AllFacets);
-    assert_eq!(cleared, "/colecoes/verao?search=flor+%26+mar&sort=novos");
+    assert_eq!(cleared, "/sets/verao?search=flor+%26+mar&sort=novos");
   }
 }

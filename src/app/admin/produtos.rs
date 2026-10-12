@@ -67,8 +67,8 @@ fn parse_page(raw: &Option<String>) -> i64 {
 pub(crate) fn category_labels(cat: &str) -> &str {
   match cat {
     "biquini" => "Biquíni",
-    "top_biquini" => "Top de Biquíni",
-    "calcinha_biquini" => "Calcinha de Biquíni",
+    "biquini_top" => "Top de Biquíni",
+    "biquini_bottom" => "Calcinha de Biquíni",
     "maio" => "Maiô",
     "saida_praia" => "Saída de Praia",
     "acessorio" => "Acessório",
@@ -337,8 +337,8 @@ pub(crate) fn first_text(
 /// Shared validation for the product create/edit multipart forms.
 pub(crate) const VALID_CATEGORIES: [&str; 6] = [
   "biquini",
-  "top_biquini",
-  "calcinha_biquini",
+  "biquini_top",
+  "biquini_bottom",
   "maio",
   "saida_praia",
   "acessorio",

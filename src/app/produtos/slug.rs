@@ -16,8 +16,8 @@ use crate::app::store::cart::{
 use crate::app::store::pricing::{discount_percent, pix_price};
 use crate::app::store::product_card::product_card;
 use crate::app::store::queries::{
-  DEFAULT_WHATSAPP_NUMBER, category_label, format_price, get_product_by_slug,
-  get_store_settings, size_label, whatsapp_link,
+  category_label, format_price, get_product_by_slug, get_store_settings,
+  size_label, whatsapp_link,
 };
 use crate::app::store::wishlist::{liked_product_ids, wishlist_button};
 use crate::auth::user::current_user_owned;
@@ -32,9 +32,7 @@ use crate::components::breadcrumb::{
 use crate::components::button::{
   ButtonSize, ButtonVariant, button, button_variants,
 };
-use crate::components::card::{
-  card, card_content, card_footer, card_header, card_title,
-};
+use crate::components::card::{card, card_content, card_header, card_title};
 use crate::components::container::container;
 use crate::components::separator::separator;
 use topcoat::icon::{icon, iconify::iconify_icon};
@@ -158,13 +156,6 @@ pub async fn page(
     .unwrap_or_else(|| product.name.clone());
   let main_image_id = main_image.as_ref().map(|i| i.id.to_string());
 
-  let whatsapp_number = settings
-    .whatsapp_number
-    .as_deref()
-    .map(str::trim)
-    .filter(|s| !s.is_empty())
-    .unwrap_or(DEFAULT_WHATSAPP_NUMBER)
-    .to_string();
   let variant_label = selected_variant
     .as_ref()
     .map(|v| format!("{} · {}", size_label(&v.size), v.color))
@@ -181,7 +172,12 @@ pub async fn page(
       product.name, variant_label, price_text
     )
   };
-  let whatsapp_url = whatsapp_link(&whatsapp_number, &whatsapp_message);
+  let whatsapp_url = settings
+    .whatsapp_number
+    .as_deref()
+    .map(str::trim)
+    .filter(|s| !s.is_empty())
+    .map(|number| whatsapp_link(number, &whatsapp_message));
 
   let product_name = product.name.clone();
   let product_slug = product.slug.clone();
@@ -407,14 +403,16 @@ pub async fn page(
                                         "Indisponível"
                                     }
                                 )
-                                <a
-                                    href=(whatsapp_url)
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    class=(class!(button_variants(ButtonVariant::Outline, ButtonSize::Lg), "w-full"))
-                                >
-                                    "Comprar pelo WhatsApp"
-                                </a>
+                                if let Some(url) = whatsapp_url {
+                                  <a
+                                      href=(url)
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      class=(class!(button_variants(ButtonVariant::Outline, ButtonSize::Lg), "w-full"))
+                                  >
+                                      "Comprar pelo WhatsApp"
+                                  </a>
+                                }
                                 <p class="text-sm text-primary" :hidden=$(!added.get())>
                                     "Adicionado ao carrinho!"
                                 </p>
@@ -482,34 +480,7 @@ pub async fn page(
                     <div class="grid gap-8 @sm/page:grid-cols-2 @lg/page:grid-cols-4">
                         #[key(item.id.to_string())]
                         for item in related {
-                            let item_url = href!(page, Slug(item.slug.clone()));
-                            let category_text = category_label(&item.category).to_string();
-                            let price_text = format_price(item.price_in_cents);
-                            let name = item.name.clone();
-
-                            card(
-                                attrs: attributes! { class="group overflow-hidden" },
-                                <a href=(item_url) class="block">
-                                    <div class="aspect-[4/5] overflow-hidden bg-foreground/5 flex items-center justify-center">
-                                        if let Some(image_url) = item.image_url.clone() {
-                                            <img
-                                                src=(image_url)
-                                                alt=(name.clone())
-                                                class="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
-                                            >
-                                        } else {
-                                            icon(data: iconify_icon!("lucide:image"))
-                                        }
-                                    </div>
-                                </a>
-                                card_header(
-                                    card_title((name.clone()))
-                                    badge(variant: BadgeVariant::Secondary, (category_text))
-                                )
-                                card_footer(
-                                    <span class="text-sm font-medium">(price_text)</span>
-                                )
-                            )
+                            product_card(product: item)
                         }
                     </div>
                 </section>

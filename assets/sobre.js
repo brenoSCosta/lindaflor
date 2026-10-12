@@ -7,6 +7,9 @@
 // - `[data-reveal]` blocks fade/slide in once when they enter the viewport.
 // Loaded with `defer` alongside the page markup.
 (function () {
+  // Arm the CSS-gated hidden state first: content is visible by default and
+  // only animates when this script actually runs.
+  document.documentElement.classList.add("reveal-armed");
   var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   function highlight(el) {
@@ -40,6 +43,13 @@
       { threshold: 0.15, rootMargin: "0px 0px -8% 0px" },
     );
     for (var j = 0; j < items.length; j++) seen.observe(items[j]);
+    // Safety net: never leave content invisible if the observer never fires
+    // (e.g. layout quirks, SPA-style swaps). Animation still plays for
+    // elements revealed earlier; this only catches stragglers.
+    window.setTimeout(function () {
+      var pending = document.querySelectorAll("[data-reveal]:not(.is-visible)");
+      for (var s = 0; s < pending.length; s++) pending[s].classList.add("is-visible");
+    }, 3000);
   }
 
   function scrollToHash(hash, smooth) {

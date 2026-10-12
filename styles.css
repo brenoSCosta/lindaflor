@@ -126,8 +126,10 @@
   }
 }
 
-/* SOBRE — subtle scroll-in + landing highlight */
-[data-reveal] {
+/* SOBRE — subtle scroll-in + landing highlight.
+   Hidden state is scoped to `html.reveal-armed` (added by sobre.js), so the
+   section stays visible when JS is disabled or the asset fails to load. */
+html.reveal-armed [data-reveal] {
   opacity: 0;
   transform: translateY(18px);
   transition:
@@ -136,7 +138,7 @@
   will-change: opacity, transform;
 }
 
-[data-reveal].is-visible {
+html.reveal-armed [data-reveal].is-visible {
   opacity: 1;
   transform: none;
 }
@@ -161,6 +163,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  html.reveal-armed [data-reveal],
   [data-reveal] {
     opacity: 1;
     transform: none;

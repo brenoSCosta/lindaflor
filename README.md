@@ -54,7 +54,6 @@ Seeds the database with an admin user and sample commerce data. Optional environ
 | `SEED_ADMIN_PASSWORD` | `admin123` | Admin user password |
 | `SEED_ADMIN_NAME` | `Admin User` | Admin user display name |
 | `SEED_PRODUCT_COUNT` | `12` | Number of products to seed |
-| `SEED_COLLECTIONS` | `Verão 2026,Clássicos,Pôr do sol` | Comma-separated collection names |
 | `SEED_PRICE_MIN` | `6990` | Minimum product price in cents |
 | `SEED_PRICE_MAX` | `29990` | Maximum product price in cents |
 | `SEED_STOCK_MIN` | `5` | Minimum stock quantity |
