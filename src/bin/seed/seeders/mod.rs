@@ -10,6 +10,8 @@ pub enum SeedError {
   Database(#[from] sqlx::Error),
   #[error("environment error: {0}")]
   Env(String),
+  #[error("catalog parse error: {0}")]
+  Catalog(#[from] serde_json::Error),
 }
 
 pub async fn run(pool: &PgPool) -> Result<(), SeedError> {

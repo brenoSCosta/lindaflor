@@ -823,7 +823,7 @@ pub async fn set_available_quantity(
   set_id: Uuid,
 ) -> Result<i64, sqlx::Error> {
   sqlx::query_scalar::<_, i64>(
-    "SELECT COALESCE(MIN(slot_qty), 0) FROM (
+    "SELECT COALESCE(MIN(slot_qty), 0)::bigint FROM (
        SELECT COALESCE(SUM(COALESCE((
          SELECT SUM(GREATEST(i.quantity - i.reserved, 0))
          FROM inventory i

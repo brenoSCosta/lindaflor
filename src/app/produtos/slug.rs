@@ -142,19 +142,13 @@ pub async fn page(
     .and_then(|v| v.price_in_cents)
     .unwrap_or(product.price_in_cents);
 
-  let main_image = product
+  let initial_img_id = product
     .images
     .iter()
     .find(|i| product_query.img.as_deref() == Some(i.id.to_string().as_str()))
     .or_else(|| product.images.first())
-    .cloned();
-
-  let main_image_url = main_image.as_ref().map(|i| i.url.clone());
-  let main_image_alt = main_image
-    .as_ref()
-    .and_then(|i| i.alt.clone())
-    .unwrap_or_else(|| product.name.clone());
-  let main_image_id = main_image.as_ref().map(|i| i.id.to_string());
+    .map(|i| i.id.to_string())
+    .unwrap_or_default();
 
   let variant_label = selected_variant
     .as_ref()
@@ -190,8 +184,14 @@ pub async fn page(
     selected_variant.as_ref().map(|v| v.available).unwrap_or(0);
   let selected_variant_id_attr =
     selected_variant_id.clone().unwrap_or_default();
+  let initial_color = selected_variant
+    .as_ref()
+    .map(|v| v.color.clone())
+    .unwrap_or_default();
+  let selected_color = signal(cx, || initial_color.clone());
   let added = signal(cx, || added_to_cart);
   let add_error_sig = signal(cx, || add_error.clone().unwrap_or_default());
+  let selected_img = signal(cx, move || initial_img_id.clone());
   let add_variant_id = selected_variant_id_attr.clone();
   let empty_error = String::new();
 
@@ -227,30 +227,62 @@ pub async fn page(
             <div class="grid gap-4 @3xl/page:grid-cols-2">
                 <div class="space-y-4">
                     <div class="relative overflow-hidden rounded-xl border border-border">
-                        <div class="aspect-[4/5] bg-foreground/5 flex items-center justify-center">
-                            if let Some(url) = main_image_url {
-                                <img src=(url) alt=(main_image_alt) class="h-full w-full object-cover">
+                        <div class="relative aspect-[4/5] bg-foreground/5">
+                            if product_images.is_empty() {
+                                <div class="flex h-full w-full items-center justify-center">
+                                    icon(data: iconify_icon!("lucide:image"))
+                                </div>
                             } else {
-                                icon(data: iconify_icon!("lucide:image"))
+                                for image in product_images.clone() {
+                                    let layer_id = image.id.to_string();
+                                    let layer_hidden = image.id.to_string();
+                                    <img
+                                        src=(image.url)
+                                        alt=(image.alt.unwrap_or_else(|| product_name.clone()))
+                                        :class=$(if selected_img.get() == layer_id {
+                                            "absolute inset-0 z-10 h-full w-full object-cover opacity-100 transition-opacity duration-700 ease-in-out"
+                                        } else {
+                                            "pointer-events-none absolute inset-0 z-0 h-full w-full object-cover opacity-0 transition-opacity duration-700 ease-in-out"
+                                        })
+                                        :aria-hidden=$(if selected_img.get() == layer_hidden { "false" } else { "true" })
+                                    >
+                                }
                             }
                         </div>
-                        <div class="absolute right-4 top-4 z-10">
+                        <div class="absolute right-4 top-4 z-20">
                             wishlist_button(product_id: product_id.clone(), liked: liked, next: String::new())
                         </div>
                     </div>
                     if product_images.len() > 1 {
-                        <div class="grid grid-cols-4 gap-3">
+                        <div class="grid grid-cols-4 gap-3" role="listbox" aria-label="Imagens do produto">
                             for image in product_images {
-                                let image_id = image.id.to_string();
-                                <a
-                                    href=(href!(page, Slug(product_slug.clone())).query([("img", image_id.as_str())]))
-                                    class=(class!(
-                                        "aspect-square overflow-hidden rounded-lg border",
-                                        "border-primary" if main_image_id.as_deref() == Some(image.id.to_string().as_str()) else "border-border",
-                                    ))
+                                let thumb_id = image.id.to_string();
+                                let select_id = image.id.to_string();
+                                let pressed_id = image.id.to_string();
+                                <button
+                                    type="button"
+                                    role="option"
+                                    :aria-selected=$(if selected_img.get() == pressed_id { "true" } else { "false" })
+                                    :class=$(if selected_img.get() == thumb_id {
+                                        "aspect-square overflow-hidden rounded-lg border border-primary ring-1 ring-primary/30 transition-[border-color,box-shadow,opacity] duration-300"
+                                    } else {
+                                        "aspect-square overflow-hidden rounded-lg border border-border opacity-80 transition-[border-color,box-shadow,opacity] duration-300 hover:border-primary/40 hover:opacity-100"
+                                    })
+                                    @click=$(|_e: Event| {
+                                        selected_img.set(select_id.to_owned());
+                                        let img_id = selected_img.get();
+                                        raw!(
+                                            r#"const url = new URL(window.location.href);
+                                               url.searchParams.set("img", String(${img_id}));
+                                               history.replaceState(null, "", url.pathname + url.search);"#,
+                                            {
+                                                let _ = img_id;
+                                            }
+                                        );
+                                    })
                                 >
                                     <img src=(image.url) alt=(image.alt.unwrap_or_else(|| product_name.clone())) class="h-full w-full object-cover">
-                                </a>
+                                </button>
                             }
                         </div>
                     }
@@ -299,29 +331,51 @@ pub async fn page(
                     if !product.colors.is_empty() {
                         card(
                             card_header(
-                                card_title("Cores disponíveis")
+                                card_title("Selecione a cor")
                             )
                             card_content(
-                                <div class="flex gap-3 flex-wrap items-center">
+                                <div class="flex gap-3 flex-wrap items-center" role="radiogroup" aria-label="Cores disponíveis">
                                     for (color_name, color_hex) in product.colors.iter().take(12) {
-                                        if let Some(hex) = color_hex {
-                                            <div
-                                                class="w-8 h-8 rounded-full border-2 border-border cursor-help"
-                                                style=(format!("background-color: {hex}"))
-                                                title=(color_name)
-                                            ></div>
-                                        } else {
-                                            <div
-                                                class="w-8 h-8 rounded-full border-2 border-border bg-foreground/10 cursor-help"
-                                                title=(color_name)
-                                            ></div>
-                                        }
+                                        let set_color = color_name.clone();
+                                        let pressed_color = color_name.clone();
+                                        let ring_color = color_name.clone();
+                                        let swatch_style = color_hex.clone().map(|hex| format!("background-color: {hex}"));
+                                        <button
+                                            type="button"
+                                            role="radio"
+                                            title=(color_name)
+                                            aria-label=(color_name)
+                                            :aria-checked=$(if selected_color.get() == pressed_color { "true" } else { "false" })
+                                            :class=$(if selected_color.get() == ring_color {
+                                                "h-8 w-8 rounded-full border-2 border-primary ring-2 ring-primary/30 transition-[border-color,box-shadow] duration-300"
+                                            } else {
+                                                "h-8 w-8 rounded-full border-2 border-border transition-[border-color,box-shadow] duration-300 hover:border-primary/40"
+                                            })
+                                            @click=$(|_e: Event| {
+                                                selected_color.set(set_color.to_owned());
+                                            })
+                                        >
+                                            if let Some(style) = swatch_style {
+                                                <span class="block h-full w-full rounded-full" style=(style)></span>
+                                            } else {
+                                                <span class="block h-full w-full rounded-full bg-foreground/10"></span>
+                                            }
+                                        </button>
                                     }
                                     if product.colors.len() > 12 {
                                         <span class="text-sm text-muted-foreground">
                                             (format!("+{} cores", product.colors.len() - 12))
                                         </span>
                                     }
+                                    <button
+                                        type="button"
+                                        class="text-xs text-primary hover:underline"
+                                        @click=$(|_e: Event| {
+                                            selected_color.set("".to_owned());
+                                        })
+                                    >
+                                        "Todas"
+                                    </button>
                                 </div>
                             )
                         )
@@ -330,7 +384,7 @@ pub async fn page(
                     card(
                         card_header(
                             <div class="flex items-center justify-between">
-                                card_title("Selecione tamanho e cor")
+                                card_title("Selecione o tamanho")
                                 <a
                                     href=(href!(crate::app::guia_de_medidas::page))
                                     class="text-xs text-primary hover:underline"
@@ -340,13 +394,19 @@ pub async fn page(
                             </div>
                         )
                         card_content(
+                            <p class="mb-2 text-sm text-muted-foreground">
+                                "Cor selecionada: "
+                                <span class="font-medium">$(if selected_color.get().is_empty() { "Todas".to_owned() } else { selected_color.get() })</span>
+                            </p>
                             <div class="grid gap-2">
                                 for variant in product_variants {
                                     let is_selected = selected_variant_id.as_deref() == Some(variant.id.to_string().as_str());
                                     let disabled = variant.available == 0;
                                     let variant_id = variant.id.to_string();
+                                    let hidden_color = variant.color.clone();
                                     <a
                                         href=(href!(page, Slug(product_slug.clone())).query([("variant", variant_id.as_str())]))
+                                        :hidden=$(if selected_color.get().is_empty() { false } else { selected_color.get() != hidden_color })
                                         class=(class!(
                                             button_variants(
                                                 if is_selected { ButtonVariant::Primary } else { ButtonVariant::Outline },

@@ -448,7 +448,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
         <div class="grid gap-4 md:grid-cols-3">
           <a href=(href!(crate::app::produtos::page).query([("category", "biquini")])) class="group relative aspect-[4/5] overflow-hidden rounded-lg">
             <img
-              src="https://images.unsplash.com/photo-1598522325075-6dfac65b8df4?auto=format&fit=crop&w=1200&q=80"
+              src="https://images.unsplash.com/photo-1487252502161-75020a813bf0?auto=format&fit=crop&w=1200&q=80"
               alt="Biquínis"
               class="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
             >
@@ -457,7 +457,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
           </a>
           <a href=(href!(crate::app::produtos::page).query([("category", "biquini_top")])) class="group relative aspect-[4/5] overflow-hidden rounded-lg">
             <img
-              src="https://images.unsplash.com/photo-1520997272473-74c1f3c6a699?auto=format&fit=crop&w=1200&q=80"
+              src="https://images.unsplash.com/photo-1631157899275-ae088292e34f?auto=format&fit=crop&w=1200&q=80"
               alt="Tops"
               class="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
             >
@@ -466,7 +466,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
           </a>
           <a href=(href!(crate::app::produtos::page).query([("category", "biquini_bottom")])) class="group relative aspect-[4/5] overflow-hidden rounded-lg">
             <img
-              src="https://images.unsplash.com/photo-1515241917366-8319c6f1af6d?auto=format&fit=crop&w=1200&q=80"
+              src="https://images.unsplash.com/photo-1625563854481-b1530ba713c0?auto=format&fit=crop&w=1200&q=80"
               alt="Calcinhas"
               class="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
             >

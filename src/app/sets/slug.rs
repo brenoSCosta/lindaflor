@@ -88,14 +88,12 @@ pub async fn page(
 
   let query = query_params::<SetQuery>(cx)
     .map_err(|err| bad_request(format!("consulta inválida: {err}")))?;
-  let selected = gallery
+  let initial_img_id = gallery
     .iter()
     .find(|(id, _, _)| query.img.as_deref() == Some(id.as_str()))
-    .or_else(|| gallery.first());
-  let main_image_url = selected.map(|(_, url, _)| url.clone());
-  let main_image_alt =
-    selected.and_then(|(_, _, alt)| alt.clone()).unwrap_or_else(|| set.name.clone());
-  let main_image_id = selected.map(|(id, _, _)| id.clone());
+    .or_else(|| gallery.first())
+    .map(|(id, _, _)| id.clone())
+    .unwrap_or_default();
 
   let set_name = set.name.clone();
   let set_slug = set.slug.clone();
@@ -144,6 +142,7 @@ pub async fn page(
 
   let added = signal(cx, || added_to_cart);
   let add_error_sig = signal(cx, || add_error.clone().unwrap_or_default());
+  let selected_img = signal(cx, move || initial_img_id.clone());
   let add_set_id = set.id.to_string();
   let add_quantity = "1".to_string();
   let empty_error = String::new();
@@ -169,26 +168,57 @@ pub async fn page(
           <div class="grid gap-4 @3xl/page:grid-cols-2">
               <div class="space-y-4">
                   <div class="relative overflow-hidden rounded-xl border border-border">
-                      <div class="aspect-[4/5] bg-foreground/5 flex items-center justify-center">
-                          if let Some(url) = main_image_url {
-                              <img src=(url) alt=(main_image_alt) class="h-full w-full object-cover">
+                      <div class="relative aspect-[4/5] bg-foreground/5">
+                          if gallery.is_empty() {
+                              <img src="/static/product-fallback.svg" alt=(set_name.clone()) class="absolute inset-0 h-full w-full object-cover">
                           } else {
-                              <img src="/static/product-fallback.svg" alt=(set_name.clone()) class="h-full w-full object-cover">
+                              for (id, url, alt) in gallery.clone() {
+                                  let layer_id = id.clone();
+                                  let layer_hidden = id.clone();
+                                  <img
+                                      src=(url)
+                                      alt=(alt.unwrap_or_else(|| set_name.clone()))
+                                      :class=$(if selected_img.get() == layer_id {
+                                          "absolute inset-0 z-10 h-full w-full object-cover opacity-100 transition-opacity duration-700 ease-in-out"
+                                      } else {
+                                          "pointer-events-none absolute inset-0 z-0 h-full w-full object-cover opacity-0 transition-opacity duration-700 ease-in-out"
+                                      })
+                                      :aria-hidden=$(if selected_img.get() == layer_hidden { "false" } else { "true" })
+                                  >
+                              }
                           }
                       </div>
                   </div>
                   if gallery.len() > 1 {
-                      <div class="grid grid-cols-4 gap-3">
+                      <div class="grid grid-cols-4 gap-3" role="listbox" aria-label="Imagens do conjunto">
                           for (id, url, alt) in gallery {
-                              <a
-                                  href=(href!(page, Slug(set_slug.clone())).query([("img", id.as_str())]))
-                                  class=(class!(
-                                      "aspect-square overflow-hidden rounded-lg border",
-                                      "border-primary" if main_image_id.as_deref() == Some(id.as_str()) else "border-border",
-                                  ))
+                              let thumb_id = id.clone();
+                              let select_id = id.clone();
+                              let pressed_id = id.clone();
+                              <button
+                                  type="button"
+                                  role="option"
+                                  :aria-selected=$(if selected_img.get() == pressed_id { "true" } else { "false" })
+                                  :class=$(if selected_img.get() == thumb_id {
+                                      "aspect-square overflow-hidden rounded-lg border border-primary ring-1 ring-primary/30 transition-[border-color,box-shadow,opacity] duration-300"
+                                  } else {
+                                      "aspect-square overflow-hidden rounded-lg border border-border opacity-80 transition-[border-color,box-shadow,opacity] duration-300 hover:border-primary/40 hover:opacity-100"
+                                  })
+                                  @click=$(|_e: Event| {
+                                      selected_img.set(select_id.to_owned());
+                                      let img_id = selected_img.get();
+                                      raw!(
+                                          r#"const url = new URL(window.location.href);
+                                             url.searchParams.set("img", String(${img_id}));
+                                             history.replaceState(null, "", url.pathname + url.search);"#,
+                                          {
+                                              let _ = img_id;
+                                          }
+                                      );
+                                  })
                               >
                                   <img src=(url) alt=(alt.unwrap_or_else(|| set_name.clone())) class="h-full w-full object-cover">
-                              </a>
+                              </button>
                           }
                       </div>
                   }

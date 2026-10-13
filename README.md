@@ -53,11 +53,14 @@ Seeds the database with an admin user and sample commerce data. Optional environ
 | `SEED_ADMIN_EMAIL` | `admin@lindaflor.com` | Admin user email |
 | `SEED_ADMIN_PASSWORD` | `admin123` | Admin user password |
 | `SEED_ADMIN_NAME` | `Admin User` | Admin user display name |
-| `SEED_PRODUCT_COUNT` | `12` | Number of products to seed |
-| `SEED_PRICE_MIN` | `6990` | Minimum product price in cents |
-| `SEED_PRICE_MAX` | `29990` | Maximum product price in cents |
+| `SEED_PRODUCT_COUNT` | `108` | Number of products to seed (round-robin across categories from `src/bin/seed/data/catalog.json`) |
+| `SEED_SET_COUNT` | `12` | Number of conjuntos (top + calcinha bundles) to seed |
+| `SEED_PRICE_MIN` | `3990` | Clamp fixture prices to this minimum (cents) |
+| `SEED_PRICE_MAX` | `29990` | Clamp fixture prices to this maximum (cents) |
 | `SEED_STOCK_MIN` | `5` | Minimum stock quantity |
 | `SEED_STOCK_MAX` | `30` | Maximum stock quantity |
+
+Re-running seed is idempotent by product/set slug: existing demo SKUs are skipped, new catalog slugs still insert. For a clean catalog, reset the database volume first.
 
 ### 5. Run the server
 

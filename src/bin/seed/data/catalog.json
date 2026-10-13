@@ -1,0 +1,4368 @@
+{
+  "products": [
+    {
+      "name": "Biquíni Cortininha Maré Serena",
+      "slug": "biquini-cortininha-mare-serena",
+      "description": "Conjunto cortininha com calcinha tradicional, feito para o dia inteiro na areia.",
+      "category": "biquini",
+      "price_in_cents": 18990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1487252502161-75020a813bf0?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Cortininha Maré Serena"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1575344719511-de5d390551af?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Cortininha Maré Serena — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Maré",
+          "hex": "#0A9FB5"
+        },
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Biquíni Triângulo Duna Dourada",
+      "slug": "biquini-triangulo-duna-dourada",
+      "description": "Top triângulo com bojo leve e calcinha de laterais médias.",
+      "category": "biquini",
+      "price_in_cents": 19990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1616594529119-2e3a53a148ca?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Triângulo Duna Dourada"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1593320402135-9410ec3eb519?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Triângulo Duna Dourada — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        },
+        {
+          "name": "Dourado",
+          "hex": "#C9A227"
+        },
+        {
+          "name": "Caramelo",
+          "hex": "#C68E17"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Biquíni Tomara-que-Caia Pôr do Sol",
+      "slug": "biquini-tomara-que-caia-por-do-sol",
+      "description": "Tomara-que-caia com elástico firme e calcinha cintura média.",
+      "category": "biquini",
+      "price_in_cents": 21990,
+      "compare_at_price_in_cents": 27487,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1517760307355-e48f68215de6?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Tomara-que-Caia Pôr do Sol"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1619885813087-630a89f9d099?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Tomara-que-Caia Pôr do Sol — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Terracota",
+          "hex": "#C84E00"
+        },
+        {
+          "name": "Coral",
+          "hex": "#FF6F61"
+        },
+        {
+          "name": "Vermelho",
+          "hex": "#E63946"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Biquíni Ombro a Ombro Brisa",
+      "slug": "biquini-ombro-a-ombro-brisa",
+      "description": "Ombro a ombro com caimento reto e calcinha de laterais largas.",
+      "category": "biquini",
+      "price_in_cents": 20990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1541433621554-05421e3a3e5a?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Ombro a Ombro Brisa"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1592169556116-a0eab523e424?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Ombro a Ombro Brisa — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Verde Tropical",
+          "hex": "#2D5016"
+        },
+        {
+          "name": "Floral",
+          "hex": "#E8A0BF"
+        },
+        {
+          "name": "Rosa",
+          "hex": "#FFB4D1"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Biquíni Faixinha Coqueiral",
+      "slug": "biquini-faixinha-coqueiral",
+      "description": "Top faixinha com amarração nas costas e tanga clássica.",
+      "category": "biquini",
+      "price_in_cents": 17990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1580247334244-67b74729bc3f?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Faixinha Coqueiral"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1617168024753-4dc893729cb3?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Faixinha Coqueiral — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Verde Oliva",
+          "hex": "#556B2F"
+        },
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        },
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Biquíni Meia Taça Arrecife",
+      "slug": "biquini-meia-taca-arrecife",
+      "description": "Meia taça com alças reguláveis e calcinha tradicional.",
+      "category": "biquini",
+      "price_in_cents": 22990,
+      "compare_at_price_in_cents": 28737,
+      "featured": true,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1644418747455-64485b3d167a?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Meia Taça Arrecife"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1586492990376-32962ccac47f?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Meia Taça Arrecife — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Marinho",
+          "hex": "#1B365D"
+        },
+        {
+          "name": "Azul Escandinavo",
+          "hex": "#4A90E2"
+        },
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Biquíni Esportivo Jangada",
+      "slug": "biquini-esportivo-jangada",
+      "description": "Top esportivo de alta sustentação com hot pant.",
+      "category": "biquini",
+      "price_in_cents": 23990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1558155453-e5444b5d8f6d?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Esportivo Jangada"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1610985007436-a72bf825c9e9?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Esportivo Jangada — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Preto Fosco",
+          "hex": "#2C2C2C"
+        },
+        {
+          "name": "Maré",
+          "hex": "#0A9FB5"
+        },
+        {
+          "name": "Listrado",
+          "hex": "#2E5A88"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Biquíni Manga Longa Sereia",
+      "slug": "biquini-manga-longa-sereia",
+      "description": "Manga longa com proteção solar e calcinha cintura alta.",
+      "category": "biquini",
+      "price_in_cents": 24990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1559827260-dc66d52bef19?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Manga Longa Sereia"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1576013551627-0cc20b96c2a7?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Manga Longa Sereia — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Floral",
+          "hex": "#E8A0BF"
+        },
+        {
+          "name": "Verde Tropical",
+          "hex": "#2D5016"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Biquíni Asa Delta Caraíva",
+      "slug": "biquini-asa-delta-caraiva",
+      "description": "Cortininha mínima com asa delta de laterais finas.",
+      "category": "biquini",
+      "price_in_cents": 16990,
+      "compare_at_price_in_cents": 21237,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Asa Delta Caraíva"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1500375592092-40eb2168fd21?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Asa Delta Caraíva — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Rosa",
+          "hex": "#FFB4D1"
+        },
+        {
+          "name": "Pink Neon",
+          "hex": "#FF2D95"
+        },
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Biquíni Cintura Alta Ladeira",
+      "slug": "biquini-cintura-alta-ladeira",
+      "description": "Top triângulo e calcinha de cintura alta que alonga a silhueta.",
+      "category": "biquini",
+      "price_in_cents": 21990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1164674/pexels-photo-1164674.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Biquíni Cintura Alta Ladeira"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1852382/pexels-photo-1852382.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Biquíni Cintura Alta Ladeira — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        },
+        {
+          "name": "Marinho",
+          "hex": "#1B365D"
+        },
+        {
+          "name": "Terracota",
+          "hex": "#C84E00"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Biquíni Tanga Lagoa Azul",
+      "slug": "biquini-tanga-lagoa-azul",
+      "description": "Conjunto clássico de praia com tanga de cobertura média.",
+      "category": "biquini",
+      "price_in_cents": 18990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1375849/pexels-photo-1375849.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Biquíni Tanga Lagoa Azul"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1838556/pexels-photo-1838556.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Biquíni Tanga Lagoa Azul — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Azul Escandinavo",
+          "hex": "#4A90E2"
+        },
+        {
+          "name": "Maré",
+          "hex": "#0A9FB5"
+        },
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Biquíni Fio Dental Estrela-do-Mar",
+      "slug": "biquini-fio-dental-estrela-do-mar",
+      "description": "Top cortininha e fio dental para bronze uniforme.",
+      "category": "biquini",
+      "price_in_cents": 15990,
+      "compare_at_price_in_cents": 19987,
+      "featured": true,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/8486146/pexels-photo-8486146.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Biquíni Fio Dental Estrela-do-Mar"
+        },
+        {
+          "url": "https://images.pexels.com/photos/2866078/pexels-photo-2866078.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Biquíni Fio Dental Estrela-do-Mar — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Vermelho",
+          "hex": "#E63946"
+        },
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        },
+        {
+          "name": "Dourado",
+          "hex": "#C9A227"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Biquíni Laterais Largas Pitanga",
+      "slug": "biquini-laterais-largas-pitanga",
+      "description": "Top faixinha e calcinha de laterais largas, conforto o dia todo.",
+      "category": "biquini",
+      "price_in_cents": 19990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1487252502161-75020a813bf0?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Laterais Largas Pitanga"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1575344719511-de5d390551af?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Laterais Largas Pitanga — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Coral",
+          "hex": "#FF6F61"
+        },
+        {
+          "name": "Floral",
+          "hex": "#E8A0BF"
+        },
+        {
+          "name": "Rosa",
+          "hex": "#FFB4D1"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Biquíni Hot Pant Recife",
+      "slug": "biquini-hot-pant-recife",
+      "description": "Top esportivo combinado com hot pant de cós largo.",
+      "category": "biquini",
+      "price_in_cents": 24990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1616594529119-2e3a53a148ca?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Hot Pant Recife"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1593320402135-9410ec3eb519?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Hot Pant Recife — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Geométrico",
+          "hex": "#7B68EE"
+        },
+        {
+          "name": "Preto Fosco",
+          "hex": "#2C2C2C"
+        },
+        {
+          "name": "Verde Oliva",
+          "hex": "#556B2F"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Biquíni Tradicional Areia Fina",
+      "slug": "biquini-tradicional-areia-fina",
+      "description": "Modelagem clássica de top e calcinha, caimento limpo.",
+      "category": "biquini",
+      "price_in_cents": 17990,
+      "compare_at_price_in_cents": 22487,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1517760307355-e48f68215de6?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Tradicional Areia Fina"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1619885813087-630a89f9d099?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Tradicional Areia Fina — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        },
+        {
+          "name": "Caramelo",
+          "hex": "#C68E17"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Biquíni Decote Profundo Noronha",
+      "slug": "biquini-decote-profundo-noronha",
+      "description": "Top meia taça de decote marcado e tanga de cintura média.",
+      "category": "biquini",
+      "price_in_cents": 22990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1541433621554-05421e3a3e5a?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Decote Profundo Noronha"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1592169556116-a0eab523e424?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Decote Profundo Noronha — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Lilás",
+          "hex": "#C8A2C8"
+        },
+        {
+          "name": "Marinho",
+          "hex": "#1B365D"
+        },
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Biquíni Listrado Farol",
+      "slug": "biquini-listrado-farol",
+      "description": "Conjunto listrado com cortininha e calcinha tradicional.",
+      "category": "biquini",
+      "price_in_cents": 18990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1580247334244-67b74729bc3f?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Listrado Farol"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1617168024753-4dc893729cb3?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Listrado Farol — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Listrado",
+          "hex": "#2E5A88"
+        },
+        {
+          "name": "Marinho",
+          "hex": "#1B365D"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Biquíni Floral Jeri",
+      "slug": "biquini-floral-jeri",
+      "description": "Estampa floral em top ombro a ombro e laterais largas.",
+      "category": "biquini",
+      "price_in_cents": 20990,
+      "compare_at_price_in_cents": 26237,
+      "featured": true,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1644418747455-64485b3d167a?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Floral Jeri"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1586492990376-32962ccac47f?w=900&h=1200&fit=crop",
+          "alt": "Biquíni Floral Jeri — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Floral",
+          "hex": "#E8A0BF"
+        },
+        {
+          "name": "Verde Tropical",
+          "hex": "#2D5016"
+        },
+        {
+          "name": "Rosa",
+          "hex": "#FFB4D1"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Top Cortininha Pedra d'Água",
+      "slug": "top-cortininha-pedra-d-agua",
+      "description": "Cortininha com bojo removível e laços nas costas.",
+      "category": "biquini_top",
+      "price_in_cents": 10990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1631157899275-ae088292e34f?w=900&h=1200&fit=crop",
+          "alt": "Top Cortininha Pedra d'Água"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1619885813087-630a89f9d099?w=900&h=1200&fit=crop",
+          "alt": "Top Cortininha Pedra d'Água — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Maré",
+          "hex": "#0A9FB5"
+        },
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        },
+        {
+          "name": "Azul Escandinavo",
+          "hex": "#4A90E2"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Top Triângulo Encantadas",
+      "slug": "top-triangulo-encantadas",
+      "description": "Triângulo clássico, alças finas e caimento macio.",
+      "category": "biquini_top",
+      "price_in_cents": 9990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1541433621554-05421e3a3e5a?w=900&h=1200&fit=crop",
+          "alt": "Top Triângulo Encantadas"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1517760307355-e48f68215de6?w=900&h=1200&fit=crop",
+          "alt": "Top Triângulo Encantadas — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        },
+        {
+          "name": "Caramelo",
+          "hex": "#C68E17"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Top Tomara-que-Caia Lua Cheia",
+      "slug": "top-tomara-que-caia-lua-cheia",
+      "description": "Tomara-que-caia com elástico interno e decote reto.",
+      "category": "biquini_top",
+      "price_in_cents": 12990,
+      "compare_at_price_in_cents": 16237,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1616594529119-2e3a53a148ca?w=900&h=1200&fit=crop",
+          "alt": "Top Tomara-que-Caia Lua Cheia"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1487252502161-75020a813bf0?w=900&h=1200&fit=crop",
+          "alt": "Top Tomara-que-Caia Lua Cheia — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        },
+        {
+          "name": "Vermelho",
+          "hex": "#E63946"
+        },
+        {
+          "name": "Lilás",
+          "hex": "#C8A2C8"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Top Ombro a Ombro Calmaria",
+      "slug": "top-ombro-a-ombro-calmaria",
+      "description": "Ombro a ombro com recorte no busto e alça larga.",
+      "category": "biquini_top",
+      "price_in_cents": 13990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=900&h=1200&fit=crop",
+          "alt": "Top Ombro a Ombro Calmaria"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1469334031218-e382a71b716b?w=900&h=1200&fit=crop",
+          "alt": "Top Ombro a Ombro Calmaria — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Floral",
+          "hex": "#E8A0BF"
+        },
+        {
+          "name": "Rosa",
+          "hex": "#FFB4D1"
+        },
+        {
+          "name": "Verde Tropical",
+          "hex": "#2D5016"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Top Esportivo Quebra-Mar",
+      "slug": "top-esportivo-quebra-mar",
+      "description": "Top esportivo de tecido firme, ideal para natação leve.",
+      "category": "biquini_top",
+      "price_in_cents": 14990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1503342217505-b0a15ec3261c?w=900&h=1200&fit=crop",
+          "alt": "Top Esportivo Quebra-Mar"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1488426862026-3ee34a7d66df?w=900&h=1200&fit=crop",
+          "alt": "Top Esportivo Quebra-Mar — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Preto Fosco",
+          "hex": "#2C2C2C"
+        },
+        {
+          "name": "Marinho",
+          "hex": "#1B365D"
+        },
+        {
+          "name": "Verde Oliva",
+          "hex": "#556B2F"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Top Manga Longa Correnteza",
+      "slug": "top-manga-longa-correnteza",
+      "description": "Manga longa com proteção UV e recorte nas costas.",
+      "category": "biquini_top",
+      "price_in_cents": 16990,
+      "compare_at_price_in_cents": 21237,
+      "featured": true,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1391498/pexels-photo-1391498.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Top Manga Longa Correnteza"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1382731/pexels-photo-1382731.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Top Manga Longa Correnteza — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Floral",
+          "hex": "#E8A0BF"
+        },
+        {
+          "name": "Maré",
+          "hex": "#0A9FB5"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Top Faixinha Duna",
+      "slug": "top-faixinha-duna",
+      "description": "Faixa estreita com amarração frontal ou nas costas.",
+      "category": "biquini_top",
+      "price_in_cents": 8990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1126993/pexels-photo-1126993.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Top Faixinha Duna"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1386604/pexels-photo-1386604.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Top Faixinha Duna — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Terracota",
+          "hex": "#C84E00"
+        },
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        },
+        {
+          "name": "Dourado",
+          "hex": "#C9A227"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Top Meia Taça Concha",
+      "slug": "top-meia-taca-concha",
+      "description": "Meia taça com bojo anatômico e alças reguláveis.",
+      "category": "biquini_top",
+      "price_in_cents": 13990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1264210/pexels-photo-1264210.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Top Meia Taça Concha"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1159670/pexels-photo-1159670.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Top Meia Taça Concha — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        },
+        {
+          "name": "Rosa",
+          "hex": "#FFB4D1"
+        },
+        {
+          "name": "Coral",
+          "hex": "#FF6F61"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Top Nadador Porto",
+      "slug": "top-nadador-porto",
+      "description": "Costas nadador e alças largas para movimento livre.",
+      "category": "biquini_top",
+      "price_in_cents": 12990,
+      "compare_at_price_in_cents": 16237,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1571937/pexels-photo-1571937.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Top Nadador Porto"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1485031/pexels-photo-1485031.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Top Nadador Porto — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Azul Escandinavo",
+          "hex": "#4A90E2"
+        },
+        {
+          "name": "Marinho",
+          "hex": "#1B365D"
+        },
+        {
+          "name": "Listrado",
+          "hex": "#2E5A88"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Top Halter Pescador",
+      "slug": "top-halter-pescador",
+      "description": "Halter no pescoço com decote em V suave.",
+      "category": "biquini_top",
+      "price_in_cents": 11990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=900&h=1200&fit=crop",
+          "alt": "Top Halter Pescador"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=900&h=1200&fit=crop",
+          "alt": "Top Halter Pescador — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Verde Tropical",
+          "hex": "#2D5016"
+        },
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        },
+        {
+          "name": "Amarelo",
+          "hex": "#FFD60A"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Top Cropped Recorte Sol",
+      "slug": "top-cropped-recorte-sol",
+      "description": "Cropped com recortes geométricos no busto.",
+      "category": "biquini_top",
+      "price_in_cents": 14990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1631157899275-ae088292e34f?w=900&h=1200&fit=crop",
+          "alt": "Top Cropped Recorte Sol"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1619885813087-630a89f9d099?w=900&h=1200&fit=crop",
+          "alt": "Top Cropped Recorte Sol — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Geométrico",
+          "hex": "#7B68EE"
+        },
+        {
+          "name": "Preto Fosco",
+          "hex": "#2C2C2C"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Top Alça Larga Trancoso",
+      "slug": "top-alca-larga-trancoso",
+      "description": "Alças largas e caimento reto, cobertura confortável.",
+      "category": "biquini_top",
+      "price_in_cents": 10990,
+      "compare_at_price_in_cents": 13737,
+      "featured": true,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1541433621554-05421e3a3e5a?w=900&h=1200&fit=crop",
+          "alt": "Top Alça Larga Trancoso"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1517760307355-e48f68215de6?w=900&h=1200&fit=crop",
+          "alt": "Top Alça Larga Trancoso — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Caramelo",
+          "hex": "#C68E17"
+        },
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        },
+        {
+          "name": "Terracota",
+          "hex": "#C84E00"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Top Frente Única Mangue",
+      "slug": "top-frente-unica-mangue",
+      "description": "Frente única com nó central e costas abertas.",
+      "category": "biquini_top",
+      "price_in_cents": 12990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1616594529119-2e3a53a148ca?w=900&h=1200&fit=crop",
+          "alt": "Top Frente Única Mangue"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1487252502161-75020a813bf0?w=900&h=1200&fit=crop",
+          "alt": "Top Frente Única Mangue — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Verde Oliva",
+          "hex": "#556B2F"
+        },
+        {
+          "name": "Floral",
+          "hex": "#E8A0BF"
+        },
+        {
+          "name": "Maré",
+          "hex": "#0A9FB5"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Top Assimétrico Farolagem",
+      "slug": "top-assimetrico-farolagem",
+      "description": "Alça única assimétrica, visual contemporâneo.",
+      "category": "biquini_top",
+      "price_in_cents": 15990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=900&h=1200&fit=crop",
+          "alt": "Top Assimétrico Farolagem"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1469334031218-e382a71b716b?w=900&h=1200&fit=crop",
+          "alt": "Top Assimétrico Farolagem — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        },
+        {
+          "name": "Pink Neon",
+          "hex": "#FF2D95"
+        },
+        {
+          "name": "Lilás",
+          "hex": "#C8A2C8"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Top Bojo Fixo Maragogi",
+      "slug": "top-bojo-fixo-maragogi",
+      "description": "Bojo fixo de sustentação média sem aro.",
+      "category": "biquini_top",
+      "price_in_cents": 13990,
+      "compare_at_price_in_cents": 17487,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1503342217505-b0a15ec3261c?w=900&h=1200&fit=crop",
+          "alt": "Top Bojo Fixo Maragogi"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1488426862026-3ee34a7d66df?w=900&h=1200&fit=crop",
+          "alt": "Top Bojo Fixo Maragogi — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        },
+        {
+          "name": "Marinho",
+          "hex": "#1B365D"
+        },
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Top Amarração Costas Pipa",
+      "slug": "top-amarracao-costas-pipa",
+      "description": "Amarração dupla nas costas, ajuste fino no busto.",
+      "category": "biquini_top",
+      "price_in_cents": 9990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1391498/pexels-photo-1391498.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Top Amarração Costas Pipa"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1382731/pexels-photo-1382731.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Top Amarração Costas Pipa — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Coral",
+          "hex": "#FF6F61"
+        },
+        {
+          "name": "Rosa",
+          "hex": "#FFB4D1"
+        },
+        {
+          "name": "Vermelho",
+          "hex": "#E63946"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Top Gola Alta Brisa",
+      "slug": "top-gola-alta-brisa",
+      "description": "Gola alta com zíper discreto nas costas.",
+      "category": "biquini_top",
+      "price_in_cents": 16990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1126993/pexels-photo-1126993.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Top Gola Alta Brisa"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1386604/pexels-photo-1386604.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Top Gola Alta Brisa — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Preto Fosco",
+          "hex": "#2C2C2C"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        },
+        {
+          "name": "Maré",
+          "hex": "#0A9FB5"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Top Faixa Larga Iemanjá",
+      "slug": "top-faixa-larga-iemanja",
+      "description": "Faixa larga que cobre mais o busto, sem alças.",
+      "category": "biquini_top",
+      "price_in_cents": 11990,
+      "compare_at_price_in_cents": 14987,
+      "featured": true,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1264210/pexels-photo-1264210.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Top Faixa Larga Iemanjá"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1159670/pexels-photo-1159670.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Top Faixa Larga Iemanjá — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Azul Escandinavo",
+          "hex": "#4A90E2"
+        },
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        },
+        {
+          "name": "Lilás",
+          "hex": "#C8A2C8"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Calcinha Asa Delta Maré Baixa",
+      "slug": "calcinha-asa-delta-mare-baixa",
+      "description": "Asa delta de laterais finas e cobertura mínima atrás.",
+      "category": "biquini_bottom",
+      "price_in_cents": 9990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1625563854481-b1530ba713c0?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Asa Delta Maré Baixa"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1580247334244-67b74729bc3f?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Asa Delta Maré Baixa — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Maré",
+          "hex": "#0A9FB5"
+        },
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        },
+        {
+          "name": "Rosa",
+          "hex": "#FFB4D1"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Calcinha Hot Pant Costa",
+      "slug": "calcinha-hot-pant-costa",
+      "description": "Hot pant de cós largo, cobertura total nas coxas.",
+      "category": "biquini_bottom",
+      "price_in_cents": 14990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1558155453-e5444b5d8f6d?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Hot Pant Costa"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1617168024753-4dc893729cb3?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Hot Pant Costa — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Preto Fosco",
+          "hex": "#2C2C2C"
+        },
+        {
+          "name": "Verde Oliva",
+          "hex": "#556B2F"
+        },
+        {
+          "name": "Marinho",
+          "hex": "#1B365D"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Calcinha Laterais Largas Pitomba",
+      "slug": "calcinha-laterais-largas-pitomba",
+      "description": "Laterais largas e recorte que valoriza o quadril.",
+      "category": "biquini_bottom",
+      "price_in_cents": 10990,
+      "compare_at_price_in_cents": 13737,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1487252502161-75020a813bf0?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Laterais Largas Pitomba"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1575344719511-de5d390551af?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Laterais Largas Pitomba — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Coral",
+          "hex": "#FF6F61"
+        },
+        {
+          "name": "Floral",
+          "hex": "#E8A0BF"
+        },
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Calcinha Tanga Guarapari",
+      "slug": "calcinha-tanga-guarapari",
+      "description": "Tanga clássica de laterais médias e caimento limpo.",
+      "category": "biquini_bottom",
+      "price_in_cents": 9990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1858175/pexels-photo-1858175.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Calcinha Tanga Guarapari"
+        },
+        {
+          "url": "https://images.pexels.com/photos/3153201/pexels-photo-3153201.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Calcinha Tanga Guarapari — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        },
+        {
+          "name": "Azul Escandinavo",
+          "hex": "#4A90E2"
+        },
+        {
+          "name": "Caramelo",
+          "hex": "#C68E17"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Calcinha Fio Dental Estrela",
+      "slug": "calcinha-fio-dental-estrela",
+      "description": "Fio dental com regulagem nas laterais.",
+      "category": "biquini_bottom",
+      "price_in_cents": 8990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/3294253/pexels-photo-3294253.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Calcinha Fio Dental Estrela"
+        },
+        {
+          "url": "https://images.pexels.com/photos/3294254/pexels-photo-3294254.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Calcinha Fio Dental Estrela — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Vermelho",
+          "hex": "#E63946"
+        },
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        },
+        {
+          "name": "Pink Neon",
+          "hex": "#FF2D95"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Calcinha Cintura Alta Ladeira Sul",
+      "slug": "calcinha-cintura-alta-ladeira-sul",
+      "description": "Cintura alta que afina a cintura e cobre o abdômen.",
+      "category": "biquini_bottom",
+      "price_in_cents": 13990,
+      "compare_at_price_in_cents": 17487,
+      "featured": true,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1164674/pexels-photo-1164674.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Calcinha Cintura Alta Ladeira Sul"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1838556/pexels-photo-1838556.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Calcinha Cintura Alta Ladeira Sul — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Terracota",
+          "hex": "#C84E00"
+        },
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        },
+        {
+          "name": "Marinho",
+          "hex": "#1B365D"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Calcinha Tradicional Areia",
+      "slug": "calcinha-tradicional-areia",
+      "description": "Modelagem tradicional, cobertura confortável.",
+      "category": "biquini_bottom",
+      "price_in_cents": 9490,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1541433621554-05421e3a3e5a?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Tradicional Areia"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1592169556116-a0eab523e424?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Tradicional Areia — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        },
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Calcinha Laterais Reguláveis Búzios",
+      "slug": "calcinha-laterais-regulaveis-buzios",
+      "description": "Laterais com laço para ajustar o recorte da perna.",
+      "category": "biquini_bottom",
+      "price_in_cents": 10990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1644418747455-64485b3d167a?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Laterais Reguláveis Búzios"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1586492990376-32962ccac47f?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Laterais Reguláveis Búzios — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Floral",
+          "hex": "#E8A0BF"
+        },
+        {
+          "name": "Rosa",
+          "hex": "#FFB4D1"
+        },
+        {
+          "name": "Verde Tropical",
+          "hex": "#2D5016"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Calcinha Cós Largo Recife Novo",
+      "slug": "calcinha-cos-largo-recife-novo",
+      "description": "Cós largo e laterais médias, firme no movimento.",
+      "category": "biquini_bottom",
+      "price_in_cents": 12990,
+      "compare_at_price_in_cents": 16237,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1610985007436-a72bf825c9e9?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Cós Largo Recife Novo"
+        },
+        {
+          "url": "https://images.pexels.com/photos/8486146/pexels-photo-8486146.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Calcinha Cós Largo Recife Novo — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Geométrico",
+          "hex": "#7B68EE"
+        },
+        {
+          "name": "Preto Fosco",
+          "hex": "#2C2C2C"
+        },
+        {
+          "name": "Listrado",
+          "hex": "#2E5A88"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Calcinha Tanga Fio Maceió",
+      "slug": "calcinha-tanga-fio-maceio",
+      "description": "Tanga com traseiro mais reduzido, ainda com laterais.",
+      "category": "biquini_bottom",
+      "price_in_cents": 9990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1375849/pexels-photo-1375849.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Calcinha Tanga Fio Maceió"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1559827260-dc66d52bef19?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Tanga Fio Maceió — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Lilás",
+          "hex": "#C8A2C8"
+        },
+        {
+          "name": "Coral",
+          "hex": "#FF6F61"
+        },
+        {
+          "name": "Dourado",
+          "hex": "#C9A227"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Calcinha Hot Pant Recorte",
+      "slug": "calcinha-hot-pant-recorte",
+      "description": "Hot pant com recortes laterais que alongam a perna.",
+      "category": "biquini_bottom",
+      "price_in_cents": 15990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1625563854481-b1530ba713c0?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Hot Pant Recorte"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1580247334244-67b74729bc3f?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Hot Pant Recorte — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Amarelo",
+          "hex": "#FFD60A"
+        },
+        {
+          "name": "Verde Oliva",
+          "hex": "#556B2F"
+        },
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Calcinha Asa Delta Bordada",
+      "slug": "calcinha-asa-delta-bordada",
+      "description": "Asa delta com acabamento contrastante nas bordas.",
+      "category": "biquini_bottom",
+      "price_in_cents": 11990,
+      "compare_at_price_in_cents": 14987,
+      "featured": true,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1558155453-e5444b5d8f6d?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Asa Delta Bordada"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1617168024753-4dc893729cb3?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Asa Delta Bordada — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        },
+        {
+          "name": "Dourado",
+          "hex": "#C9A227"
+        },
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Calcinha Cintura Alta Tanga",
+      "slug": "calcinha-cintura-alta-tanga",
+      "description": "Cintura alta combinada com traseiro tipo tanga.",
+      "category": "biquini_bottom",
+      "price_in_cents": 13990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1487252502161-75020a813bf0?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Cintura Alta Tanga"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1575344719511-de5d390551af?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Cintura Alta Tanga — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Marinho",
+          "hex": "#1B365D"
+        },
+        {
+          "name": "Vermelho",
+          "hex": "#E63946"
+        },
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Calcinha Tradicional Laterais Finas",
+      "slug": "calcinha-tradicional-laterais-finas",
+      "description": "Caimento tradicional com laterais mais delicadas.",
+      "category": "biquini_bottom",
+      "price_in_cents": 9490,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1858175/pexels-photo-1858175.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Calcinha Tradicional Laterais Finas"
+        },
+        {
+          "url": "https://images.pexels.com/photos/3153201/pexels-photo-3153201.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Calcinha Tradicional Laterais Finas — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Maré",
+          "hex": "#0A9FB5"
+        },
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        },
+        {
+          "name": "Azul Escandinavo",
+          "hex": "#4A90E2"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Calcinha Super Alta Duna",
+      "slug": "calcinha-super-alta-duna",
+      "description": "Cós super alto, cobertura máxima na frente.",
+      "category": "biquini_bottom",
+      "price_in_cents": 14990,
+      "compare_at_price_in_cents": 18737,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/3294253/pexels-photo-3294253.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Calcinha Super Alta Duna"
+        },
+        {
+          "url": "https://images.pexels.com/photos/3294254/pexels-photo-3294254.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Calcinha Super Alta Duna — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Caramelo",
+          "hex": "#C68E17"
+        },
+        {
+          "name": "Terracota",
+          "hex": "#C84E00"
+        },
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Calcinha Fio Regulável Neon",
+      "slug": "calcinha-fio-regulavel-neon",
+      "description": "Fio com laterais reguláveis e visual ousado.",
+      "category": "biquini_bottom",
+      "price_in_cents": 8990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1164674/pexels-photo-1164674.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Calcinha Fio Regulável Neon"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1838556/pexels-photo-1838556.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Calcinha Fio Regulável Neon — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Pink Neon",
+          "hex": "#FF2D95"
+        },
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        },
+        {
+          "name": "Lilás",
+          "hex": "#C8A2C8"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Calcinha Laterais Largas Listrada",
+      "slug": "calcinha-laterais-largas-listrada",
+      "description": "Laterais largas em listra marinha clássica.",
+      "category": "biquini_bottom",
+      "price_in_cents": 10990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1541433621554-05421e3a3e5a?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Laterais Largas Listrada"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1592169556116-a0eab523e424?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Laterais Largas Listrada — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Listrado",
+          "hex": "#2E5A88"
+        },
+        {
+          "name": "Marinho",
+          "hex": "#1B365D"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Calcinha Tanga Cós Elástico",
+      "slug": "calcinha-tanga-cos-elastico",
+      "description": "Tanga com cós elástico macio, sem marcar.",
+      "category": "biquini_bottom",
+      "price_in_cents": 9990,
+      "compare_at_price_in_cents": 12487,
+      "featured": true,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1644418747455-64485b3d167a?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Tanga Cós Elástico"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1586492990376-32962ccac47f?w=900&h=1200&fit=crop",
+          "alt": "Calcinha Tanga Cós Elástico — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Verde Tropical",
+          "hex": "#2D5016"
+        },
+        {
+          "name": "Floral",
+          "hex": "#E8A0BF"
+        },
+        {
+          "name": "Rosa",
+          "hex": "#FFB4D1"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Maiô Decote V Enseada",
+      "slug": "maio-decote-v-enseada",
+      "description": "Decote em V profundo com alças finas e costas abertas.",
+      "category": "maio",
+      "price_in_cents": 19990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1587660987491-ffd22589feec?w=900&h=1200&fit=crop",
+          "alt": "Maiô Decote V Enseada"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1542427361-4388a46a654a?w=900&h=1200&fit=crop",
+          "alt": "Maiô Decote V Enseada — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        },
+        {
+          "name": "Marinho",
+          "hex": "#1B365D"
+        },
+        {
+          "name": "Vermelho",
+          "hex": "#E63946"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Maiô Costas Nadador Ubatuba",
+      "slug": "maio-costas-nadador-ubatuba",
+      "description": "Costas nadador e decote reto, feito para natação.",
+      "category": "maio",
+      "price_in_cents": 21990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1603965473083-f5cec6836fc3?w=900&h=1200&fit=crop",
+          "alt": "Maiô Costas Nadador Ubatuba"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1610429046748-d0084d7f55e6?w=900&h=1200&fit=crop",
+          "alt": "Maiô Costas Nadador Ubatuba — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Azul Escandinavo",
+          "hex": "#4A90E2"
+        },
+        {
+          "name": "Maré",
+          "hex": "#0A9FB5"
+        },
+        {
+          "name": "Listrado",
+          "hex": "#2E5A88"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Maiô Manga Longa Corrente",
+      "slug": "maio-manga-longa-corrente",
+      "description": "Manga longa com proteção solar e recorte na cintura.",
+      "category": "maio",
+      "price_in_cents": 24990,
+      "compare_at_price_in_cents": 31237,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1551632494-bba43419b32b?w=900&h=1200&fit=crop",
+          "alt": "Maiô Manga Longa Corrente"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1427097829427-56a905bf7004?w=900&h=1200&fit=crop",
+          "alt": "Maiô Manga Longa Corrente — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Floral",
+          "hex": "#E8A0BF"
+        },
+        {
+          "name": "Verde Tropical",
+          "hex": "#2D5016"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Maiô Recortes Geométricos Farol",
+      "slug": "maio-recortes-geometricos-farol",
+      "description": "Recortes que desenham a silhueta sem compressão excessiva.",
+      "category": "maio",
+      "price_in_cents": 22990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1566455080274-8ce262d75fc9?w=900&h=1200&fit=crop",
+          "alt": "Maiô Recortes Geométricos Farol"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=900&h=1200&fit=crop",
+          "alt": "Maiô Recortes Geométricos Farol — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Geométrico",
+          "hex": "#7B68EE"
+        },
+        {
+          "name": "Preto Fosco",
+          "hex": "#2C2C2C"
+        },
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Maiô Zíper Frontal Quebra-Mar",
+      "slug": "maio-ziper-frontal-quebra-mar",
+      "description": "Zíper frontal para vestir fácil e ajustar o decote.",
+      "category": "maio",
+      "price_in_cents": 23990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=900&h=1200&fit=crop",
+          "alt": "Maiô Zíper Frontal Quebra-Mar"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1559827260-dc66d52bef19?w=900&h=1200&fit=crop",
+          "alt": "Maiô Zíper Frontal Quebra-Mar — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        },
+        {
+          "name": "Marinho",
+          "hex": "#1B365D"
+        },
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Maiô Ombro a Ombro Calmaria",
+      "slug": "maio-ombro-a-ombro-calmaria",
+      "description": "Ombro a ombro com elástico no busto e pernas altas.",
+      "category": "maio",
+      "price_in_cents": 20990,
+      "compare_at_price_in_cents": 26237,
+      "featured": true,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1576013551627-0cc20b96c2a7?w=900&h=1200&fit=crop",
+          "alt": "Maiô Ombro a Ombro Calmaria"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1540541338287-41700207dee6?w=900&h=1200&fit=crop",
+          "alt": "Maiô Ombro a Ombro Calmaria — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Rosa",
+          "hex": "#FFB4D1"
+        },
+        {
+          "name": "Coral",
+          "hex": "#FF6F61"
+        },
+        {
+          "name": "Lilás",
+          "hex": "#C8A2C8"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Maiô Tomara-que-Caia Lua",
+      "slug": "maio-tomara-que-caia-lua",
+      "description": "Tomara-que-caia estruturado, decote reto e pernas médias.",
+      "category": "maio",
+      "price_in_cents": 21990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/863988/pexels-photo-863988.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Maiô Tomara-que-Caia Lua"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1263348/pexels-photo-1263348.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Maiô Tomara-que-Caia Lua — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Terracota",
+          "hex": "#C84E00"
+        },
+        {
+          "name": "Dourado",
+          "hex": "#C9A227"
+        },
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Maiô Halter Pescadora",
+      "slug": "maio-halter-pescadora",
+      "description": "Halter no pescoço e costas quase nuas.",
+      "category": "maio",
+      "price_in_cents": 18990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1263349/pexels-photo-1263349.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Maiô Halter Pescadora"
+        },
+        {
+          "url": "https://images.pexels.com/photos/261185/pexels-photo-261185.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Maiô Halter Pescadora — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Verde Oliva",
+          "hex": "#556B2F"
+        },
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        },
+        {
+          "name": "Caramelo",
+          "hex": "#C68E17"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Maiô Recorte Cintura Duna",
+      "slug": "maio-recorte-cintura-duna",
+      "description": "Recorte na cintura que afina o tronco.",
+      "category": "maio",
+      "price_in_cents": 19990,
+      "compare_at_price_in_cents": 24987,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/61129/pexels-photo-61129.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Maiô Recorte Cintura Duna"
+        },
+        {
+          "url": "https://images.pexels.com/photos/863988/pexels-photo-863988.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Maiô Recorte Cintura Duna — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        },
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        },
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Maiô Gola Alta Bruma",
+      "slug": "maio-gola-alta-bruma",
+      "description": "Gola alta com abertura nas costas e zíper discreto.",
+      "category": "maio",
+      "price_in_cents": 25990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1566073771259-6a8506099945?w=900&h=1200&fit=crop",
+          "alt": "Maiô Gola Alta Bruma"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1520256862855-398228c41684?w=900&h=1200&fit=crop",
+          "alt": "Maiô Gola Alta Bruma — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Preto Fosco",
+          "hex": "#2C2C2C"
+        },
+        {
+          "name": "Maré",
+          "hex": "#0A9FB5"
+        },
+        {
+          "name": "Lilás",
+          "hex": "#C8A2C8"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Maiô Assimétrico Ilhabela",
+      "slug": "maio-assimetrico-ilhabela",
+      "description": "Alça única e recorte diagonal no busto.",
+      "category": "maio",
+      "price_in_cents": 22990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1587660987491-ffd22589feec?w=900&h=1200&fit=crop",
+          "alt": "Maiô Assimétrico Ilhabela"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1542427361-4388a46a654a?w=900&h=1200&fit=crop",
+          "alt": "Maiô Assimétrico Ilhabela — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Vermelho",
+          "hex": "#E63946"
+        },
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        },
+        {
+          "name": "Pink Neon",
+          "hex": "#FF2D95"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Maiô Costas Abertas Jericoacoara",
+      "slug": "maio-costas-abertas-jericoacoara",
+      "description": "Costas em U profundo e alças finas cruzadas.",
+      "category": "maio",
+      "price_in_cents": 19990,
+      "compare_at_price_in_cents": 24987,
+      "featured": true,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1603965473083-f5cec6836fc3?w=900&h=1200&fit=crop",
+          "alt": "Maiô Costas Abertas Jericoacoara"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1610429046748-d0084d7f55e6?w=900&h=1200&fit=crop",
+          "alt": "Maiô Costas Abertas Jericoacoara — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Floral",
+          "hex": "#E8A0BF"
+        },
+        {
+          "name": "Verde Tropical",
+          "hex": "#2D5016"
+        },
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Maiô Compressão Esportiva",
+      "slug": "maio-compressao-esportiva",
+      "description": "Tecido de compressão leve e alças largas.",
+      "category": "maio",
+      "price_in_cents": 24990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1551632494-bba43419b32b?w=900&h=1200&fit=crop",
+          "alt": "Maiô Compressão Esportiva"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1427097829427-56a905bf7004?w=900&h=1200&fit=crop",
+          "alt": "Maiô Compressão Esportiva — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Marinho",
+          "hex": "#1B365D"
+        },
+        {
+          "name": "Preto Fosco",
+          "hex": "#2C2C2C"
+        },
+        {
+          "name": "Verde Oliva",
+          "hex": "#556B2F"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Maiô Decote Quadrado Porto",
+      "slug": "maio-decote-quadrado-porto",
+      "description": "Decote quadrado, alças médias e pernas altas.",
+      "category": "maio",
+      "price_in_cents": 18990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1566455080274-8ce262d75fc9?w=900&h=1200&fit=crop",
+          "alt": "Maiô Decote Quadrado Porto"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=900&h=1200&fit=crop",
+          "alt": "Maiô Decote Quadrado Porto — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Caramelo",
+          "hex": "#C68E17"
+        },
+        {
+          "name": "Terracota",
+          "hex": "#C84E00"
+        },
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Maiô Manga Curta Recife",
+      "slug": "maio-manga-curta-recife",
+      "description": "Manga curta raglan, visual praia-esporte.",
+      "category": "maio",
+      "price_in_cents": 21990,
+      "compare_at_price_in_cents": 27487,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1544551763-46a013bb70d5?w=900&h=1200&fit=crop",
+          "alt": "Maiô Manga Curta Recife"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1559827260-dc66d52bef19?w=900&h=1200&fit=crop",
+          "alt": "Maiô Manga Curta Recife — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Listrado",
+          "hex": "#2E5A88"
+        },
+        {
+          "name": "Azul Escandinavo",
+          "hex": "#4A90E2"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Maiô Transpasse Concha",
+      "slug": "maio-transpasse-concha",
+      "description": "Transpasse frontal que valoriza o busto.",
+      "category": "maio",
+      "price_in_cents": 20990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1576013551627-0cc20b96c2a7?w=900&h=1200&fit=crop",
+          "alt": "Maiô Transpasse Concha"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1540541338287-41700207dee6?w=900&h=1200&fit=crop",
+          "alt": "Maiô Transpasse Concha — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Rosa",
+          "hex": "#FFB4D1"
+        },
+        {
+          "name": "Floral",
+          "hex": "#E8A0BF"
+        },
+        {
+          "name": "Coral",
+          "hex": "#FF6F61"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Maiô Zíper nas Costas Arraial",
+      "slug": "maio-ziper-nas-costas-arraial",
+      "description": "Zíper nas costas e decote V suave na frente.",
+      "category": "maio",
+      "price_in_cents": 19990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/863988/pexels-photo-863988.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Maiô Zíper nas Costas Arraial"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1263348/pexels-photo-1263348.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Maiô Zíper nas Costas Arraial — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Maré",
+          "hex": "#0A9FB5"
+        },
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        },
+        {
+          "name": "Marinho",
+          "hex": "#1B365D"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Maiô Recortes Contraste Sol",
+      "slug": "maio-recortes-contraste-sol",
+      "description": "Recortes em duas cores que alongam o corpo.",
+      "category": "maio",
+      "price_in_cents": 23990,
+      "compare_at_price_in_cents": 29987,
+      "featured": true,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1263349/pexels-photo-1263349.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Maiô Recortes Contraste Sol"
+        },
+        {
+          "url": "https://images.pexels.com/photos/261185/pexels-photo-261185.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Maiô Recortes Contraste Sol — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        },
+        {
+          "name": "Dourado",
+          "hex": "#C9A227"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Kaftan Folhagem Tropical",
+      "slug": "kaftan-folhagem-tropical",
+      "description": "Kaftan amplo com manga morcego e caimento fluido.",
+      "category": "saida_praia",
+      "price_in_cents": 24990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1601660413127-7314a0453953?w=900&h=1200&fit=crop",
+          "alt": "Kaftan Folhagem Tropical"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1561648512-2d9c26a7768b?w=900&h=1200&fit=crop",
+          "alt": "Kaftan Folhagem Tropical — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Verde Tropical",
+          "hex": "#2D5016"
+        },
+        {
+          "name": "Floral",
+          "hex": "#E8A0BF"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Chemise Linho da Maré",
+      "slug": "chemise-linho-da-mare",
+      "description": "Chemise reta, comprimento midi, abotoamento discreto.",
+      "category": "saida_praia",
+      "price_in_cents": 17990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1523293182086-7651a899d37f?w=900&h=1200&fit=crop",
+          "alt": "Chemise Linho da Maré"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=900&h=1200&fit=crop",
+          "alt": "Chemise Linho da Maré — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        },
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        },
+        {
+          "name": "Caramelo",
+          "hex": "#C68E17"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Saída Midi Brisa Norte",
+      "slug": "saida-midi-brisa-norte",
+      "description": "Midi leve com fenda lateral e alças finas.",
+      "category": "saida_praia",
+      "price_in_cents": 15990,
+      "compare_at_price_in_cents": 19987,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1515372039744-b8f02a3ae446?w=900&h=1200&fit=crop",
+          "alt": "Saída Midi Brisa Norte"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1515372039744-b8f02a3ae446?w=900&h=1200&fit=crop",
+          "alt": "Saída Midi Brisa Norte — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Azul Escandinavo",
+          "hex": "#4A90E2"
+        },
+        {
+          "name": "Maré",
+          "hex": "#0A9FB5"
+        },
+        {
+          "name": "Lilás",
+          "hex": "#C8A2C8"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Saída Longa Pôr do Sol",
+      "slug": "saida-longa-por-do-sol",
+      "description": "Comprimento longo, tecido fluido, usa aberta ou fechada.",
+      "category": "saida_praia",
+      "price_in_cents": 22990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1469334031218-e382a71b716b?w=900&h=1200&fit=crop",
+          "alt": "Saída Longa Pôr do Sol"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1490481651871-ab68de25d43d?w=900&h=1200&fit=crop",
+          "alt": "Saída Longa Pôr do Sol — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Terracota",
+          "hex": "#C84E00"
+        },
+        {
+          "name": "Coral",
+          "hex": "#FF6F61"
+        },
+        {
+          "name": "Dourado",
+          "hex": "#C9A227"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Túnica Tricot Areia",
+      "slug": "tunica-tricot-areia",
+      "description": "Túnica de malha vazada, caimento reto sobre o biquíni.",
+      "category": "saida_praia",
+      "price_in_cents": 18990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?w=900&h=1200&fit=crop",
+          "alt": "Túnica Tricot Areia"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1509631179647-0177331693ae?w=900&h=1200&fit=crop",
+          "alt": "Túnica Tricot Areia — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        },
+        {
+          "name": "Caramelo",
+          "hex": "#C68E17"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Kimono Palmeira",
+      "slug": "kimono-palmeira",
+      "description": "Kimono com faixa e manga ampla, estampa tropical.",
+      "category": "saida_praia",
+      "price_in_cents": 20990,
+      "compare_at_price_in_cents": 26237,
+      "featured": true,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1483985988355-763728e1935b?w=900&h=1200&fit=crop",
+          "alt": "Kimono Palmeira"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1445205170230-053b83016050?w=900&h=1200&fit=crop",
+          "alt": "Kimono Palmeira — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Floral",
+          "hex": "#E8A0BF"
+        },
+        {
+          "name": "Verde Oliva",
+          "hex": "#556B2F"
+        },
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Kaftan Ombro Caído Jeri",
+      "slug": "kaftan-ombro-caido-jeri",
+      "description": "Kaftan de ombro caído, decote V e barra longa.",
+      "category": "saida_praia",
+      "price_in_cents": 23990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/985635/pexels-photo-985635.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Kaftan Ombro Caído Jeri"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1926769/pexels-photo-1926769.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Kaftan Ombro Caído Jeri — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        },
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        },
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Chemise Curta Recife",
+      "slug": "chemise-curta-recife",
+      "description": "Chemise curta, usa como vestido de praia no fim de tarde.",
+      "category": "saida_praia",
+      "price_in_cents": 13990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/794062/pexels-photo-794062.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Chemise Curta Recife"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1536619/pexels-photo-1536619.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Chemise Curta Recife — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Rosa",
+          "hex": "#FFB4D1"
+        },
+        {
+          "name": "Floral",
+          "hex": "#E8A0BF"
+        },
+        {
+          "name": "Amarelo",
+          "hex": "#FFD60A"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Saída Midi Tricot Maré",
+      "slug": "saida-midi-tricot-mare",
+      "description": "Midi de malha com recortes vazados nas laterais.",
+      "category": "saida_praia",
+      "price_in_cents": 19990,
+      "compare_at_price_in_cents": 24987,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/972995/pexels-photo-972995.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Saída Midi Tricot Maré"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1021693/pexels-photo-1021693.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Saída Midi Tricot Maré — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Maré",
+          "hex": "#0A9FB5"
+        },
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        },
+        {
+          "name": "Azul Escandinavo",
+          "hex": "#4A90E2"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Saída Longa Fenda Dupla",
+      "slug": "saida-longa-fenda-dupla",
+      "description": "Longa com fendas laterais, movimento a cada passo.",
+      "category": "saida_praia",
+      "price_in_cents": 25990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1469334031218-e382a71b716b?w=900&h=1200&fit=crop",
+          "alt": "Saída Longa Fenda Dupla"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=900&h=1200&fit=crop",
+          "alt": "Saída Longa Fenda Dupla — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        },
+        {
+          "name": "Marinho",
+          "hex": "#1B365D"
+        },
+        {
+          "name": "Terracota",
+          "hex": "#C84E00"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Túnica Gola V Coqueiro",
+      "slug": "tunica-gola-v-coqueiro",
+      "description": "Túnica de gola V, comprimento no joelho.",
+      "category": "saida_praia",
+      "price_in_cents": 16990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1601660413127-7314a0453953?w=900&h=1200&fit=crop",
+          "alt": "Túnica Gola V Coqueiro"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1561648512-2d9c26a7768b?w=900&h=1200&fit=crop",
+          "alt": "Túnica Gola V Coqueiro — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Verde Tropical",
+          "hex": "#2D5016"
+        },
+        {
+          "name": "Floral",
+          "hex": "#E8A0BF"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Kimono Curto Duna",
+      "slug": "kimono-curto-duna",
+      "description": "Kimono curto, manga 3/4, fecha com faixa fina.",
+      "category": "saida_praia",
+      "price_in_cents": 14990,
+      "compare_at_price_in_cents": 18737,
+      "featured": true,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1523293182086-7651a899d37f?w=900&h=1200&fit=crop",
+          "alt": "Kimono Curto Duna"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=900&h=1200&fit=crop",
+          "alt": "Kimono Curto Duna — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Caramelo",
+          "hex": "#C68E17"
+        },
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        },
+        {
+          "name": "Dourado",
+          "hex": "#C9A227"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Kaftan Bordado Concha",
+      "slug": "kaftan-bordado-concha",
+      "description": "Kaftan com bordado na gola e barra ampla.",
+      "category": "saida_praia",
+      "price_in_cents": 27990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1515372039744-b8f02a3ae446?w=900&h=1200&fit=crop",
+          "alt": "Kaftan Bordado Concha"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1515372039744-b8f02a3ae446?w=900&h=1200&fit=crop",
+          "alt": "Kaftan Bordado Concha — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        },
+        {
+          "name": "Dourado",
+          "hex": "#C9A227"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Chemise Botões Madrepérola",
+      "slug": "chemise-botoes-madreperola",
+      "description": "Chemise midi com botões à frente, visual camisa de praia.",
+      "category": "saida_praia",
+      "price_in_cents": 18990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1469334031218-e382a71b716b?w=900&h=1200&fit=crop",
+          "alt": "Chemise Botões Madrepérola"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1490481651871-ab68de25d43d?w=900&h=1200&fit=crop",
+          "alt": "Chemise Botões Madrepérola — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Listrado",
+          "hex": "#2E5A88"
+        },
+        {
+          "name": "Marinho",
+          "hex": "#1B365D"
+        },
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Saída Longa Manga Bufante",
+      "slug": "saida-longa-manga-bufante",
+      "description": "Manga bufante e cintura solta, volume romântico.",
+      "category": "saida_praia",
+      "price_in_cents": 24990,
+      "compare_at_price_in_cents": 31237,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1487412720507-e7ab37603c6f?w=900&h=1200&fit=crop",
+          "alt": "Saída Longa Manga Bufante"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1509631179647-0177331693ae?w=900&h=1200&fit=crop",
+          "alt": "Saída Longa Manga Bufante — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Lilás",
+          "hex": "#C8A2C8"
+        },
+        {
+          "name": "Rosa",
+          "hex": "#FFB4D1"
+        },
+        {
+          "name": "Floral",
+          "hex": "#E8A0BF"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Túnica Assimétrica Farol",
+      "slug": "tunica-assimetrica-farol",
+      "description": "Barra assimétrica e caimento enviesado.",
+      "category": "saida_praia",
+      "price_in_cents": 19990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1483985988355-763728e1935b?w=900&h=1200&fit=crop",
+          "alt": "Túnica Assimétrica Farol"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1445205170230-053b83016050?w=900&h=1200&fit=crop",
+          "alt": "Túnica Assimétrica Farol — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Preto Fosco",
+          "hex": "#2C2C2C"
+        },
+        {
+          "name": "Verde Oliva",
+          "hex": "#556B2F"
+        },
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Kimono Longo Correnteza",
+      "slug": "kimono-longo-correnteza",
+      "description": "Kimono longo, manga ampla, usa aberto sobre o maiô.",
+      "category": "saida_praia",
+      "price_in_cents": 22990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/985635/pexels-photo-985635.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Kimono Longo Correnteza"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1926769/pexels-photo-1926769.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Kimono Longo Correnteza — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Maré",
+          "hex": "#0A9FB5"
+        },
+        {
+          "name": "Azul Escandinavo",
+          "hex": "#4A90E2"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Saída Midi Faixa Cintura",
+      "slug": "saida-midi-faixa-cintura",
+      "description": "Midi com faixa para marcar a cintura ou deixar solta.",
+      "category": "saida_praia",
+      "price_in_cents": 16990,
+      "compare_at_price_in_cents": 21237,
+      "featured": true,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/794062/pexels-photo-794062.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Saída Midi Faixa Cintura"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1536619/pexels-photo-1536619.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Saída Midi Faixa Cintura — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Coral",
+          "hex": "#FF6F61"
+        },
+        {
+          "name": "Terracota",
+          "hex": "#C84E00"
+        },
+        {
+          "name": "Amarelo",
+          "hex": "#FFD60A"
+        }
+      ],
+      "sizes": [
+        "pp",
+        "p",
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Canga Maré Cheia",
+      "slug": "canga-mare-cheia",
+      "description": "Canga retangular, seca rápido, serve de toalha leve.",
+      "category": "acessorio",
+      "price_in_cents": 7990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1575535135032-0045eaea7d62?w=900&h=1200&fit=crop",
+          "alt": "Canga Maré Cheia"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1579429713897-b98f6afbc295?w=900&h=1200&fit=crop",
+          "alt": "Canga Maré Cheia — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Maré",
+          "hex": "#0A9FB5"
+        },
+        {
+          "name": "Floral",
+          "hex": "#E8A0BF"
+        },
+        {
+          "name": "Azul Escandinavo",
+          "hex": "#4A90E2"
+        }
+      ],
+      "sizes": [
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Pareô Nó Central",
+      "slug": "pareo-no-central",
+      "description": "Pareô triangular para amarrar no quadril ou no pescoço.",
+      "category": "acessorio",
+      "price_in_cents": 6990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1519046904884-53103b34b206?w=900&h=1200&fit=crop",
+          "alt": "Pareô Nó Central"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1473496169904-658ba7c44d8a?w=900&h=1200&fit=crop",
+          "alt": "Pareô Nó Central — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Verde Tropical",
+          "hex": "#2D5016"
+        },
+        {
+          "name": "Rosa",
+          "hex": "#FFB4D1"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        }
+      ],
+      "sizes": [
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Chapéu Palha Aba Larga",
+      "slug": "chapeu-palha-aba-larga",
+      "description": "Chapéu de palha com aba larga e fita contrastante.",
+      "category": "acessorio",
+      "price_in_cents": 12990,
+      "compare_at_price_in_cents": 16237,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=900&h=1200&fit=crop",
+          "alt": "Chapéu Palha Aba Larga"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1473496169904-658ba7c44d8a?w=900&h=1200&fit=crop",
+          "alt": "Chapéu Palha Aba Larga — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        },
+        {
+          "name": "Caramelo",
+          "hex": "#C68E17"
+        },
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        }
+      ],
+      "sizes": [
+        "p",
+        "m",
+        "g"
+      ]
+    },
+    {
+      "name": "Bolsa Palha Redonda",
+      "slug": "bolsa-palha-redonda",
+      "description": "Bolsa redonda de palha, alça de ombro, cabe canga e necessaire.",
+      "category": "acessorio",
+      "price_in_cents": 11990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=900&h=1200&fit=crop",
+          "alt": "Bolsa Palha Redonda"
+        },
+        {
+          "url": "https://images.pexels.com/photos/3601426/pexels-photo-3601426.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Bolsa Palha Redonda — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        },
+        {
+          "name": "Dourado",
+          "hex": "#C9A227"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        }
+      ],
+      "sizes": [
+        "p",
+        "m",
+        "g"
+      ]
+    },
+    {
+      "name": "Cinto Trançado Duna",
+      "slug": "cinto-trancado-duna",
+      "description": "Cinto de palha trançada para marcar a saída.",
+      "category": "acessorio",
+      "price_in_cents": 4990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1174732/pexels-photo-1174732.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Cinto Trançado Duna"
+        },
+        {
+          "url": "https://images.pexels.com/photos/457882/pexels-photo-457882.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Cinto Trançado Duna — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Caramelo",
+          "hex": "#C68E17"
+        },
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        },
+        {
+          "name": "Terracota",
+          "hex": "#C84E00"
+        }
+      ],
+      "sizes": [
+        "p",
+        "m"
+      ]
+    },
+    {
+      "name": "Turbante Faixa Praia",
+      "slug": "turbante-faixa-praia",
+      "description": "Turbante elástico para cabelo molhado ou proteção do sol.",
+      "category": "acessorio",
+      "price_in_cents": 3990,
+      "compare_at_price_in_cents": 4987,
+      "featured": true,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1032650/pexels-photo-1032650.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Turbante Faixa Praia"
+        },
+        {
+          "url": "https://images.pexels.com/photos/237272/pexels-photo-237272.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Turbante Faixa Praia — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Floral",
+          "hex": "#E8A0BF"
+        },
+        {
+          "name": "Listrado",
+          "hex": "#2E5A88"
+        },
+        {
+          "name": "Rosa",
+          "hex": "#FFB4D1"
+        }
+      ],
+      "sizes": [
+        "p",
+        "m"
+      ]
+    },
+    {
+      "name": "Necessaire Impermeável Concha",
+      "slug": "necessaire-impermeavel-concha",
+      "description": "Necessaire com forro fácil de limpar para protetor e batom.",
+      "category": "acessorio",
+      "price_in_cents": 4490,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1450353/pexels-photo-1450353.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Necessaire Impermeável Concha"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1320684/pexels-photo-1320684.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Necessaire Impermeável Concha — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        },
+        {
+          "name": "Maré",
+          "hex": "#0A9FB5"
+        },
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        }
+      ],
+      "sizes": [
+        "p",
+        "m"
+      ]
+    },
+    {
+      "name": "Canga Gigante Recife",
+      "slug": "canga-gigante-recife",
+      "description": "Canga extra-larga para duas pessoas na areia.",
+      "category": "acessorio",
+      "price_in_cents": 9990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/753626/pexels-photo-753626.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Canga Gigante Recife"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1007657/pexels-photo-1007657.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Canga Gigante Recife — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Geométrico",
+          "hex": "#7B68EE"
+        },
+        {
+          "name": "Verde Tropical",
+          "hex": "#2D5016"
+        },
+        {
+          "name": "Marinho",
+          "hex": "#1B365D"
+        }
+      ],
+      "sizes": [
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Pareô Longo Palmeira",
+      "slug": "pareo-longo-palmeira",
+      "description": "Pareô longo que vira vestido com um nó no ombro.",
+      "category": "acessorio",
+      "price_in_cents": 8990,
+      "compare_at_price_in_cents": 11237,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/240526/pexels-photo-240526.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Pareô Longo Palmeira"
+        },
+        {
+          "url": "https://images.pexels.com/photos/248797/pexels-photo-248797.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Pareô Longo Palmeira — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Floral",
+          "hex": "#E8A0BF"
+        },
+        {
+          "name": "Verde Oliva",
+          "hex": "#556B2F"
+        },
+        {
+          "name": "Coral",
+          "hex": "#FF6F61"
+        }
+      ],
+      "sizes": [
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Chapéu Palha Copa Média",
+      "slug": "chapeu-palha-copa-media",
+      "description": "Copa média e aba média, fácil de levar na bolsa.",
+      "category": "acessorio",
+      "price_in_cents": 10990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/189349/pexels-photo-189349.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Chapéu Palha Copa Média"
+        },
+        {
+          "url": "https://images.pexels.com/photos/994605/pexels-photo-994605.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Chapéu Palha Copa Média — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        },
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        },
+        {
+          "name": "Caramelo",
+          "hex": "#C68E17"
+        }
+      ],
+      "sizes": [
+        "p",
+        "m",
+        "g"
+      ]
+    },
+    {
+      "name": "Bolsa Palha Retangular",
+      "slug": "bolsa-palha-retangular",
+      "description": "Bolsa retangular com forro e bolso interno.",
+      "category": "acessorio",
+      "price_in_cents": 12990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1575535135032-0045eaea7d62?w=900&h=1200&fit=crop",
+          "alt": "Bolsa Palha Retangular"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1579429713897-b98f6afbc295?w=900&h=1200&fit=crop",
+          "alt": "Bolsa Palha Retangular — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        },
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        },
+        {
+          "name": "Terracota",
+          "hex": "#C84E00"
+        }
+      ],
+      "sizes": [
+        "p",
+        "m",
+        "g"
+      ]
+    },
+    {
+      "name": "Cinto Corda Maré",
+      "slug": "cinto-corda-mare",
+      "description": "Cinto de corda náutica com ponteira dourada.",
+      "category": "acessorio",
+      "price_in_cents": 3990,
+      "compare_at_price_in_cents": 4987,
+      "featured": true,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1519046904884-53103b34b206?w=900&h=1200&fit=crop",
+          "alt": "Cinto Corda Maré"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1473496169904-658ba7c44d8a?w=900&h=1200&fit=crop",
+          "alt": "Cinto Corda Maré — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Maré",
+          "hex": "#0A9FB5"
+        },
+        {
+          "name": "Dourado",
+          "hex": "#C9A227"
+        },
+        {
+          "name": "Marinho",
+          "hex": "#1B365D"
+        }
+      ],
+      "sizes": [
+        "p",
+        "m"
+      ]
+    },
+    {
+      "name": "Turbante Tricot Areia",
+      "slug": "turbante-tricot-areia",
+      "description": "Turbante de malha, usa na cabeça ou no pescoço.",
+      "category": "acessorio",
+      "price_in_cents": 4490,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=900&h=1200&fit=crop",
+          "alt": "Turbante Tricot Areia"
+        },
+        {
+          "url": "https://images.unsplash.com/photo-1473496169904-658ba7c44d8a?w=900&h=1200&fit=crop",
+          "alt": "Turbante Tricot Areia — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        },
+        {
+          "name": "Lilás",
+          "hex": "#C8A2C8"
+        }
+      ],
+      "sizes": [
+        "p",
+        "m"
+      ]
+    },
+    {
+      "name": "Necessaire Palha Mini",
+      "slug": "necessaire-palha-mini",
+      "description": "Mini necessaire de palha para joias de praia.",
+      "category": "acessorio",
+      "price_in_cents": 3990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=900&h=1200&fit=crop",
+          "alt": "Necessaire Palha Mini"
+        },
+        {
+          "url": "https://images.pexels.com/photos/3601426/pexels-photo-3601426.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Necessaire Palha Mini — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        },
+        {
+          "name": "Dourado",
+          "hex": "#C9A227"
+        },
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        }
+      ],
+      "sizes": [
+        "p",
+        "m"
+      ]
+    },
+    {
+      "name": "Canga Listrada Farol",
+      "slug": "canga-listrada-farol",
+      "description": "Canga listrada clássica, dobra compacta.",
+      "category": "acessorio",
+      "price_in_cents": 7490,
+      "compare_at_price_in_cents": 9362,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1174732/pexels-photo-1174732.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Canga Listrada Farol"
+        },
+        {
+          "url": "https://images.pexels.com/photos/457882/pexels-photo-457882.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Canga Listrada Farol — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Listrado",
+          "hex": "#2E5A88"
+        },
+        {
+          "name": "Marinho",
+          "hex": "#1B365D"
+        },
+        {
+          "name": "Branco",
+          "hex": "#F5F5F5"
+        }
+      ],
+      "sizes": [
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Pareô Fio Dourado",
+      "slug": "pareo-fio-dourado",
+      "description": "Pareô leve com filete dourado na barra.",
+      "category": "acessorio",
+      "price_in_cents": 7990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1032650/pexels-photo-1032650.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Pareô Fio Dourado"
+        },
+        {
+          "url": "https://images.pexels.com/photos/237272/pexels-photo-237272.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Pareô Fio Dourado — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Off-white",
+          "hex": "#FAF7F2"
+        },
+        {
+          "name": "Dourado",
+          "hex": "#C9A227"
+        },
+        {
+          "name": "Rosa",
+          "hex": "#FFB4D1"
+        }
+      ],
+      "sizes": [
+        "m",
+        "g",
+        "gg"
+      ]
+    },
+    {
+      "name": "Chapéu Palha Aba Curta",
+      "slug": "chapeu-palha-aba-curta",
+      "description": "Aba curta, visual urbano para o calçadão.",
+      "category": "acessorio",
+      "price_in_cents": 8990,
+      "compare_at_price_in_cents": null,
+      "featured": false,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/1450353/pexels-photo-1450353.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Chapéu Palha Aba Curta"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1320684/pexels-photo-1320684.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Chapéu Palha Aba Curta — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Preto",
+          "hex": "#111111"
+        },
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        },
+        {
+          "name": "Caramelo",
+          "hex": "#C68E17"
+        }
+      ],
+      "sizes": [
+        "p",
+        "m",
+        "g"
+      ]
+    },
+    {
+      "name": "Bolsa Palha Mini Cilindro",
+      "slug": "bolsa-palha-mini-cilindro",
+      "description": "Cilindro pequeno, alça longa, para o essencial.",
+      "category": "acessorio",
+      "price_in_cents": 9990,
+      "compare_at_price_in_cents": 12487,
+      "featured": true,
+      "images": [
+        {
+          "url": "https://images.pexels.com/photos/753626/pexels-photo-753626.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Bolsa Palha Mini Cilindro"
+        },
+        {
+          "url": "https://images.pexels.com/photos/1007657/pexels-photo-1007657.jpeg?auto=compress&cs=tinysrgb&w=900&h=1200&fit=crop",
+          "alt": "Bolsa Palha Mini Cilindro — detalhe"
+        }
+      ],
+      "colors": [
+        {
+          "name": "Areia",
+          "hex": "#D4B896"
+        },
+        {
+          "name": "Coral",
+          "hex": "#FF6F61"
+        },
+        {
+          "name": "Verde Oliva",
+          "hex": "#556B2F"
+        }
+      ],
+      "sizes": [
+        "p",
+        "m",
+        "g"
+      ]
+    }
+  ],
+  "sets": [
+    {
+      "name": "Conjunto Cortininha Tanga Maré",
+      "slug": "conjunto-cortininha-tanga-mare",
+      "description": "Duo leve para bronze e água rasa.",
+      "top_slug": "top-cortininha-pedra-d-agua",
+      "bottom_slug": "calcinha-tanga-guarapari"
+    },
+    {
+      "name": "Conjunto Triângulo Asa Delta Sol",
+      "slug": "conjunto-triangulo-asa-delta-sol",
+      "description": "Pouca cobertura, máximo de pele ao sol.",
+      "top_slug": "top-triangulo-encantadas",
+      "bottom_slug": "calcinha-asa-delta-mare-baixa"
+    },
+    {
+      "name": "Conjunto Faixinha Laterais Largas",
+      "slug": "conjunto-faixinha-laterais-largas",
+      "description": "Conforto de praia o dia inteiro, sem marcar.",
+      "top_slug": "top-faixinha-duna",
+      "bottom_slug": "calcinha-laterais-largas-pitomba"
+    },
+    {
+      "name": "Conjunto Meia Taça Cintura Alta",
+      "slug": "conjunto-meia-taca-cintura-alta",
+      "description": "Sustentação no busto e cintura marcada.",
+      "top_slug": "top-meia-taca-concha",
+      "bottom_slug": "calcinha-cintura-alta-ladeira-sul"
+    },
+    {
+      "name": "Conjunto Tomara-que-Caia Tanga",
+      "slug": "conjunto-tomara-que-caia-tanga",
+      "description": "Ombros livres e recorte clássico no quadril.",
+      "top_slug": "top-tomara-que-caia-lua-cheia",
+      "bottom_slug": "calcinha-tanga-fio-maceio"
+    },
+    {
+      "name": "Conjunto Ombro a Ombro Tradicional",
+      "slug": "conjunto-ombro-a-ombro-tradicional",
+      "description": "Caimento reto no tronco, cobertura confortável embaixo.",
+      "top_slug": "top-ombro-a-ombro-calmaria",
+      "bottom_slug": "calcinha-tradicional-areia"
+    },
+    {
+      "name": "Conjunto Esportivo Hot Pant",
+      "slug": "conjunto-esportivo-hot-pant",
+      "description": "Duo firme para nadar, jogar e caminhar na orla.",
+      "top_slug": "top-esportivo-quebra-mar",
+      "bottom_slug": "calcinha-hot-pant-costa"
+    },
+    {
+      "name": "Conjunto Manga Longa Super Alta",
+      "slug": "conjunto-manga-longa-super-alta",
+      "description": "Proteção solar no tronco e cobertura máxima na barriga.",
+      "top_slug": "top-manga-longa-correnteza",
+      "bottom_slug": "calcinha-super-alta-duna"
+    },
+    {
+      "name": "Conjunto Halter Fio Dental",
+      "slug": "conjunto-halter-fio-dental",
+      "description": "Decote aberto e traseiro mínimo.",
+      "top_slug": "top-halter-pescador",
+      "bottom_slug": "calcinha-fio-dental-estrela"
+    },
+    {
+      "name": "Conjunto Nadador Cós Largo",
+      "slug": "conjunto-nadador-cos-largo",
+      "description": "Movimento livre nas costas, firmeza no quadril.",
+      "top_slug": "top-nadador-porto",
+      "bottom_slug": "calcinha-cos-largo-recife-novo"
+    },
+    {
+      "name": "Conjunto Frente Única Asa Delta",
+      "slug": "conjunto-frente-unica-asa-delta",
+      "description": "Nó no busto e laterais finas, visual de verão.",
+      "top_slug": "top-frente-unica-mangue",
+      "bottom_slug": "calcinha-asa-delta-bordada"
+    },
+    {
+      "name": "Conjunto Assimétrico Hot Pant Recorte",
+      "slug": "conjunto-assimetrico-hot-pant-recorte",
+      "description": "Top de alça única com shortinho de recortes.",
+      "top_slug": "top-assimetrico-farolagem",
+      "bottom_slug": "calcinha-hot-pant-recorte"
+    }
+  ]
+}
