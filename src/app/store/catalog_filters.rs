@@ -5,8 +5,6 @@
 
 use topcoat::{
   Result,
-  context::Cx,
-  router::request,
   view::{View, attributes, component, view},
 };
 
@@ -95,23 +93,27 @@ impl FilterState {
   }
 }
 
-/// Every value of a repeated query key (`?tamanho=p&tamanho=m`), decoded.
-/// `#[query_params]` can't deserialize sequences, so facet checkboxes are
-/// read from the raw query string; callers still normalize the values.
-pub fn repeated_query_values(cx: &Cx, key: &str) -> Vec<String> {
-  let query = request::uri(cx).query().unwrap_or("");
-  parse_repeated(query, key)
-}
-
-fn parse_repeated(query: &str, key: &str) -> Vec<String> {
+/// Every decoded `key=value` pair of a raw query string, in order.
+/// `#[query_params]` can't deserialize sequences, so the catalog reads its
+/// repeated facets (`?tamanho=p&tamanho=m`) from these; callers still
+/// normalize the values.
+pub fn query_pairs(query: &str) -> Vec<(String, String)> {
   let Ok(url) = reqwest::Url::parse(&format!("http://localhost/?{query}"))
   else {
     return Vec::new();
   };
   url
     .query_pairs()
+    .map(|(k, v)| (k.into_owned(), v.into_owned()))
+    .collect()
+}
+
+/// Every non-empty value of `key` in `pairs`.
+pub fn repeated_values(pairs: &[(String, String)], key: &str) -> Vec<String> {
+  pairs
+    .iter()
     .filter(|(k, v)| k == key && !v.is_empty())
-    .map(|(_, v)| v.into_owned())
+    .map(|(_, v)| v.clone())
     .collect()
 }
 
@@ -366,9 +368,13 @@ mod tests {
   #[test]
   fn repeated_values_are_collected_and_decoded() {
     let query = "tamanho=p&cor=Azul+marinho&tamanho=m&tamanho=&cor=Lim%C3%A3o";
-    assert_eq!(parse_repeated(query, "tamanho"), vec!["p", "m"]);
-    assert_eq!(parse_repeated(query, "cor"), vec!["Azul marinho", "Limão"]);
-    assert!(parse_repeated("", "cor").is_empty());
+    let pairs = query_pairs(query);
+    assert_eq!(repeated_values(&pairs, "tamanho"), vec!["p", "m"]);
+    assert_eq!(
+      repeated_values(&pairs, "cor"),
+      vec!["Azul marinho", "Limão"]
+    );
+    assert!(repeated_values(&query_pairs(""), "cor").is_empty());
   }
 
   #[test]

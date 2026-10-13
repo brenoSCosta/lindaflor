@@ -5,19 +5,18 @@ use topcoat::{
   Result,
   context::Cx,
   context::app_context,
-  router::{href, page, query_params},
+  router::{href, page, request},
   runtime::{Event, shard, signal},
   view::{View, attributes, view},
 };
 
 use crate::app::store::catalog_filters::{
-  catalog_toolbar, repeated_query_values,
+  catalog_toolbar, query_pairs, repeated_values,
 };
 use crate::app::store::product_card::product_card;
 use crate::app::store::queries::{
-  CatalogFilters, STOREFRONT_PAGE_SIZE, clamp_catalog_page,
-  count_products_with_filters, list_filter_colors,
-  list_products_with_filters,
+  CatalogFilters, CatalogQuery, STOREFRONT_PAGE_SIZE, clamp_catalog_page,
+  count_products_with_filters, list_filter_colors, list_products_with_filters,
 };
 use crate::components::breadcrumb::{
   breadcrumb, breadcrumb_item, breadcrumb_link, breadcrumb_list,
@@ -29,22 +28,6 @@ use crate::components::input::input;
 use crate::components::pagination::{
   pagination, pagination_content, pagination_item,
 };
-
-#[query_params(error = bad_request)]
-struct ProductsQuery {
-  category: Option<String>,
-  search: Option<String>,
-  destaque: Option<bool>,
-  esgotados: Option<bool>,
-  page: Option<i64>,
-  sort: Option<String>,
-  // `tamanho` / `cor` repeat (one per checkbox); query_params can't read
-  // sequences, so they come from `repeated_query_values` instead.
-  preco_min: Option<String>,
-  preco_max: Option<String>,
-  disponivel: Option<bool>,
-  sale: Option<bool>,
-}
 
 const CATEGORIES: [(&str, &str); 7] = [
   ("all", "Todos"),
@@ -119,48 +102,10 @@ fn catalog_search(raw: &str) -> String {
   raw.trim().chars().take(SEARCH_MAX).collect()
 }
 
-#[page]
-pub async fn page(cx: &Cx) -> Result<impl View> {
-  let query = query_params::<ProductsQuery>(cx)?;
-  let category = catalog_category(query.category.as_deref().unwrap_or("all"));
-  let search = catalog_search(query.search.as_deref().unwrap_or(""));
-  let featured_only = query.destaque.unwrap_or(false);
-  let include_out_of_stock = query.esgotados.unwrap_or(false);
-  let page = clamp_catalog_page(query.page.unwrap_or(1));
-  let sort = query.sort.clone().unwrap_or_else(|| "destaque".to_string());
-  let tamanho = repeated_query_values(cx, "tamanho");
-  let cor = repeated_query_values(cx, "cor");
-  let preco_min = query.preco_min.as_deref();
-  let preco_max = query.preco_max.as_deref();
-  let disponivel = query.disponivel.unwrap_or(false);
-  let sale = query.sale.unwrap_or(false);
-
-  Ok(view! {
-      catalog_results(
-          category: category,
-          search: search,
-          featured_only: featured_only,
-          include_out_of_stock: include_out_of_stock,
-          catalog_page: page,
-          sort: sort,
-          tamanho: tamanho,
-          cor: cor,
-          preco_min: preco_min.map(|s| s.to_string()),
-          preco_max: preco_max.map(|s| s.to_string()),
-          disponivel: disponivel,
-          sale: sale,
-      )
-  })
-}
-
-/// Category filters and search results. Re-renders on the server when either
-/// signal changes, without reloading the rest of the storefront.
-///
-/// Arguments and restored signals are request input: categories outside the
-/// catalog and oversized searches are normalized before the query runs.
-#[shard("/busca/produtos")]
-async fn catalog_results(
-  cx: &Cx,
+/// Catalog state for [`catalog_results`], parsed from the page's raw query
+/// string. Request input: values are normalized and junk falls back to the
+/// defaults instead of failing the page.
+struct CatalogParams {
   category: String,
   search: String,
   featured_only: bool,
@@ -173,7 +118,68 @@ async fn catalog_results(
   preco_max: Option<String>,
   disponivel: bool,
   sale: bool,
-) -> Result<impl View> {
+}
+
+impl CatalogParams {
+  fn from_query(raw: &str) -> Self {
+    let pairs = query_pairs(raw);
+    let first = |key: &str| {
+      pairs
+        .iter()
+        .find(|(k, _)| k == key)
+        .map(|(_, v)| v.as_str())
+    };
+    let flag = |key: &str| first(key) == Some("true");
+    Self {
+      category: catalog_category(first("category").unwrap_or("all")),
+      search: catalog_search(first("search").unwrap_or("")),
+      featured_only: flag("destaque"),
+      include_out_of_stock: flag("esgotados"),
+      catalog_page: clamp_catalog_page(
+        first("page")
+          .and_then(|raw| raw.trim().parse().ok())
+          .unwrap_or(1),
+      ),
+      sort: first("sort").unwrap_or("destaque").to_string(),
+      tamanho: repeated_values(&pairs, "tamanho"),
+      cor: repeated_values(&pairs, "cor"),
+      preco_min: first("preco_min").map(str::to_owned),
+      preco_max: first("preco_max").map(str::to_owned),
+      disponivel: flag("disponivel"),
+      sale: flag("sale"),
+    }
+  }
+}
+
+#[page]
+pub async fn page(cx: &Cx) -> Result<impl View> {
+  let query = request::uri(cx).query().unwrap_or("").to_owned();
+  Ok(view! {
+      catalog_results(query: query)
+  })
+}
+
+/// Category filters and search results. Re-renders on the server when either
+/// signal changes, without reloading the rest of the storefront.
+///
+/// Arguments and restored signals are request input: categories outside the
+/// catalog and oversized searches are normalized before the query runs.
+#[shard("/busca/produtos")]
+async fn catalog_results(cx: &Cx, query: String) -> Result<impl View> {
+  let CatalogParams {
+    category,
+    search,
+    featured_only,
+    include_out_of_stock,
+    catalog_page,
+    sort,
+    tamanho,
+    cor,
+    preco_min,
+    preco_max,
+    disponivel,
+    sale,
+  } = CatalogParams::from_query(&query);
   let category = signal(cx, || catalog_category(&category));
   let search = signal(cx, || catalog_search(&search));
   let sort_signal = signal(cx, || sort.clone());
@@ -233,22 +239,23 @@ async fn catalog_results(
   let sort_str = sort_signal.get();
   let products = list_products_with_filters(
     pool,
-    category_filter,
-    search_filter,
-    featured_only,
-    include_out_of_stock,
-    &filters,
-    &sort_str,
-    page_size,
-    offset,
+    CatalogQuery {
+      category: category_filter,
+      search: search_filter,
+      featured_only,
+      include_out_of_stock,
+      filters: &filters,
+      sort: &sort_str,
+      limit: page_size,
+      offset,
+    },
   )
   .await?;
   let store = crate::app::utils::object_store(cx);
   let products =
     crate::app::admin::produtos::resolve_summary_images(&store, products).await;
 
-  let available_colors =
-    list_filter_colors(pool, category_filter).await?;
+  let available_colors = list_filter_colors(pool, category_filter).await?;
 
   // Update heading for special cases
   let heading = if sale {
@@ -470,5 +477,35 @@ mod tests {
     assert_eq!(filters.sizes, vec!["p".to_string(), "m".to_string()]);
     assert_eq!(filters.colors.len(), COLOR_FILTER_MAX);
     assert!(filters.sale_only);
+  }
+
+  #[test]
+  fn catalog_params_parse_raw_query() {
+    let params = CatalogParams::from_query(
+      "category=maio&search=+azul+&destaque=true&page=3&sort=novos\
+       &tamanho=p&tamanho=m&cor=Azul&preco_min=89,90&disponivel=true",
+    );
+    assert_eq!(params.category, "maio");
+    assert_eq!(params.search, "azul");
+    assert!(params.featured_only);
+    assert!(!params.include_out_of_stock);
+    assert_eq!(params.catalog_page, 3);
+    assert_eq!(params.sort, "novos");
+    assert_eq!(params.tamanho, vec!["p", "m"]);
+    assert_eq!(params.cor, vec!["Azul"]);
+    assert_eq!(params.preco_min.as_deref(), Some("89,90"));
+    assert!(params.preco_max.is_none());
+    assert!(params.disponivel);
+    assert!(!params.sale);
+  }
+
+  #[test]
+  fn catalog_params_fall_back_on_junk() {
+    let params =
+      CatalogParams::from_query("category=nope&page=abc&destaque=yes");
+    assert_eq!(params.category, "all");
+    assert_eq!(params.catalog_page, 1);
+    assert!(!params.featured_only);
+    assert_eq!(params.sort, "destaque");
   }
 }

@@ -321,17 +321,32 @@ pub async fn list_wishlist_products(
   Ok(rows.into_iter().map(ProductSummary::from).collect())
 }
 
+/// One page of storefront products: base filters, facets, sort, and window.
+pub struct CatalogQuery<'a> {
+  pub category: Option<&'a str>,
+  pub search: Option<&'a str>,
+  pub featured_only: bool,
+  pub include_out_of_stock: bool,
+  pub filters: &'a CatalogFilters,
+  pub sort: &'a str,
+  pub limit: i64,
+  pub offset: i64,
+}
+
 pub async fn list_products_with_filters(
   pool: &PgPool,
-  category: Option<&str>,
-  search: Option<&str>,
-  featured_only: bool,
-  include_out_of_stock: bool,
-  filters: &CatalogFilters,
-  sort: &str,
-  limit: i64,
-  offset: i64,
+  query: CatalogQuery<'_>,
 ) -> Result<Vec<ProductSummary>, sqlx::Error> {
+  let CatalogQuery {
+    category,
+    search,
+    featured_only,
+    include_out_of_stock,
+    filters,
+    sort,
+    limit,
+    offset,
+  } = query;
   let mut sql = String::from(
     "SELECT p.id, p.name, p.slug, p.price_in_cents, p.compare_at_price_in_cents, p.category::text AS category,
             (SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.sort_order ASC LIMIT 1) AS image_url,

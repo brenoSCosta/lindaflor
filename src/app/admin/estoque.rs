@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::app::auth_helpers::require_admin;
 use crate::app::store::inventory::adjust_stock;
+use crate::audit::AuditEvent;
 use crate::components::badge::{BadgeVariant, badge};
 use crate::components::button::{ButtonSize, ButtonVariant, button};
 use crate::components::card::{card, card_content, card_header, card_title};
@@ -209,17 +210,19 @@ pub async fn page(
       .map_err(|error| topcoat::Error::from(bad_request(error.to_string())))?;
     crate::audit::record_audit_event(
       &mut *tx,
-      "inventory",
-      &inventory_id.to_string(),
-      "inventory",
-      inventory_id,
-      Some(actor.user.id),
-      Some(actor.user.name.as_str()),
-      serde_json::json!({
-        "delta": delta,
-        "reason": reason,
-        "warehouse_id": warehouse_id,
-      }),
+      AuditEvent {
+        aggregate_type: "inventory",
+        aggregate_id: &inventory_id.to_string(),
+        entity_type: "inventory",
+        entity_id: inventory_id,
+        actor_id: Some(actor.user.id),
+        actor_name: Some(actor.user.name.as_str()),
+        metadata: serde_json::json!({
+          "delta": delta,
+          "reason": reason,
+          "warehouse_id": warehouse_id,
+        }),
+      },
     )
     .await?;
     tx.commit().await?;

@@ -531,7 +531,7 @@ async fn seed_products(
             .execute(pool)
             .await?;
 
-        let quantity = if (product_index + variant_index) % 23 == 0 {
+        let quantity = if (product_index + variant_index).is_multiple_of(23) {
           0
         } else if stock_max > stock_min {
           rng.gen_range(stock_min..=stock_max)

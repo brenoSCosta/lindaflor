@@ -11,6 +11,7 @@ use topcoat::{
 };
 use uuid::Uuid;
 
+use crate::audit::AuditEvent;
 use crate::auth::CREDENTIAL_PROVIDER_ID;
 use crate::auth::google::{GoogleOAuthConfig, safe_callback_path};
 use crate::auth::password::{
@@ -1604,28 +1605,12 @@ fn ensure_not_admin_target(target: &User) -> Result<()> {
 
 async fn record_audit_event<'e, E>(
   executor: E,
-  aggregate_type: &str,
-  aggregate_id: &str,
-  entity_type: &str,
-  entity_id: Uuid,
-  actor_id: Option<Uuid>,
-  actor_name: Option<&str>,
-  metadata: serde_json::Value,
+  event: AuditEvent<'_>,
 ) -> Result<()>
 where
   E: sqlx::Executor<'e, Database = sqlx::Postgres>,
 {
-  crate::audit::record_audit_event(
-    executor,
-    aggregate_type,
-    aggregate_id,
-    entity_type,
-    entity_id,
-    actor_id,
-    actor_name,
-    metadata,
-  )
-  .await?;
+  crate::audit::record_audit_event(executor, event).await?;
   Ok(())
 }
 
@@ -1741,13 +1726,15 @@ pub async fn set_user_role(
   .await?;
   record_audit_event(
     &mut *tx,
-    "user",
-    &user_id.to_string(),
-    "user",
-    user_id,
-    Some(actor.user.id),
-    Some(actor.user.name.as_str()),
-    serde_json::json!({ "action": "set_role", "role": role }),
+    AuditEvent {
+      aggregate_type: "user",
+      aggregate_id: &user_id.to_string(),
+      entity_type: "user",
+      entity_id: user_id,
+      actor_id: Some(actor.user.id),
+      actor_name: Some(actor.user.name.as_str()),
+      metadata: serde_json::json!({ "action": "set_role", "role": role }),
+    },
   )
   .await?;
   tx.commit().await?;
@@ -1797,13 +1784,15 @@ pub async fn ban_user(
     .await?;
   record_audit_event(
     &mut *tx,
-    "user",
-    &user_id.to_string(),
-    "user",
-    user_id,
-    Some(actor.user.id),
-    Some(actor.user.name.as_str()),
-    serde_json::json!({ "action": "ban_user", "reason": reason }),
+    AuditEvent {
+      aggregate_type: "user",
+      aggregate_id: &user_id.to_string(),
+      entity_type: "user",
+      entity_id: user_id,
+      actor_id: Some(actor.user.id),
+      actor_name: Some(actor.user.name.as_str()),
+      metadata: serde_json::json!({ "action": "ban_user", "reason": reason }),
+    },
   )
   .await?;
   tx.commit().await?;
@@ -1833,13 +1822,15 @@ pub async fn unban_user(
   .await?;
   record_audit_event(
     &mut *tx,
-    "user",
-    &user_id.to_string(),
-    "user",
-    user_id,
-    Some(actor.user.id),
-    Some(actor.user.name.as_str()),
-    serde_json::json!({ "action": "unban_user" }),
+    AuditEvent {
+      aggregate_type: "user",
+      aggregate_id: &user_id.to_string(),
+      entity_type: "user",
+      entity_id: user_id,
+      actor_id: Some(actor.user.id),
+      actor_name: Some(actor.user.name.as_str()),
+      metadata: serde_json::json!({ "action": "unban_user" }),
+    },
   )
   .await?;
   tx.commit().await?;
@@ -1863,13 +1854,15 @@ pub async fn remove_user(
   // AFTER the delete inside the same tx.
   record_audit_event(
     &mut *tx,
-    "user",
-    &user_id.to_string(),
-    "user",
-    user_id,
-    Some(actor.user.id),
-    Some(actor.user.name.as_str()),
-    serde_json::json!({ "action": "remove_user" }),
+    AuditEvent {
+      aggregate_type: "user",
+      aggregate_id: &user_id.to_string(),
+      entity_type: "user",
+      entity_id: user_id,
+      actor_id: Some(actor.user.id),
+      actor_name: Some(actor.user.name.as_str()),
+      metadata: serde_json::json!({ "action": "remove_user" }),
+    },
   )
   .await?;
   tx.commit().await?;
@@ -1945,13 +1938,15 @@ pub async fn revoke_admin_session(
   }
   record_audit_event(
     &mut *tx,
-    "user",
-    &owner.to_string(),
-    "session",
-    session_id,
-    Some(actor.user.id),
-    Some(actor.user.name.as_str()),
-    serde_json::json!({ "action": "revoke_session", "session_id": session_id }),
+    AuditEvent {
+      aggregate_type: "user",
+      aggregate_id: &owner.to_string(),
+      entity_type: "session",
+      entity_id: session_id,
+      actor_id: Some(actor.user.id),
+      actor_name: Some(actor.user.name.as_str()),
+      metadata: serde_json::json!({ "action": "revoke_session", "session_id": session_id }),
+    },
   )
   .await?;
   tx.commit().await?;
@@ -1973,13 +1968,15 @@ pub async fn revoke_admin_user_sessions(
     .await?;
   record_audit_event(
     &mut *tx,
-    "user",
-    &user_id.to_string(),
-    "user",
-    user_id,
-    Some(actor.user.id),
-    Some(actor.user.name.as_str()),
-    serde_json::json!({ "action": "revoke_all_sessions" }),
+    AuditEvent {
+      aggregate_type: "user",
+      aggregate_id: &user_id.to_string(),
+      entity_type: "user",
+      entity_id: user_id,
+      actor_id: Some(actor.user.id),
+      actor_name: Some(actor.user.name.as_str()),
+      metadata: serde_json::json!({ "action": "revoke_all_sessions" }),
+    },
   )
   .await?;
   tx.commit().await?;

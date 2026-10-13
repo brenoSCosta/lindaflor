@@ -3,7 +3,6 @@ pub mod app_sidebar;
 pub mod auth_helpers;
 pub mod check_email;
 pub mod checkout;
-pub mod sets;
 pub mod conta;
 pub mod dashboard;
 pub mod favoritos;
@@ -15,6 +14,7 @@ pub mod pedido;
 pub mod politica_privacidade;
 pub mod produtos;
 pub mod reset_password;
+pub mod sets;
 pub mod settings;
 pub mod store;
 pub mod termos;
@@ -51,7 +51,9 @@ use topcoat::{
 use self::store::hero::hero_banners;
 use self::store::pricing::storefront_settings;
 use self::store::product_card::product_card;
-use self::store::queries::{CatalogFilters, list_products_with_filters};
+use self::store::queries::{
+  CatalogFilters, CatalogQuery, list_products_with_filters,
+};
 use crate::app::app_sidebar::{app_shell, is_app_shell_path, storefront_shell};
 use crate::app::auth_helpers::optional_user;
 use crate::auth::service;
@@ -322,14 +324,16 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   // Lançamentos (new arrivals, 8 products)
   let lancamentos = list_products_with_filters(
     pool,
-    None,
-    None,
-    false,
-    true,
-    &empty_filters,
-    "novos",
-    8,
-    0,
+    CatalogQuery {
+      category: None,
+      search: None,
+      featured_only: false,
+      include_out_of_stock: true,
+      filters: &empty_filters,
+      sort: "novos",
+      limit: 8,
+      offset: 0,
+    },
   )
   .await?;
   let lancamentos =
@@ -339,14 +343,16 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   // Mais vendidos (best sellers, 8 products)
   let mais_vendidos = list_products_with_filters(
     pool,
-    None,
-    None,
-    false,
-    true,
-    &empty_filters,
-    "mais_vendidos",
-    8,
-    0,
+    CatalogQuery {
+      category: None,
+      search: None,
+      featured_only: false,
+      include_out_of_stock: true,
+      filters: &empty_filters,
+      sort: "mais_vendidos",
+      limit: 8,
+      offset: 0,
+    },
   )
   .await?;
   let mais_vendidos =
@@ -358,14 +364,16 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   sale_filters.sale_only = true;
   let liquida = list_products_with_filters(
     pool,
-    None,
-    None,
-    false,
-    true,
-    &sale_filters,
-    "maior_desconto",
-    4,
-    0,
+    CatalogQuery {
+      category: None,
+      search: None,
+      featured_only: false,
+      include_out_of_stock: true,
+      filters: &sale_filters,
+      sort: "maior_desconto",
+      limit: 4,
+      offset: 0,
+    },
   )
   .await?;
   let liquida =

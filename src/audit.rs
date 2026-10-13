@@ -1,16 +1,21 @@
 use sqlx::Postgres;
 use uuid::Uuid;
 
+/// One row of the `audit_events` trail.
+pub struct AuditEvent<'a> {
+  pub aggregate_type: &'a str,
+  pub aggregate_id: &'a str,
+  pub entity_type: &'a str,
+  pub entity_id: Uuid,
+  pub actor_id: Option<Uuid>,
+  pub actor_name: Option<&'a str>,
+  pub metadata: serde_json::Value,
+}
+
 /// Append-only privileged mutation trail (`audit_events`).
 pub async fn record_audit_event<'e, E>(
   executor: E,
-  aggregate_type: &str,
-  aggregate_id: &str,
-  entity_type: &str,
-  entity_id: Uuid,
-  actor_id: Option<Uuid>,
-  actor_name: Option<&str>,
-  metadata: serde_json::Value,
+  event: AuditEvent<'_>,
 ) -> Result<(), sqlx::Error>
 where
   E: sqlx::Executor<'e, Database = Postgres>,
@@ -23,13 +28,13 @@ where
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
         "#,
     Uuid::now_v7(),
-    aggregate_type,
-    aggregate_id,
-    entity_type,
-    entity_id,
-    actor_id,
-    actor_name,
-    metadata,
+    event.aggregate_type,
+    event.aggregate_id,
+    event.entity_type,
+    event.entity_id,
+    event.actor_id,
+    event.actor_name,
+    event.metadata,
   )
   .execute(executor)
   .await?;
