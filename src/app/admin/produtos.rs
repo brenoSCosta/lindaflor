@@ -95,13 +95,15 @@ async fn product_directory(
   let current_page = signal(cx, || clamp_product_page(initial_page));
 
   let query = clamp_product_query(&q.get());
+  // Literal match: `%`/`_`/`\` typed by the admin are not wildcards.
+  let like_query = crate::db::escape_like(&query);
   let active_filter = clamp_product_active(&active.get());
   let mut page_num = clamp_product_page(current_page.get());
   let page_size: i64 = 20;
 
   let total: i64 = sqlx::query_scalar!(
-    "SELECT COUNT(*) FROM products p WHERE ($1 = '' OR p.name ILIKE '%' || $1 || '%') AND ($2 = 'all' OR p.active = ($2 = 'true'))",
-    query,
+    "SELECT COUNT(*) FROM products p WHERE ($1 = '' OR p.name ILIKE '%' || $1 || '%' ESCAPE '\\') AND ($2 = 'all' OR p.active = ($2 = 'true'))",
+    like_query,
     active_filter,
   )
   .fetch_one(pool)
@@ -124,12 +126,12 @@ async fn product_directory(
          LEFT JOIN product_variants pv ON pv.product_id = p.id
          LEFT JOIN inventory i ON i.variant_id = pv.id
          LEFT JOIN warehouses w ON w.id = i.warehouse_id
-         WHERE ($1 = '' OR p.name ILIKE '%' || $1 || '%')
+         WHERE ($1 = '' OR p.name ILIKE '%' || $1 || '%' ESCAPE '\\')
            AND ($2 = 'all' OR p.active = ($2 = 'true'))
          GROUP BY p.id
          ORDER BY p.name
          LIMIT $3 OFFSET $4",
-        query,
+        like_query,
         active_filter,
         page_size,
         (page_num - 1) * page_size,

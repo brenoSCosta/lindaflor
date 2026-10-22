@@ -36,7 +36,19 @@ pub mod kind {
   pub const ORDER_CANCELLED: &str = "order_cancelled";
   pub const ORDER_EXPIRED: &str = "order_expired";
   pub const ORDER_REFUNDED: &str = "order_refunded";
+  pub const NEWSLETTER_WELCOME: &str = "newsletter_welcome";
+
+  /// Auth mail anyone can trigger for an arbitrary address (sign-up /
+  /// resend verification, password reset, change-email confirmation):
+  /// capped per recipient by [`super::enqueue_throttled`].
+  pub const RECIPIENT_THROTTLED: [&str; 3] =
+    [VERIFY_EMAIL, PASSWORD_RESET, CHANGE_EMAIL];
 }
+
+/// At most this many [`kind::RECIPIENT_THROTTLED`] mails per recipient
+/// address per [`RECIPIENT_WINDOW_SECS`].
+pub const RECIPIENT_MAX_PER_WINDOW: i64 = 5;
+pub const RECIPIENT_WINDOW_SECS: i64 = 3600;
 
 /// Queue `email` for `to`. With `dedupe_key`, a second enqueue under the
 /// same key is a silent no-op.
@@ -66,6 +78,63 @@ where
   .await?;
   tracing::debug!(kind, to = %redact_address(to), "mail enqueued");
   Ok(())
+}
+
+/// [`enqueue`] for the [`kind::RECIPIENT_THROTTLED`] kinds: silently drops
+/// the mail (returns `false`) once the recipient already has
+/// [`RECIPIENT_MAX_PER_WINDOW`] of them queued or sent in the last
+/// [`RECIPIENT_WINDOW_SECS`], so the endpoints cannot be used to flood a
+/// mailbox (or burn SMTP reputation) one rotating IP at a time. Callers
+/// answer the client exactly as on success: the cap must not reveal
+/// anything about the address.
+///
+/// The count and insert are one statement; two racing requests can still
+/// both pass at the edge (soft cap, off by at most the concurrency).
+pub async fn enqueue_throttled<'e, E>(
+  executor: E,
+  kind: &str,
+  to: &str,
+  email: &Email,
+) -> Result<bool, sqlx::Error>
+where
+  E: PgExecutor<'e>,
+{
+  let to = to.trim();
+  let inserted = sqlx::query(
+    "INSERT INTO email_outbox (id, kind, to_address, subject, html_body, text_body)
+     SELECT $1, $2, $3, $4, $5, $6
+     WHERE (
+       SELECT count(*) FROM email_outbox
+       WHERE lower(to_address) = lower($3)
+         AND kind = ANY($7)
+         AND created_at > now() - make_interval(secs => $8)
+     ) < $9",
+  )
+  .bind(Uuid::now_v7())
+  .bind(kind)
+  .bind(to)
+  .bind(&email.subject)
+  .bind(&email.html)
+  .bind(&email.text)
+  .bind(&kind::RECIPIENT_THROTTLED[..])
+  .bind(RECIPIENT_WINDOW_SECS as f64)
+  .bind(RECIPIENT_MAX_PER_WINDOW)
+  .execute(executor)
+  .await?
+  .rows_affected()
+    > 0;
+  if inserted {
+    tracing::debug!(kind, to = %redact_address(to), "mail enqueued");
+  } else {
+    tracing::info!(
+      kind,
+      to = %redact_address(to),
+      max = RECIPIENT_MAX_PER_WINDOW,
+      window_secs = RECIPIENT_WINDOW_SECS,
+      "auth mail dropped: per-recipient limit reached"
+    );
+  }
+  Ok(inserted)
 }
 
 /// Delay before retry number `attempts + 1`: 30s, 60s, 120s, … capped at 1h.
@@ -274,6 +343,62 @@ mod tests {
     // Nothing left to claim.
     let again = drain_once(&pool, &Mailer::Log, 3).await.unwrap();
     assert_eq!(again, DrainReport::default());
+  }
+
+  #[tokio::test]
+  async fn auth_mail_is_capped_per_recipient() {
+    let pool = crate::test_support::isolated_pool().await;
+    let to = "Bombed@Example.com";
+    let mut accepted = 0;
+    for i in 0..8 {
+      // Mixed kinds and address casing share one budget.
+      let k = kind::RECIPIENT_THROTTLED[i % 3];
+      let addr = if i % 2 == 0 {
+        to.to_string()
+      } else {
+        to.to_lowercase()
+      };
+      if enqueue_throttled(&pool, k, &addr, &sample()).await.unwrap() {
+        accepted += 1;
+      }
+    }
+    assert_eq!(accepted, RECIPIENT_MAX_PER_WINDOW);
+    let queued: i64 = sqlx::query_scalar(
+      "SELECT count(*) FROM email_outbox WHERE lower(to_address) = 'bombed@example.com'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(queued, RECIPIENT_MAX_PER_WINDOW);
+
+    // Other recipients and non-auth kinds are unaffected.
+    assert!(
+      enqueue_throttled(
+        &pool,
+        kind::PASSWORD_RESET,
+        "other@example.com",
+        &sample()
+      )
+      .await
+      .unwrap()
+    );
+    enqueue(&pool, kind::ORDER_CREATED, to, &sample(), None)
+      .await
+      .unwrap();
+
+    // Rows older than the window no longer count.
+    sqlx::query(
+      "UPDATE email_outbox SET created_at = now() - interval '2 hours'
+       WHERE lower(to_address) = 'bombed@example.com'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(
+      enqueue_throttled(&pool, kind::VERIFY_EMAIL, to, &sample())
+        .await
+        .unwrap()
+    );
   }
 
   #[tokio::test]

@@ -49,9 +49,6 @@ struct OAuthStateValue {
   /// PKCE `code_verifier`; sent as `code_verifier` at token exchange.
   #[serde(default, skip_serializing_if = "Option::is_none")]
   code_verifier: Option<String>,
-  /// OIDC `nonce` sent in the authorize URL (stored server-side).
-  #[serde(default, skip_serializing_if = "Option::is_none")]
-  nonce: Option<String>,
 }
 
 #[derive(Debug)]
@@ -61,7 +58,6 @@ pub struct ConsumedOAuthState {
   pub session_binding: Option<String>,
   pub browser_binding: Option<String>,
   pub code_verifier: Option<String>,
-  pub nonce: Option<String>,
 }
 
 #[derive(Debug)]
@@ -139,14 +135,13 @@ pub fn pkce_s256_challenge(verifier: &str) -> String {
   base64url_nopad(&Sha256::digest(verifier.as_bytes()))
 }
 
-/// Authorize URL with optional PKCE `code_challenge` (S256) and OIDC `nonce`.
+/// Authorize URL with optional PKCE `code_challenge` (S256).
 pub fn google_authorize_url(
   config: &GoogleOAuthConfig,
   state: &str,
   code_challenge: Option<&str>,
-  nonce: Option<&str>,
 ) -> String {
-  config.authorize_url_with(state, code_challenge, nonce)
+  config.authorize_url_with(state, code_challenge)
 }
 
 /// Verify a link-flow callback runs in the session that started it.
@@ -267,7 +262,6 @@ pub async fn store_oauth_state(
       session_binding: None,
       browser_binding: None,
       code_verifier: None,
-      nonce: None,
     },
   )
   .await
@@ -288,7 +282,6 @@ pub struct NewOAuthState<'a> {
   /// [`issue_oauth_browser_binding`] hash; required by the callback.
   pub browser_binding: Option<&'a str>,
   pub code_verifier: Option<&'a str>,
-  pub nonce: Option<&'a str>,
 }
 
 pub async fn store_oauth_state_full(
@@ -303,7 +296,6 @@ pub async fn store_oauth_state_full(
     session_binding,
     browser_binding,
     code_verifier,
-    nonce,
   } = params;
   let id = Uuid::now_v7();
   let identifier = format!("{OAUTH_STATE_PREFIX}{state}");
@@ -314,7 +306,6 @@ pub async fn store_oauth_state_full(
     session_binding: session_binding.map(str::to_owned),
     browser_binding: browser_binding.map(str::to_owned),
     code_verifier: code_verifier.map(str::to_owned),
-    nonce: nonce.map(str::to_owned),
   })
   .expect("oauth state value serializes");
   sqlx::query!(
@@ -366,7 +357,6 @@ pub async fn consume_oauth_state(
     session_binding: parsed.session_binding,
     browser_binding: parsed.browser_binding,
     code_verifier: parsed.code_verifier,
-    nonce: parsed.nonce,
   })
 }
 
@@ -488,11 +478,9 @@ pub async fn google_callback(cx: &Cx) -> Result<()> {
     }
   }
 
-  // `nonce` is generated, stored, and sent on the authorize
-  // URL. We do not parse Google's `id_token` JWT to check the nonce claim
-  // (`jsonwebtoken` is not a dependency). PKCE + random `state` still bind
+  // No OIDC nonce: the `id_token` is never parsed (identity comes from
+  // `userinfo`), and PKCE + the random, browser-bound `state` already bind
   // the authorization code to this start.
-  let _stored_nonce = oauth_state.nonce.as_deref();
 
   let Some(verifier) = oauth_state
     .code_verifier
@@ -540,18 +528,12 @@ pub async fn google_callback(cx: &Cx) -> Result<()> {
   let email_verified = google_email_verified(profile.email_verified);
   let google_sub = profile.sub;
 
-  let access_expires = tokens.expires_in.map(expires_at_from_secs);
-
   let account = GoogleAccountUpsert {
     google_sub: &google_sub,
     email: &email,
     image: image.as_deref(),
     email_verified,
-    access_token: &tokens.access_token,
-    refresh_token: tokens.refresh_token.as_deref(),
-    id_token: tokens.id_token.as_deref(),
     scope: tokens.scope.as_deref(),
-    access_expires,
   };
 
   let user_id = if let Some(link_user_id) = oauth_state.link_user_id {
@@ -602,6 +584,11 @@ pub async fn google_callback(cx: &Cx) -> Result<()> {
 }
 
 /// Grouped Google account upsert data to keep fn signatures small.
+///
+/// Google's access/refresh/id tokens are deliberately absent: the app only
+/// needs the identity (`sub`) and never calls Google on the user's behalf
+/// after sign-in, so the `accounts` token columns stay `NULL` for Google
+/// rows (migration `0026` cleared previously stored values).
 #[derive(Debug, Clone, Copy)]
 pub struct GoogleAccountUpsert<'a> {
   pub google_sub: &'a str,
@@ -610,11 +597,7 @@ pub struct GoogleAccountUpsert<'a> {
   pub email: &'a str,
   pub image: Option<&'a str>,
   pub email_verified: bool,
-  pub access_token: &'a str,
-  pub refresh_token: Option<&'a str>,
-  pub id_token: Option<&'a str>,
   pub scope: Option<&'a str>,
-  pub access_expires: Option<OffsetDateTime>,
 }
 
 /// Link a Google account to an already-authenticated user (link-social flow).
@@ -626,11 +609,7 @@ pub async fn link_google_account(
   let image = account.image;
   let email_verified = account.email_verified;
   let google_sub = account.google_sub;
-  let access_token = account.access_token;
-  let refresh_token = account.refresh_token;
-  let id_token = account.id_token;
   let scope = account.scope;
-  let access_expires = account.access_expires;
   let user_exists =
     sqlx::query!("SELECT id FROM users WHERE id = $1", link_user_id)
       .fetch_optional(pool)
@@ -662,21 +641,17 @@ pub async fn link_google_account(
       r#"
             UPDATE accounts
             SET
-                access_token = $3,
-                refresh_token = COALESCE($4, refresh_token),
-                id_token = COALESCE($5, id_token),
-                scope = COALESCE($6, scope),
-                access_token_expires_at = $7,
+                access_token = NULL,
+                refresh_token = NULL,
+                id_token = NULL,
+                access_token_expires_at = NULL,
+                scope = COALESCE($3, scope),
                 updated_at = now()
             WHERE provider_id = $1 AND account_id = $2
             "#,
       GOOGLE_PROVIDER_ID,
       google_sub,
-      access_token,
-      refresh_token,
-      id_token,
       scope,
-      access_expires,
     )
     .execute(pool)
     .await?;
@@ -685,21 +660,16 @@ pub async fn link_google_account(
     sqlx::query!(
       r#"
             INSERT INTO accounts (
-                id, account_id, provider_id, user_id,
-                access_token, refresh_token, id_token, scope,
-                access_token_expires_at, created_at, updated_at
+                id, account_id, provider_id, user_id, scope,
+                created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())
+            VALUES ($1, $2, $3, $4, $5, now(), now())
             "#,
       account_id,
       google_sub,
       GOOGLE_PROVIDER_ID,
       link_user_id,
-      access_token,
-      refresh_token,
-      id_token,
       scope,
-      access_expires,
     )
     .execute(pool)
     .await?;
@@ -741,11 +711,7 @@ pub async fn find_or_create_google_user(
   let google_sub = account.google_sub;
   let image = account.image;
   let email_verified = account.email_verified;
-  let access_token = account.access_token;
-  let refresh_token = account.refresh_token;
-  let id_token = account.id_token;
   let scope = account.scope;
-  let access_expires = account.access_expires;
   // Existing Google account linkage.
   if let Some(existing) = sqlx::query!(
     r#"
@@ -763,21 +729,17 @@ pub async fn find_or_create_google_user(
       r#"
             UPDATE accounts
             SET
-                access_token = $3,
-                refresh_token = COALESCE($4, refresh_token),
-                id_token = COALESCE($5, id_token),
-                scope = COALESCE($6, scope),
-                access_token_expires_at = $7,
+                access_token = NULL,
+                refresh_token = NULL,
+                id_token = NULL,
+                access_token_expires_at = NULL,
+                scope = COALESCE($3, scope),
                 updated_at = now()
             WHERE provider_id = $1 AND account_id = $2
             "#,
       GOOGLE_PROVIDER_ID,
       google_sub,
-      access_token,
-      refresh_token,
-      id_token,
       scope,
-      access_expires,
     )
     .execute(pool)
     .await?;
@@ -868,21 +830,16 @@ pub async fn find_or_create_google_user(
   sqlx::query!(
     r#"
         INSERT INTO accounts (
-            id, account_id, provider_id, user_id,
-            access_token, refresh_token, id_token, scope,
-            access_token_expires_at, created_at, updated_at
+            id, account_id, provider_id, user_id, scope,
+            created_at, updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())
+        VALUES ($1, $2, $3, $4, $5, now(), now())
         "#,
     account_id,
     google_sub,
     GOOGLE_PROVIDER_ID,
     user_id,
-    access_token,
-    refresh_token,
-    id_token,
     scope,
-    access_expires,
   )
   .execute(pool)
   .await?;
@@ -941,21 +898,16 @@ async fn take_over_unverified_user(
   sqlx::query!(
     r#"
         INSERT INTO accounts (
-            id, account_id, provider_id, user_id,
-            access_token, refresh_token, id_token, scope,
-            access_token_expires_at, created_at, updated_at
+            id, account_id, provider_id, user_id, scope,
+            created_at, updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())
+        VALUES ($1, $2, $3, $4, $5, now(), now())
         "#,
     Uuid::now_v7(),
     account.google_sub,
     GOOGLE_PROVIDER_ID,
     user_id,
-    account.access_token,
-    account.refresh_token,
-    account.id_token,
     account.scope,
-    account.access_expires,
   )
   .execute(&mut *tx)
   .await?;
@@ -1038,24 +990,19 @@ mod tests {
   }
 
   #[test]
-  fn authorize_url_carries_pkce_and_nonce() {
+  fn authorize_url_carries_pkce_without_nonce() {
     let config = GoogleOAuthConfig {
       client_id: "fake-client.apps.googleusercontent.com".into(),
       client_secret: "GOCSPX-fake".into(),
       app_origin: "http://localhost:4200".into(),
     };
-    let url = google_authorize_url(
-      &config,
-      "state-1",
-      Some("challenge-1"),
-      Some("n-1"),
-    );
+    let url = google_authorize_url(&config, "state-1", Some("challenge-1"));
     assert!(url.contains("state=state-1"));
     assert!(url.contains("code_challenge=challenge-1"));
     assert!(url.contains("code_challenge_method=S256"));
-    assert!(url.contains("nonce=n-1"));
+    assert!(!url.contains("nonce="));
 
-    let plain = google_authorize_url(&config, "state-1", None, None);
+    let plain = google_authorize_url(&config, "state-1", None);
     assert!(!plain.contains("code_challenge"));
     assert!(!plain.contains("nonce="));
   }

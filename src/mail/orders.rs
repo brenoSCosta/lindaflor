@@ -16,6 +16,9 @@ struct OrderRow {
   name: Option<String>,
   pix: Option<String>,
   pay_until: Option<String>,
+  payment_provider: String,
+  carrier: String,
+  tracking_code: Option<String>,
 }
 
 struct Recipient {
@@ -35,7 +38,8 @@ async fn load(
               AS name,
             o.payment_meta->>'pix_copy_paste' AS pix,
             to_char(o.reservation_expires_at AT TIME ZONE 'America/Sao_Paulo',
-                    'DD/MM/YYYY HH24:MI') AS pay_until
+                    'DD/MM/YYYY HH24:MI') AS pay_until,
+            o.payment_provider, o.carrier, o.tracking_code
      FROM orders o
      LEFT JOIN users u ON u.id = o.user_id
      WHERE o.id = $1",
@@ -50,6 +54,9 @@ async fn load(
     name,
     pix,
     pay_until,
+    payment_provider,
+    carrier,
+    tracking_code,
   }) = row
   else {
     return Ok(None);
@@ -62,6 +69,14 @@ async fn load(
     "/pedido/{order_id}?t={}",
     super::encode_query_value(&access_token.to_string())
   ));
+  let mercado_pago =
+    payment_provider == crate::payments::ProviderKind::MercadoPago.as_str();
+  let tracking_code = tracking_code
+    .map(|code| code.trim().to_string())
+    .filter(|code| !code.is_empty());
+  let tracking_url = tracking_code
+    .as_deref()
+    .and_then(|code| crate::app::store::order::tracking_url(&carrier, code));
   Ok(Some(Recipient {
     to,
     order: OrderMail {
@@ -69,8 +84,14 @@ async fn load(
       name: name.unwrap_or_default(),
       total_cents,
       url,
-      pix_copy_paste: pix.filter(|p| !p.is_empty()),
+      // Mercado Pago issues its own (dynamic) QR on the order page; a
+      // static BR Code must never reach those customers.
+      pix_copy_paste: pix.filter(|p| !p.is_empty() && !mercado_pago),
       pay_until,
+      mercado_pago,
+      carrier: carrier.trim().to_string(),
+      tracking_code,
+      tracking_url,
     },
   }))
 }
@@ -131,4 +152,55 @@ pub async fn enqueue_order_transition(
     _ => templates::order_cancelled(&recipient.order, false),
   };
   enqueue(&mut **tx, kind, &recipient.to, &email, None).await
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  async fn seed(pool: &sqlx::PgPool, provider: &str) -> Uuid {
+    let order_id = Uuid::now_v7();
+    sqlx::query(
+      "INSERT INTO orders (id, guest_email, status, access_token, total_cents,
+                           payment_provider, payment_meta)
+       VALUES ($1, 'mp@example.com', 'pending_payment', $2, 5000, $3,
+               jsonb_build_object('pix_copy_paste', '000201STATICPIXCODE'))",
+    )
+    .bind(order_id)
+    .bind(Uuid::new_v4())
+    .bind(provider)
+    .execute(pool)
+    .await
+    .unwrap();
+    order_id
+  }
+
+  async fn created_body(pool: &sqlx::PgPool, order_id: Uuid) -> String {
+    let mut tx = pool.begin().await.unwrap();
+    enqueue_order_created(&mut tx, order_id).await.unwrap();
+    let body: String = sqlx::query_scalar(
+      "SELECT text_body FROM email_outbox WHERE dedupe_key = $1",
+    )
+    .bind(format!("order:{order_id}:created"))
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    tx.rollback().await.unwrap();
+    body
+  }
+
+  #[tokio::test]
+  async fn order_created_mail_hides_static_pix_for_mercado_pago() {
+    let pool = crate::test_support::fresh_pool().await;
+
+    let mp = seed(&pool, "mercadopago").await;
+    let body = created_body(&pool, mp).await;
+    assert!(!body.contains("STATICPIXCODE"), "{body}");
+    assert!(body.contains("Mercado Pago"), "{body}");
+    assert!(body.contains(&format!("/pedido/{mp}?t=")), "{body}");
+
+    let pix = seed(&pool, "static_pix").await;
+    let body = created_body(&pool, pix).await;
+    assert!(body.contains("000201STATICPIXCODE"), "{body}");
+  }
 }

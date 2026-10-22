@@ -19,18 +19,21 @@ use topcoat::router::{
 };
 use tower_http::set_header::{SetResponseHeader, SetResponseHeaderLayer};
 
-/// Enforcing Content-Security-Policy. Allows the Topcoat runtime,
-/// Tailwind stylesheet, toasts (inline scripts/styles) plus the
-/// dev-docs CDN (Scalar/Swagger, dev-only routes).
+/// Enforcing (production) Content-Security-Policy. Allows the Topcoat
+/// runtime, Tailwind stylesheet and toasts (inline scripts/styles). Every
+/// app script is a self-hosted Topcoat asset (`/_topcoat/assets/...`), so
+/// no third-party script/style origin is listed: the CDN-backed API docs
+/// (Scalar/Swagger) are dev-only routes and only the dev CSP allows them.
 ///
-/// `'unsafe-eval'` is required: Topcoat compiles live expressions with
-/// `new Function` in the browser. Without it, field bindings never hydrate.
+/// `'unsafe-eval'` is required: Topcoat 0.9's browser runtime compiles live
+/// expressions with `new Function` (`runtime/browser/src/expression/
+/// compile.ts`). Without it, field bindings never hydrate.
 ///
 /// `img-src` includes `http:` so local object storage (RustFS at
 /// `http://127.0.0.1:4203`) can serve avatars and product images. Google
 /// profile photos are `https:`. On an HTTPS origin the browser still
 /// blocks mixed-content `http:` images, so production S3 must be HTTPS.
-pub const CONTENT_SECURITY_POLICY_VALUE: &str = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data: blob: http: https:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+pub const CONTENT_SECURITY_POLICY_VALUE: &str = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http: https:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
 
 /// Dev-only CSP. `topcoat::dev::script()` (see `src/app.rs` root layout)
 /// injects `<script src="{TOPCOAT_DEV_URL}/dev.js">` when running under
@@ -223,10 +226,14 @@ mod tests {
       content_security_policy_value_for_env("production")
         .to_str()
         .unwrap()
-        .contains(
-          "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com"
-        )
+        .contains("script-src 'self' 'unsafe-inline' 'unsafe-eval';")
     );
+    for cdn in ["unpkg.com", "jsdelivr.net"] {
+      assert!(
+        !CONTENT_SECURITY_POLICY_VALUE.contains(cdn),
+        "prod CSP must not allow third-party CDN {cdn}"
+      );
+    }
     assert!(
       content_security_policy_value_for_env("production")
         .to_str()

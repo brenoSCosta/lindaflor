@@ -216,7 +216,9 @@ async fn insert_cart(
   user_id: Option<Uuid>,
 ) -> Result<CartRow, sqlx::Error> {
   let id = Uuid::now_v7();
-  let token = Uuid::now_v7();
+  // The token is a bearer secret (cookie): fully random v4, not the
+  // time-ordered v7 used for row ids.
+  let token = Uuid::new_v4();
   sqlx::query("INSERT INTO carts (id, token, user_id) VALUES ($1, $2, $3)")
     .bind(id)
     .bind(token)
@@ -1508,6 +1510,15 @@ async fn clamp_cart_to_stock(
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[tokio::test]
+  async fn cart_token_is_random_v4() {
+    let pool = crate::test_support::fresh_pool().await;
+    let cart = insert_cart(&pool, None).await.unwrap();
+    // The token is a bearer secret: fully random, not time-ordered v7.
+    assert_eq!(cart.token.get_version_num(), 4);
+    assert_ne!(cart.token, cart.id);
+  }
 
   async fn seed_variant(
     pool: &PgPool,

@@ -250,7 +250,6 @@ pub async fn sign_in_social(
     crate::auth::google::safe_callback_path(body.callback_url.as_deref());
   let state = random_token();
   let code_verifier = random_token();
-  let nonce = random_token();
   let code_challenge =
     crate::auth::routes::oauth::pkce_s256_challenge(&code_verifier);
   let pool = app_context::<PgPool>(cx);
@@ -266,7 +265,6 @@ pub async fn sign_in_social(
         &crate::auth::routes::oauth::issue_oauth_browser_binding(cx),
       ),
       code_verifier: Some(&code_verifier),
-      nonce: Some(&nonce),
     },
   )
   .await?;
@@ -275,7 +273,6 @@ pub async fn sign_in_social(
     &config,
     &state,
     Some(&code_challenge),
-    Some(&nonce),
   );
   Ok((
     StatusCode::OK,

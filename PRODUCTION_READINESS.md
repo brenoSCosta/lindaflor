@@ -9,6 +9,18 @@
 > How to use this file: work top-down. Each item has location, impact, and concrete fix. Checkboxes are intentional — check them off as you land fixes.
 >
 > Spot-checked against the tree on 2026-10-07 (second pass). Order status in DB is `pending_payment`, not `pending`.
+>
+> **Status 2026-10-22 (`migration` branch):** checkboxes below were re-verified against the code. Landed since the first pass:
+> - Mercado Pago behind `PaymentProvider` (`src/payments/`, migration `0023`).
+> - Transactional mail outbox (`0020`).
+> - Docker/CI/backups.
+> - Security review fixes A1–A6, B1, C1–C4 and D1–D2.
+> - Tracking, saved addresses and guest-link expiry (`0024`).
+> - `timestamptz` (`0025`).
+> - The checkout service split + `thiserror` (`1003a65`).
+> - `p2-polish` (`0026`): Google tokens no longer stored, prod CSP without CDNs, escaped `ILIKE`, per-recipient auth-mail cap, tracking in the shipped email.
+>
+> Still open: checkout create-order rate limit/CAPTCHA, PITR/S3 versioning/restore drill, S3/Google retry, Grafana stack and the remaining §5 items. See also `CODEBASE-REVIEW-CC.md` → Status.
 
 ---
 
@@ -120,7 +132,8 @@ Do **not** drop Mercado Pago types into `src/app/checkout.rs` (already ~1.7k lin
 
 **Strategy + Adapter — `PaymentProvider`**
 
-- [ ] Add `src/payments/` with a public enum (or thin trait + enum), registered on the router like storage (`app_context`):
+- [x] Add `src/payments/` with a public enum (or thin trait + enum), registered on the router like storage (`app_context`):
+  - *Landed as `PaymentProvider::{StaticPix, MercadoPago}`. "Unavailable" is the open circuit breaker or an unconfigured static PIX (`payment_available` in checkout). Production refuses static PIX unless `ALLOW_STATIC_PIX=1`.*
 
 ```rust
 pub enum PaymentProvider {
@@ -138,7 +151,7 @@ impl PaymentProvider {
 
   - Boot in `main.rs` the same way as `ObjectStore`: MP client if `MP_ACCESS_TOKEN` set (shared `reqwest::Client`, timeout 10s — see §2.1 / retry below); else `ManualPix` if `allow_manual_pix`; else `Unavailable`. Tests use a fake/in-memory backend (mirror `ObjectStore::memory()`).
   - Checkout, webhook, admin “Refresh from MP / Refund”, and the expiry worker talk **only** to `PaymentProvider` + `order.apply`. Pages must not import `mercadopago` HTTP types. Admin “mark paid” and local EMV stay `ManualPix`.
-- [ ] Extract an application service from the checkout page (same split auth already has: `routes/` vs `service.rs`):
+- [x] Extract an application service from the checkout page (same split auth already has: `routes/` vs `service.rs`). *Landed as `src/app/store/checkout_service.rs` (`1003a65`).*
   - `src/app/store/checkout.rs` (or `src/app/checkout/service.rs`): `create_order_in_tx`, quote, persist, reserve stock, then `provider.create_charge`.
   - `src/app/checkout.rs` stays GET/POST + view. `#[page]` must not own PIX/MP payloads.
 
@@ -149,46 +162,55 @@ Today allowed moves live in **two** places and will be three with MP:
 - Expiry: `src/app/store/inventory.rs:321-346` — `pending_payment` past `reservation_expires_at` → `cancelled` + `release_reservation`.
 - Next: webhook + refund.
 
-- [ ] One function, e.g. `order.apply(event)` inside `SELECT … FOR UPDATE`. Webhook, admin mark-paid, refund, and expiry worker all call it. Illegal transitions are `match` exhaustiveness / a typed error, not a scattered `UPDATE`.
+- [x] One function, e.g. `order.apply(event)` inside `SELECT … FOR UPDATE`. Webhook, admin mark-paid, refund, and expiry worker all call it. Illegal transitions are `match` exhaustiveness / a typed error, not a scattered `UPDATE`.
   - Allowed: `pending_payment → paid | cancelled`; `paid → shipped → delivered`; `paid → refunded/cancelled` (restock + coupon restore, §4.3).
   - Map PSP events **in the adapter** (`approved → Paid`, `rejected|cancelled|expired → Cancelled`); never store raw MP strings as the source of truth for stock.
 
 **Observer — side effects of `apply`, not a bus**
 
-- [ ] `Paid` → `convert_reservation` (+ `paid_at`). `Cancelled` / refund → `release_reservation` + restore coupon redemption (§4.3). Keep these **in the same tx** as the status write.
-- [ ] If `GET /v1/payments/:id` + apply is slow, verify-then-queue (`pg_notify` or Valkey stream) and still `apply` once (idempotent on `mp_payment_id`). Do **not** add a crate-wide event bus this pass.
-- [ ] **Later (P2):** `Paid` / verify / reset mail as a listener (or a second Strategy: `Mail { Log, Smtp }`). Until then, `tracing::info!` stubs stay.
+- [x] `Paid` → `convert_reservation` (+ `paid_at`). `Cancelled` / refund → `release_reservation` + restore coupon redemption (§4.3). Keep these **in the same tx** as the status write.
+- [x] *(Not needed so far: the webhook fetches and applies inline, idempotent on `mp_payment_id`.)* If `GET /v1/payments/:id` + apply is slow, verify-then-queue (`pg_notify` or Valkey stream) and still `apply` once (idempotent on `mp_payment_id`). Do **not** add a crate-wide event bus this pass.
+- [x] **Later (P2):** `Paid` / verify / reset mail as a listener (or a second Strategy: `Mail { Log, Smtp }`). *Landed: `Mailer::{Log, Smtp}` + Postgres outbox enqueued inside `order::apply` / checkout / auth token issuance (`src/mail/`).*
 
 **Retry + circuit breaker — outbound HTTP only (P0 on MP)**
 
 Today: Google `Client::new()` per `exchange_code` / `fetch_userinfo` (`google.rs:123,151`), no timeout; S3 one boot client, default reqwest timeouts (`storage.rs:22`); Valkey connect once, no PING (`valkey.rs:6`, §3.3).
 
-- [ ] Shared `reqwest::Client` (timeout 10s, pool) for MP **and** Google (stop per-request `Client::new()`). S3 already one client at boot — add explicit timeout.
-- [ ] MP `create_charge` / `fetch_status` / `refund`: retry **5xx + timeout** only, exponential backoff + jitter, cap 3 attempts. Send Mercado Pago `X-Idempotency-Key` (order id) on create so a retry cannot double-charge.
-- [ ] Circuit breaker around the MP client (open after consecutive failures, fail checkout fast with `psp_unavailable`, half-open probe). Same optional wrapper later for S3 put/delete (5xx only, never 404).
-- [ ] Do **not** retry inbound `POST /api/webhooks/mercadopago` (MP retries you). Idempotent `apply` on `mp_payment_id` is the defense. Do not wrap Postgres, Valkey fail-closed maps, or `governor`.
+- [x] Shared `reqwest::Client` (timeout 10s, pool) for MP **and** Google (stop per-request `Client::new()`). S3 already one client at boot — add explicit timeout.
+- [x] MP `create_charge` / `fetch_status` / `refund`: retry **5xx + timeout** only, exponential backoff + jitter, cap 3 attempts. Send Mercado Pago `X-Idempotency-Key` (order id) on create so a retry cannot double-charge.
+- [x] Circuit breaker around the MP client (open after consecutive failures, fail checkout fast with `psp_unavailable`, half-open probe). Same optional wrapper later for S3 put/delete (5xx only, never 404). *(The S3 wrapper is still open; see §5.)*
+- [x] Do **not** retry inbound `POST /api/webhooks/mercadopago` (MP retries you). Idempotent `apply` on `mp_payment_id` is the defense. Do not wrap Postgres, Valkey fail-closed maps, or `governor`.
 
 ### 2.1 Target design (Mercado Pago)
-- [ ] Create MP integration **behind** `PaymentProvider` (§2.0), e.g. `src/payments/mercadopago.rs` (not called from the page):
+- [x] Create MP integration **behind** `PaymentProvider` (§2.0), e.g. `src/payments/mercadopago.rs` (not called from the page):
   - Shared `reqwest::Client` with `timeout(10s)` + pool + retry/CB from §2.0. Do not `Client::new()` per request (`src/auth/google.rs:123,151` does this today). `src/storage.rs:22` builds one client per `ObjectStore` at boot — keep that; add timeout.
   - `POST https://api.mercadopago.com/v1/payments` with `MP_ACCESS_TOKEN` (server-only env, never exposed to template). Body: `transaction_amount = total_cents/100`, `payment_method_id = "pix"`, `payer.email`, `external_reference = order.id`, `notification_url = https://<APP_ORIGIN>/api/webhooks/mercadopago`, `expiration_date` = order expiry.
   - Persist on `orders`: add columns `mp_payment_id BIGINT NULL, mp_status TEXT NULL, paid_at TIMESTAMPTZ NULL, payment_method TEXT DEFAULT 'manual_pix'`. Migration `0007_mercadopago.sql`.
   - Checkout: create `orders(status='pending_payment')` + reservations first, then create MP payment; store `mp_payment_id`; render MP `point_of_interaction.transaction_data.{qr_code,qr_code_base64,ticket_url}` instead of local EMV. Keep local EMV only behind `allow_manual_pix` flag.
   - Statuses: map MP `approved → paid` (convert reservations, `paid_at=now()`), `rejected/cancelled/expired → cancelled` (release reservations + restore coupon — see §4.3). Apply **only** via `order.apply` (§2.0) in one tx with `SELECT ... FOR UPDATE`; webhook handler idempotent on `mp_payment_id`.
-- [ ] Webhook `POST /api/webhooks/mercadopago`:
+- [x] Webhook `POST /api/webhooks/mercadopago`:
   - Validate `x-signature` (`ts=...,v1=...`) per [MP webhook docs](https://www.mercadopago.com.br/developers/en/docs/your-integrations/notifications/webhooks): parse `ts`/`v1`, build manifest `id:{data.id};request-id:{x-request-id};ts:{ts};` (`data.id` from **query** params, lowercase if alphanumeric; omit missing parts), `v1 == hex(HMAC_SHA256(secret, manifest))`. Reject missing/invalid with 401. Optionally also allowlist `notification_url` secret query param (`?secret=<WEBHOOK_SECRET>`).
   - On `type=payment` + `action=payment.updated`, fetch `GET /v1/payments/:id` (never trust body alone), then `order.apply` (§2.0). Return 200 fast; verify-then-queue if slow (Valkey stream or `pg_notify` + worker).
   - Log `mp_payment_id + order_id + new_status` only; never log full MP body (contains payer PII).
-- [ ] Admin UI:
+- [x] Admin UI. *Notes on what landed:*
+  - *The settings POST exists. MP credentials are env/`*_FILE` only (`MP_ACCESS_TOKEN`, `MP_WEBHOOK_SECRET`), not admin fields.*
+  - *MP orders show MP status + "Sincronizar" + "Estornar no Mercado Pago". The manual "Marcar como pago" / "Recebido após expirar" / local "Estornar" are hidden for MP orders and refused server-side (`p2-polish`).*
+  - *Every admin transition is audited.*
+  - *Revenue counts paid/shipped/delivered only.*
   - Implement `#[route(POST "/admin/configuracoes")]` handler: validate + save `pix_key/type, merchant_name/city, whatsapp_*` AND new `mp_access_token_set (bool, write-only), mp_public_key, mp_webhook_secret_set, allow_manual_pix`. Pre-fill inputs from `_settings` (currently unpopulated). Never render secrets back.
   - Orders admin: replace bare “mark paid” with `MP status + Refresh from MP + Refund` (`POST /v1/payments/:id/refunds`). Keep manual override behind `require_admin` + audit log (`admin_audit(user_id, order_id, action)`).
   - Dashboard revenue (`src/app/admin.rs:52-57`): sum only `status='paid'` (currently `NOT IN ('cancelled')` inflates with unpaid `pending_payment`).
-- [ ] Abuse / correctness gates:
+- [~] Abuse / correctness gates. *Landed:*
+  - *The checkout gate.*
+  - *The background expiry sweeper (MP-aware).*
+  - *24h vs 48h copy aligned to the 48h hold (`p2-polish`).*
+
+  *Still open: rate limit / CAPTCHA on order creation, and documenting the shipping-on-discount rule in `termos`.*
   - Gate checkout when neither MP nor manual PIX configured: `400 pix_not_configured`.
   - Rate-limit + CAPTCHA on `create_order`; background worker (tokio-cron or `pg_cron`) to expire `pending_payment` past `reservation_expires_at` and `release_expired_reservations` — do not rely on per-request sweeper.
   - Align copy: decide 24h vs 48h, update both code and template.
   - Decide shipping-on-discount rule explicitly (currently free-shipping threshold `29_900` on pre-discount subtotal — `checkout.rs:782,190`): document in `termos` + keep server-side recompute (already correct — `create_order_in_tx` re-quotes via `quote_cart_for_checkout`, `checkout.rs:770-805`).
-- [ ] Tests (embedded PG + MP mock server):
+- [x] Tests (embedded PG + MP mock server): *(`src/payments/tests.rs`, `store/order.rs::apply_rejects_illegal_transition`, `create_order_fails_when_pix_not_configured`)*
   - `webhook_approved_marks_paid_once` (double-delivery idempotent), `webhook_bad_signature_rejected`, `expired_mp_releases_stock_and_coupon`, `empty_pix_key_blocks_checkout`, `manual_paid_requires_admin_audit`.
   - `apply_rejects_illegal_transition` (e.g. `delivered → paid`); `create_charge_retries_5xx_once_with_same_idempotency_key`; `circuit_open_returns_psp_unavailable` (no extra MP HTTP).
 
@@ -230,7 +252,7 @@ No request correlation, no structured access log, no scrapeable metrics. `tracin
 ### 3.4 CSRF / CORS / headers — `src/app.rs`, `src/security_headers.rs`, `Cargo.toml`
 Landed: prod boot requires valid `APP_ORIGIN`; `OriginPolicy` always Verify (trust that origin when set); same-origin only (no `CorsLayer` / no `Access-Control-*`); enforcing CSP + nosniff + Referrer-Policy via `tower-http` `SetResponseHeader` + native `response_headers` fallback; HSTS prod-only. OpenAPI Scalar/Swagger stay dev-only CDN (no SRI/self-host this pass).
 - [x] Require `APP_ORIGIN` in prod; always install `OriginPolicy`; document same-origin CORS; security headers + enforcing CSP; HSTS outside dev/test.
-- [ ] Later (explicitly deferred): SRI or self-host Scalar/Swagger; assert `openapi_docs_enabled()==false` in prod tests.
+- [ ] Later (explicitly deferred): SRI or self-host Scalar/Swagger; assert `openapi_docs_enabled()==false` in prod tests. *(Partial, `p2-polish`: the prod CSP no longer allows `unpkg`/`jsdelivr`. The CDN docs are dev-only and covered by the dev CSP. `'unsafe-eval'` is still required by the Topcoat runtime.)*
 
 ### 3.5 Migrations on every boot, tiny pool — `src/db.rs:5-8`
 `sqlx::migrate!().run()` on boot: OK single-instance, unsafe multi-replica race; blocks serve on DB down. `max_connections(5)` hardcoded, no timeouts (`test_support.rs:34` uses 16 — divergence).
@@ -299,14 +321,14 @@ Enum is `pending_payment | paid | processing | shipped | delivered | cancelled`.
   - Landed (P2-6): `actor != target` self-guard + `ensure_not_admin_target` on set-role/ban/unban/remove + `revoke_admin_session` requires `user_id` ownership check; all privileged mutations append to `audit_events` (`migrations/0010_audit_events.sql`: id uuid v7, aggregate_type/id, entity_type/id, actor_user_id FK users SET NULL, actor_name, metadata jsonb, occurred_at, created_at).
 - [x] **Cookies:** pending-2FA cookie no `Secure`/`__Host` (`service.rs:134-149`), clear drops attributes (removal may fail); toast/cart `Secure` conditional. Verify prod `Secure=true`; test prod cookie path (tests force `APP_ENV=development` — `tests/common/mod.rs:35,91`).
   - Landed (P2-7): session/pending-2FA/toast/cart cookies hardened prod-only (`__Host-` + `Secure`, clear mirrors attributes); dedicated prod-only `tests/prod_cookies.rs` binary (`pool_and_prod_router`, `APP_ENV=production`) asserts flags on set + clear. Never mixed with dev-router tests in one binary (env is process-global).
-- [ ] **Guest order token:** `?t=<Uuid>` long-lived, no expiry, URL-logged (`pedido/id.rs:60-73`). Add `expires_at` (e.g. 90d) + rotate on email-link re-send; keep collapsing missing vs unauthorized to the same message.
+- [x] *(Landed: `access_token_expires_at`, 90 days, extended on ship/deliver; expired ≡ not found. No rotate-on-resend.)* **Guest order token:** `?t=<Uuid>` long-lived, no expiry, URL-logged (`pedido/id.rs:60-73`). Add `expires_at` (e.g. 90d) + rotate on email-link re-send; keep collapsing missing vs unauthorized to the same message.
 - [ ] **Images:** `collect_multipart` buffers `8×2MB=16MB` in memory before validation (`admin/produtos.rs:297-321`); `remaining` trusts client `delete_image_id[]` length (`produtos/id.rs:392-407`); seed uses external `picsum.photos` URLs passing `is_storage_key` (`seeders/commerce.rs:299-308`, `utils.rs:50-52`). Add total-request cap + streaming size-first check; count after ownership check; allowlist external URLs or self-host seeds.
 - [ ] **Storefront N-serial:** sequential `await resolve_storage_url` in loops (`checkout.rs:100-104`, `carrinho.rs:105-109`) — harmless today (pure presign, `storage.rs:247-283`) but N-serial if presign ever does I/O. `join_all` when adding I/O.
-- [ ] **Admin search:** `ILIKE '%q%'` leading-wildcard unindexed (`admin/pedidos.rs:82`, `admin/produtos.rs:101`) — fine now; add `pg_trgm` if catalog >10k.
-- [ ] **Ops nits:** `HOST` defaults `127.0.0.1` (`main.rs:49`, undocumented — prod needs `0.0.0.0`); invalid `PORT` exits 1 no context (`config.rs:23`); external `://` URLs pass through `resolve_storage_url` unvalidated (`utils.rs:63` — allowlist if user-supplied); `open-redirect` defense good (`safe_callback_path`, `google.rs:154`, `app.rs:206`) but `redirect_to/callback_url` params only logged/ignored — remove dead params or wire them.
+- [ ] **Admin search:** `ILIKE '%q%'` leading-wildcard unindexed (`admin/pedidos.rs:82`, `admin/produtos.rs:101`) — fine now; add `pg_trgm` if catalog >10k. *(Wildcards in user input are now escaped everywhere via `db::escape_like` + `ESCAPE '\'`.)*
+- [ ] *(`HOST` is now documented in the README.)* **Ops nits:** `HOST` defaults `127.0.0.1` (`main.rs:49`, undocumented — prod needs `0.0.0.0`); invalid `PORT` exits 1 no context (`config.rs:23`); external `://` URLs pass through `resolve_storage_url` unvalidated (`utils.rs:63` — allowlist if user-supplied); `open-redirect` defense good (`safe_callback_path`, `google.rs:154`, `app.rs:206`) but `redirect_to/callback_url` params only logged/ignored — remove dead params or wire them.
 - [ ] **Grafana stack:** after §3.7 primitives, optional scrape + Loki ship (Prometheus / Loki / Alloy / Grafana compose). Not required to launch.
-- [ ] **Email verification not enforced:** sign-up auto-sign-in with `email_verified=false`, sign-in never gates (`service.rs:160-328`, `sign_up.rs:89-147`). Decide: gate checkout / account-actions on verified, or accept unverified (document + throttle sends).
-- [ ] **Mail Strategy / Observer:** replace `tracing::info!("mail not wired yet")` with `Mail { Log, Smtp }` (or SES) as a listener of `order.apply(Paid)` + reset/verify. Not a `Notifier` enum until send is real. WhatsApp stays a `wa.me` link unless we add a server send.
+- [ ] *(Sends are now throttled: at most 5 verify/reset/change-email mails per recipient per hour, with extras dropped silently. The gating decision is still open.)* **Email verification not enforced:** sign-up auto-sign-in with `email_verified=false`, sign-in never gates (`service.rs:160-328`, `sign_up.rs:89-147`). Decide: gate checkout / account-actions on verified, or accept unverified (document + throttle sends).
+- [x] *(Landed: `src/mail/` outbox + `Mailer::{Log, Smtp}`.)* **Mail Strategy / Observer:** replace `tracing::info!("mail not wired yet")` with `Mail { Log, Smtp }` (or SES) as a listener of `order.apply(Paid)` + reset/verify. Not a `Notifier` enum until send is real. WhatsApp stays a `wa.me` link unless we add a server send.
 - [ ] **S3 / Google retry:** after MP CB lands, wrap S3 put/delete 5xx and Google token/userinfo with one retry + fail-closed breaker (user-facing OAuth can fail fast).
 
 ---

@@ -109,6 +109,26 @@ pub enum DbError {
   PendingMigrations { versions: Vec<i64> },
 }
 
+/// Escape `%`, `_` and `\` so user input matches literally inside a
+/// `LIKE`/`ILIKE` pattern. Every caller pairs it with an explicit
+/// `ESCAPE '\'` in SQL so the escape character never depends on server
+/// defaults.
+pub fn escape_like(input: &str) -> String {
+  let mut out = String::with_capacity(input.len());
+  for c in input.chars() {
+    if matches!(c, '%' | '_' | '\\') {
+      out.push('\\');
+    }
+    out.push(c);
+  }
+  out
+}
+
+/// `%<escaped>%` substring pattern for `ILIKE $n ESCAPE '\'`.
+pub fn like_contains(input: &str) -> String {
+  format!("%{}%", escape_like(input))
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
@@ -215,5 +235,13 @@ mod tests {
     let rest = pending_up_versions(&migrator, &applied);
     assert!(!rest.contains(&first));
     assert_eq!(rest.len(), all.len() - 1);
+  }
+
+  #[test]
+  fn like_helpers_escape_wildcards() {
+    assert_eq!(escape_like("plain"), "plain");
+    assert_eq!(escape_like("50%_off\\x"), "50\\%\\_off\\\\x");
+    assert_eq!(like_contains("a_b"), "%a\\_b%");
+    assert_eq!(like_contains(""), "%%");
   }
 }

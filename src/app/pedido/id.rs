@@ -544,7 +544,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                             </p>
                         } else {
                             <p class="text-sm text-muted-foreground">
-                                "A reserva de estoque é válida por 24 horas após a criação do pedido."
+                                "A reserva de estoque é válida por 48 horas após a criação do pedido."
                             </p>
                         }
                         if let Some(src) = mp_qr_image {

@@ -220,7 +220,7 @@ fn append_product_filters(
   }
   if search {
     sql.push_str(&format!(
-            " AND (p.name ILIKE ${} OR p.description ILIKE ${} OR EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = p.id AND pv.sku ILIKE ${}))",
+            " AND (p.name ILIKE ${} ESCAPE '\\' OR p.description ILIKE ${} ESCAPE '\\' OR EXISTS (SELECT 1 FROM product_variants pv WHERE pv.product_id = p.id AND pv.sku ILIKE ${} ESCAPE '\\'))",
             param_index,
             *param_index + 1,
             *param_index + 2,
@@ -432,7 +432,7 @@ pub async fn list_products_with_filters(
     param_index + 1
   ));
 
-  let search_term = search.map(|s| format!("%{}%", s.trim()));
+  let search_term = search.map(|s| crate::db::like_contains(s.trim()));
   let mut query = sqlx::query_as::<_, ProductSummaryRow>(&sql);
   query = bind_product_filters(query, category, search_term);
 
@@ -482,7 +482,7 @@ pub async fn count_products_with_filters(
     query = query.bind(c);
   }
   if let Some(s) = search {
-    let term = format!("%{}%", s.trim());
+    let term = crate::db::like_contains(s.trim());
     query = query.bind(term.clone()).bind(term.clone()).bind(term);
   }
 
@@ -532,7 +532,7 @@ pub async fn list_products(
     param_index + 1
   ));
 
-  let search_term = search.map(|s| format!("%{}%", s.trim()));
+  let search_term = search.map(|s| crate::db::like_contains(s.trim()));
   let mut query = sqlx::query_as::<_, ProductSummaryRow>(&sql);
   query = bind_product_filters(query, category, search_term);
   query = query.bind(limit).bind(offset);
@@ -565,7 +565,7 @@ pub async fn count_products(
     query = query.bind(c);
   }
   if let Some(s) = search {
-    let term = format!("%{}%", s.trim());
+    let term = crate::db::like_contains(s.trim());
     query = query.bind(term.clone()).bind(term.clone()).bind(term);
   }
   query.fetch_one(pool).await
@@ -596,6 +596,36 @@ pub async fn list_related_products(
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[tokio::test]
+  async fn search_treats_like_wildcards_literally() {
+    let pool = crate::test_support::isolated_pool().await;
+    for name in ["Top 100% linho", "Top 1000 linho", "tag_a", "tagXa"] {
+      let id = Uuid::now_v7();
+      sqlx::query(
+        "INSERT INTO products (id, name, slug, price_in_cents, active)
+         VALUES ($1, $2, $3, 1000, true)",
+      )
+      .bind(id)
+      .bind(name)
+      .bind(format!("p-{id}"))
+      .execute(&pool)
+      .await
+      .unwrap();
+    }
+    for (term, expected) in
+      [("100%", 1), ("%", 1), ("tag_a", 1), ("_", 1), ("linho", 2)]
+    {
+      let total = count_products(&pool, None, Some(term), false, true)
+        .await
+        .unwrap();
+      assert_eq!(total, expected, "search {term:?}");
+      let rows = list_products(&pool, None, Some(term), false, true, 10, 0)
+        .await
+        .unwrap();
+      assert_eq!(rows.len() as i64, expected, "list {term:?}");
+    }
+  }
 
   #[tokio::test]
   async fn list_products_respects_limit() {

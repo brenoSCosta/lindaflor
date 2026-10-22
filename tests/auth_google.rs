@@ -83,6 +83,8 @@ fn serve(stream: TcpStream) {
       "200 OK",
       serde_json::json!({
           "access_token": format!("at-{code}"),
+          "refresh_token": format!("rt-{code}"),
+          "id_token": format!("it-{code}"),
           "expires_in": 3600,
           "token_type": "Bearer",
       }),
@@ -251,6 +253,99 @@ async fn google_login_creates_session_in_the_starting_browser() {
   assert!(res.status().is_redirection(), "{}", res.status());
   assert!(session_cookie_from(&res).is_some(), "expected a session");
   assert!(user_id_by_email(&pool, &email).await.is_some());
+}
+
+/// Only the Google identity is kept: the OAuth tokens returned by the
+/// exchange never reach `accounts`, and no unchecked OIDC nonce is sent.
+#[tokio::test]
+async fn google_login_stores_no_provider_tokens() {
+  let (pool, router) = setup().await;
+  let email = unique_email("google-notokens");
+  let sub = format!("sub-{}", Uuid::now_v7());
+  let code = google_profile(&sub, &email, true);
+
+  let res = send(
+    &router,
+    Method::POST,
+    "/api/auth/sign-in/social",
+    None,
+    Some(serde_json::json!({ "provider": "google" })),
+  )
+  .await;
+  assert_eq!(res.status(), StatusCode::OK);
+  let bind = named_cookie_from(&res, BIND_COOKIE).expect("bind cookie");
+  let json = test_support::body_json(res).await;
+  let url = json["url"].as_str().unwrap().to_owned();
+  assert!(url.contains("code_challenge="), "{url}");
+  assert!(!url.contains("nonce="), "{url}");
+
+  let res = callback(&router, &code, &state_from_url(&url), Some(&bind)).await;
+  assert!(res.status().is_redirection(), "{}", res.status());
+
+  // Second login updates the existing row: still nothing stored.
+  let again = start_login(&router).await;
+  let res =
+    callback(&router, &code, &again.state, again.bind_cookie.as_deref()).await;
+  assert!(res.status().is_redirection(), "{}", res.status());
+
+  let row: (Option<String>, Option<String>, Option<String>, bool) =
+    sqlx::query_as(
+      "SELECT access_token, refresh_token, id_token,
+              access_token_expires_at IS NULL
+       FROM accounts WHERE provider_id = 'google' AND account_id = $1",
+    )
+    .bind(&sub)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+  assert_eq!(row, (None, None, None, true));
+}
+
+/// Migration 0026 scrubs tokens stored before the change (idempotent, so
+/// it can be replayed here against the already-migrated test database).
+#[tokio::test]
+async fn migration_0026_clears_stored_google_tokens() {
+  let (pool, _router) = setup().await;
+  let user_id = Uuid::now_v7();
+  let sub = format!("sub-{}", Uuid::now_v7());
+  sqlx::query(
+    "INSERT INTO users (id, name, email, email_verified, role, created_at, updated_at)
+     VALUES ($1, 'Legacy', $2, true, 'user', now(), now())",
+  )
+  .bind(user_id)
+  .bind(unique_email("google-legacy"))
+  .execute(&pool)
+  .await
+  .unwrap();
+  sqlx::query(
+    "INSERT INTO accounts (id, account_id, provider_id, user_id, access_token,
+                           refresh_token, id_token, access_token_expires_at,
+                           created_at, updated_at)
+     VALUES ($1, $2, 'google', $3, 'at', 'rt', 'it', now(), now(), now())",
+  )
+  .bind(Uuid::now_v7())
+  .bind(&sub)
+  .bind(user_id)
+  .execute(&pool)
+  .await
+  .unwrap();
+
+  sqlx::raw_sql(include_str!("../migrations/0026_polish.sql"))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+  let row: (Option<String>, Option<String>, Option<String>, bool) =
+    sqlx::query_as(
+      "SELECT access_token, refresh_token, id_token,
+              access_token_expires_at IS NULL
+       FROM accounts WHERE provider_id = 'google' AND account_id = $1",
+    )
+    .bind(&sub)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+  assert_eq!(row, (None, None, None, true));
 }
 
 // A4: login CSRF — the callback must run in the browser that started it.

@@ -229,6 +229,41 @@ pub fn delete_account(name: &str, url: &str) -> Email {
   )
 }
 
+// --- Newsletter ---
+
+/// Welcome mail for a new newsletter subscriber; repeats the store's
+/// first-purchase coupon when one is configured.
+pub fn newsletter_welcome(
+  name: &str,
+  shop_url: &str,
+  first_purchase_code: Option<&str>,
+) -> Email {
+  let mut paragraphs = vec![
+    greeting(name),
+    "Obrigada por se inscrever na newsletter! Você vai receber em primeira mão nossos lançamentos, coleções e promoções.".to_string(),
+  ];
+  if let Some(code) = first_purchase_code
+    .map(str::trim)
+    .filter(|code| !code.is_empty())
+  {
+    paragraphs.push(format!(
+      "Presente de boas-vindas: use o cupom {code} na sua primeira compra."
+    ));
+  }
+  render(
+    format!("Boas-vindas à newsletter · {BRAND}"),
+    Body {
+      heading: "Que bom ter você por aqui",
+      paragraphs,
+      action: Some(("Visitar a loja", shop_url)),
+      code: None,
+      footnote: Some(
+        "Se você não se inscreveu, ignore este e-mail: não enviaremos outra confirmação.",
+      ),
+    },
+  )
+}
+
 // --- Commerce ---
 
 /// What every order email needs. Built by [`super::orders`].
@@ -243,6 +278,14 @@ pub struct OrderMail {
   pub pix_copy_paste: Option<String>,
   /// Payment deadline, already formatted (`dd/mm/aaaa hh:mm`, Brasília).
   pub pay_until: Option<String>,
+  /// Paid through Mercado Pago: the QR Code lives on the order page.
+  pub mercado_pago: bool,
+  /// Shipping carrier (`orders.carrier`, e.g. "Correios").
+  pub carrier: String,
+  pub tracking_code: Option<String>,
+  /// Carrier's public tracking page, when known
+  /// (see [`crate::app::store::order::tracking_url`]).
+  pub tracking_url: Option<String>,
 }
 
 pub fn order_code(order_id: uuid::Uuid) -> String {
@@ -264,19 +307,29 @@ pub fn order_created(order: &OrderMail) -> Email {
     ),
     None => "Seus itens ficam reservados por tempo limitado.".to_string(),
   });
-  paragraphs.push(
-    "Na página do pedido você encontra o QR Code e o código copia-e-cola, e acompanha a confirmação do pagamento.".to_string(),
-  );
+  paragraphs.push(if order.mercado_pago {
+    "O pagamento é processado pelo Mercado Pago: abra a página do pedido para ver o QR Code e o código copia-e-cola. A confirmação é automática.".to_string()
+  } else {
+    "Na página do pedido você encontra o QR Code e o código copia-e-cola, e acompanha a confirmação do pagamento.".to_string()
+  });
+  let (action_label, code) = if order.mercado_pago {
+    ("Pagar com PIX", None)
+  } else {
+    (
+      "Ver instruções de pagamento",
+      order
+        .pix_copy_paste
+        .as_deref()
+        .map(|code| ("PIX copia-e-cola:", code)),
+    )
+  };
   render(
     format!("Pedido #{} recebido · {BRAND}", order.code),
     Body {
       heading: "Pedido recebido — falta o pagamento",
       paragraphs,
-      action: Some(("Ver instruções de pagamento", &order.url)),
-      code: order
-        .pix_copy_paste
-        .as_deref()
-        .map(|code| ("PIX copia-e-cola:", code)),
+      action: Some((action_label, &order.url)),
+      code,
       footnote: Some(
         "Guarde este e-mail: o link acima dá acesso ao seu pedido.",
       ),
@@ -306,20 +359,43 @@ pub fn payment_confirmed(order: &OrderMail) -> Email {
 }
 
 pub fn order_shipped(order: &OrderMail) -> Email {
+  let carrier = if order.carrier.is_empty() {
+    "a transportadora"
+  } else {
+    order.carrier.as_str()
+  };
+  let mut paragraphs = vec![greeting(&order.name)];
+  match &order.tracking_code {
+    Some(_) => paragraphs.push(format!(
+      "O pedido #{} foi enviado por {carrier}. Use o código de rastreio abaixo para acompanhar a entrega.",
+      order.code
+    )),
+    None => paragraphs.push(format!(
+      "O pedido #{} foi enviado por {carrier}. Acompanhe o status pela página do pedido.",
+      order.code
+    )),
+  }
+  // The carrier page is the main action when we have one; the order page
+  // stays reachable through the footnote.
+  let action = match &order.tracking_url {
+    Some(link) => ("Rastrear entrega", link.as_str()),
+    None => ("Acompanhar pedido", order.url.as_str()),
+  };
+  let footnote = order
+    .tracking_url
+    .as_ref()
+    .map(|_| format!("Detalhes do pedido: {}", order.url));
   render(
     format!("Pedido #{} enviado · {BRAND}", order.code),
     Body {
       heading: "Seu pedido está a caminho",
-      paragraphs: vec![
-        greeting(&order.name),
-        format!(
-          "O pedido #{} foi enviado. Acompanhe o status pela página do pedido.",
-          order.code
-        ),
-      ],
-      action: Some(("Acompanhar pedido", &order.url)),
-      code: None,
-      footnote: None,
+      paragraphs,
+      action: Some(action),
+      code: order
+        .tracking_code
+        .as_deref()
+        .map(|code| ("Código de rastreio:", code)),
+      footnote: footnote.as_deref(),
     },
   )
 }
@@ -389,7 +465,60 @@ mod tests {
       url: "https://loja.example.com/pedido/abc?t=tok&x=1".to_string(),
       pix_copy_paste: Some("00020126BR.GOV.BCB.PIX".to_string()),
       pay_until: Some("01/11/2026 10:00".to_string()),
+      mercado_pago: false,
+      carrier: "Correios".to_string(),
+      tracking_code: None,
+      tracking_url: None,
     }
+  }
+
+  #[test]
+  fn order_created_for_mercado_pago_links_order_page_without_static_pix() {
+    let order = OrderMail {
+      mercado_pago: true,
+      ..sample_order()
+    };
+    let email = order_created(&order);
+    assert!(!email.text.contains("00020126BR.GOV.BCB.PIX"));
+    assert!(!email.html.contains("00020126BR.GOV.BCB.PIX"));
+    assert!(email.text.contains("Mercado Pago"));
+    assert!(email.text.contains(
+      "Pagar com PIX: https://loja.example.com/pedido/abc?t=tok&x=1"
+    ));
+  }
+
+  #[test]
+  fn order_shipped_carries_carrier_code_and_tracking_link() {
+    let link = "https://rastreamento.correios.com.br/app/index.php?objetos=AA123456789BR";
+    let order = OrderMail {
+      tracking_code: Some("AA123456789BR".to_string()),
+      tracking_url: Some(link.to_string()),
+      ..sample_order()
+    };
+    let email = order_shipped(&order);
+    for part in [&email.text, &email.html] {
+      assert!(part.contains("Correios"), "{part}");
+      assert!(part.contains("AA123456789BR"), "{part}");
+      assert!(part.contains("rastreamento.correios.com.br"), "{part}");
+      assert!(part.contains("/pedido/abc?t=tok"), "{part}");
+    }
+    assert!(email.text.contains(&format!("Rastrear entrega: {link}")));
+
+    // Other carriers: code shown, no link we can't vouch for.
+    let other = OrderMail {
+      carrier: "Jadlog".to_string(),
+      tracking_code: Some("JD123".to_string()),
+      tracking_url: None,
+      ..sample_order()
+    };
+    let email = order_shipped(&other);
+    assert!(email.text.contains("Jadlog"));
+    assert!(email.text.contains("JD123"));
+    assert!(
+      email
+        .text
+        .contains("Acompanhar pedido: https://loja.example.com/pedido/abc")
+    );
   }
 
   #[test]
@@ -450,6 +579,21 @@ mod tests {
     for code in [None, Some("  ")] {
       assert!(!verify_email("Ana", url, code).text.contains("cupom"));
     }
+  }
+
+  #[test]
+  fn newsletter_welcome_mentions_coupon_only_when_configured() {
+    let with = newsletter_welcome(
+      "Ana",
+      "https://loja.example.com/",
+      Some("BEMVINDA10"),
+    );
+    assert!(with.subject.contains("newsletter"));
+    assert!(with.text.contains("cupom BEMVINDA10"));
+    assert!(with.html.contains("https://loja.example.com/"));
+    let without = newsletter_welcome("", "https://loja.example.com/", None);
+    assert!(!without.text.contains("cupom"));
+    assert!(without.text.contains("Olá!"));
   }
 
   #[test]

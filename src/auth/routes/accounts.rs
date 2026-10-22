@@ -179,10 +179,9 @@ pub async fn link_social(
     return Err(unauthorized().into());
   };
 
-  // PKCE (S256 `code_challenge`) + OIDC `nonce`. The verifier stays
+  // PKCE (S256 `code_challenge`). The verifier stays
   // server-side in the state row; only the challenge travels in the URL.
   let code_verifier = random_token();
-  let nonce = random_token();
   let code_challenge = pkce_s256_challenge(&code_verifier);
 
   let state = random_token();
@@ -208,13 +207,11 @@ pub async fn link_social(
       session_binding: Some(&session_binding),
       browser_binding: Some(&browser_binding),
       code_verifier: Some(&code_verifier),
-      nonce: Some(&nonce),
     },
   )
   .await?;
 
-  let url =
-    google_authorize_url(&config, &state, Some(&code_challenge), Some(&nonce));
+  let url = google_authorize_url(&config, &state, Some(&code_challenge));
   Ok((
     StatusCode::OK,
     Json(serde_json::to_value(SignInSocialResponse { url })?),

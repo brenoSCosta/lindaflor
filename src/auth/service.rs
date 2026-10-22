@@ -448,7 +448,6 @@ pub async fn start_google_oauth(
   let callback_path = safe_callback_path(callback_url);
   let state = random_token();
   let code_verifier = random_token();
-  let nonce = random_token();
   let code_challenge = pkce_s256_challenge(&code_verifier);
   let browser_binding = issue_oauth_browser_binding(cx);
   store_oauth_state_full(
@@ -461,17 +460,11 @@ pub async fn start_google_oauth(
       session_binding,
       browser_binding: Some(&browser_binding),
       code_verifier: Some(&code_verifier),
-      nonce: Some(&nonce),
     },
   )
   .await?;
 
-  Ok(google_authorize_url(
-    &config,
-    &state,
-    Some(&code_challenge),
-    Some(&nonce),
-  ))
+  Ok(google_authorize_url(&config, &state, Some(&code_challenge)))
 }
 
 // --- Password reset ---
@@ -1643,20 +1636,9 @@ fn canonical_role(role: &str) -> Result<&'static str> {
   }
 }
 
-fn escape_like(input: &str) -> String {
-  let mut out = String::with_capacity(input.len());
-  for c in input.chars() {
-    if matches!(c, '%' | '_' | '\\') {
-      out.push('\\');
-    }
-    out.push(c);
-  }
-  out
-}
-
 fn like_pattern(query: Option<&str>) -> String {
   match query.map(str::trim).filter(|s| !s.is_empty()) {
-    Some(q) => format!("%{}%", escape_like(q)),
+    Some(q) => crate::db::like_contains(q),
     None => String::new(),
   }
 }
@@ -1679,7 +1661,7 @@ pub async fn list_admin_users(
   let total: i64 = sqlx::query_scalar!(
     r#"
         SELECT COUNT(*) FROM users
-        WHERE ($1 = '' OR name ILIKE $1 OR email ILIKE $1)
+        WHERE ($1 = '' OR name ILIKE $1 ESCAPE '\' OR email ILIKE $1 ESCAPE '\')
         "#,
     pattern,
   )
@@ -1692,7 +1674,7 @@ pub async fn list_admin_users(
         SELECT id, name, email, email_verified, image, two_factor_enabled, role,
                banned, ban_reason, ban_expires
         FROM users
-        WHERE ($1 = '' OR name ILIKE $1 OR email ILIKE $1)
+        WHERE ($1 = '' OR name ILIKE $1 ESCAPE '\' OR email ILIKE $1 ESCAPE '\')
         ORDER BY created_at DESC, id DESC
         LIMIT $2 OFFSET $3
         "#,

@@ -7,6 +7,7 @@
 //! configured [`Mailer`] with retries and exponential backoff.
 
 pub mod auth;
+pub mod newsletter;
 pub mod orders;
 pub mod outbox;
 pub mod templates;

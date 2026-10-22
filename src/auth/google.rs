@@ -38,18 +38,20 @@ impl GoogleOAuthConfig {
 
   /// Build the Google authorize URL the client should navigate to.
   pub fn authorize_url(&self, state: &str) -> String {
-    self.authorize_url_with(state, None, None)
+    self.authorize_url_with(state, None)
   }
 
-  /// Authorize URL with optional PKCE S256 `code_challenge` and OIDC `nonce`.
+  /// Authorize URL with an optional PKCE S256 `code_challenge`.
   ///
-  /// Callers must store the matching `code_verifier` (and `nonce`) server-side;
-  /// only the challenge/nonce travel on this URL.
+  /// Callers must store the matching `code_verifier` server-side; only the
+  /// challenge travels on this URL. No OIDC `nonce` is sent: the profile
+  /// comes from `userinfo` over the server-side, PKCE-bound code exchange,
+  /// and the `id_token` is never parsed, so a nonce would imply a check
+  /// that does not exist.
   pub fn authorize_url_with(
     &self,
     state: &str,
     code_challenge: Option<&str>,
-    nonce: Option<&str>,
   ) -> String {
     let redirect_uri = self.redirect_uri();
     let mut pairs: Vec<(&str, &str)> = vec![
@@ -64,9 +66,6 @@ impl GoogleOAuthConfig {
     if let Some(challenge) = code_challenge {
       pairs.push(("code_challenge", challenge));
       pairs.push(("code_challenge_method", "S256"));
-    }
-    if let Some(nonce) = nonce {
-      pairs.push(("nonce", nonce));
     }
     reqwest::Url::parse_with_params(GOOGLE_AUTH_URL, &pairs)
       .expect("Google auth URL is valid")
@@ -234,7 +233,7 @@ mod tests {
   }
 
   #[test]
-  fn authorize_url_with_pkce_and_nonce() {
+  fn authorize_url_with_pkce_has_no_nonce() {
     let config = GoogleOAuthConfig {
       client_id: "fake-client.apps.googleusercontent.com".into(),
       client_secret: "GOCSPX-fake".into(),
@@ -243,14 +242,13 @@ mod tests {
     let url = config.authorize_url_with(
       "csrf-state-1",
       Some("E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM"),
-      Some("nonce-hex"),
     );
     assert!(
       url
         .contains("code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")
     );
     assert!(url.contains("code_challenge_method=S256"));
-    assert!(url.contains("nonce=nonce-hex"));
+    assert!(!url.contains("nonce="));
     assert!(url.contains("state=csrf-state-1"));
   }
 

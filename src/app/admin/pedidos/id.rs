@@ -72,6 +72,21 @@ struct ItemRow {
   unit_price_cents: i64,
 }
 
+/// Local-only transitions that record money moving (`Pay`, `ReopenPay`)
+/// or returned (`Refund`) without talking to any PSP. For Mercado Pago
+/// orders the PSP is the source of truth: "Sincronizar" / "Estornar no
+/// Mercado Pago" drive those edges, so the manual buttons are hidden and
+/// the POST is refused (a local "Estornar" would not move any money).
+fn manual_money_event_blocked(mercado_pago: bool, event: OrderEvent) -> bool {
+  mercado_pago
+    && matches!(
+      event,
+      OrderEvent::Pay | OrderEvent::ReopenPay | OrderEvent::Refund
+    )
+}
+
+const MP_MANUAL_BLOCKED_MSG: &str = "Pedido do Mercado Pago: use \"Sincronizar com Mercado Pago\" ou \"Estornar no Mercado Pago\". A baixa manual não movimenta dinheiro.";
+
 fn status_label(status: &str) -> &'static str {
   match status {
     "pending_payment" => "Aguardando pagamento",
@@ -140,6 +155,16 @@ async fn update_order(
   let Some(event) = OrderEvent::parse(form.status.trim()) else {
     return fail("Status inválido.");
   };
+  let provider: Option<String> =
+    sqlx::query_scalar("SELECT payment_provider FROM orders WHERE id = $1")
+      .bind(order_id)
+      .fetch_optional(pool)
+      .await?;
+  let mercado_pago = provider.as_deref()
+    == Some(crate::payments::ProviderKind::MercadoPago.as_str());
+  if manual_money_event_blocked(mercado_pago, event) {
+    return fail(MP_MANUAL_BLOCKED_MSG);
+  }
   // The checkbox is always the explicit restock choice: browsers omit an
   // unchecked box, so absent = "do not restock". The forms pre-check it for
   // Paid/Processing (the transition default) and leave it off otherwise.
@@ -259,6 +284,9 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let mp_refundable = payment
     .as_ref()
     .is_some_and(|info| info.refundable(&order.status));
+  // Static-PIX orders keep the manual "Marcar como pago" / "Estornar";
+  // Mercado Pago orders only get the PSP-backed actions.
+  let manual_money = payment.is_none();
   let expires = order.reservation_expires_at.clone().unwrap_or_default();
   let created = order.created_at.clone();
   let status = order.status.clone();
@@ -279,14 +307,16 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
 
           if pending {
               <div class="mt-2 flex flex-wrap gap-3">
-                  <form method="post" action=(href!(page, Id(order_id.to_string())))>
-                      <input type="hidden" name="status" value="paid">
-                      button(
-                          variant: ButtonVariant::Primary,
-                          attrs: attributes! { type="submit" },
-                          "Marcar como pago"
-                      )
-                  </form>
+                  if manual_money {
+                      <form method="post" action=(href!(page, Id(order_id.to_string())))>
+                          <input type="hidden" name="status" value="paid">
+                          button(
+                              variant: ButtonVariant::Primary,
+                              attrs: attributes! { type="submit" },
+                              "Marcar como pago"
+                          )
+                      </form>
+                  }
                   <form method="post" action=(href!(page, Id(order_id.to_string())))>
                       <input type="hidden" name="status" value="cancelled">
                       button(
@@ -317,16 +347,18 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                           "Cancelar"
                       )
                   </form>
-                  <form method="post" action=(href!(page, Id(order_id.to_string()))) class="flex items-center gap-2">
-                      <input type="hidden" name="status" value="refunded">
-                      checkbox(attrs: attributes! { id="restock-refund" name="restock" value="1" checked=(true) })
-                      label(attrs: attributes! { for="restock-refund" }, "Devolver ao estoque")
-                      button(
-                          variant: ButtonVariant::Outline,
-                          attrs: attributes! { type="submit" },
-                          "Estornar"
-                      )
-                  </form>
+                  if manual_money {
+                      <form method="post" action=(href!(page, Id(order_id.to_string()))) class="flex items-center gap-2">
+                          <input type="hidden" name="status" value="refunded">
+                          checkbox(attrs: attributes! { id="restock-refund" name="restock" value="1" checked=(true) })
+                          label(attrs: attributes! { for="restock-refund" }, "Devolver ao estoque")
+                          button(
+                              variant: ButtonVariant::Outline,
+                              attrs: attributes! { type="submit" },
+                              "Estornar"
+                          )
+                      </form>
+                  }
               </div>
           }
           if processing {
@@ -341,16 +373,18 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                           "Cancelar"
                       )
                   </form>
-                  <form method="post" action=(href!(page, Id(order_id.to_string()))) class="flex items-center gap-2">
-                      <input type="hidden" name="status" value="refunded">
-                      checkbox(attrs: attributes! { id="restock-refund" name="restock" value="1" checked=(true) })
-                      label(attrs: attributes! { for="restock-refund" }, "Devolver ao estoque")
-                      button(
-                          variant: ButtonVariant::Outline,
-                          attrs: attributes! { type="submit" },
-                          "Estornar"
-                      )
-                  </form>
+                  if manual_money {
+                      <form method="post" action=(href!(page, Id(order_id.to_string()))) class="flex items-center gap-2">
+                          <input type="hidden" name="status" value="refunded">
+                          checkbox(attrs: attributes! { id="restock-refund" name="restock" value="1" checked=(true) })
+                          label(attrs: attributes! { for="restock-refund" }, "Devolver ao estoque")
+                          button(
+                              variant: ButtonVariant::Outline,
+                              attrs: attributes! { type="submit" },
+                              "Estornar"
+                          )
+                      </form>
+                  }
               </div>
           }
           if shipped {
@@ -373,30 +407,34 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                           "Cancelar"
                       )
                   </form>
-                  <form method="post" action=(href!(page, Id(order_id.to_string()))) class="flex items-center gap-2">
-                      <input type="hidden" name="status" value="refunded">
-                      checkbox(attrs: attributes! { id="restock-refund" name="restock" value="1" })
-                      label(attrs: attributes! { for="restock-refund" }, "Devolver ao estoque")
-                      button(
-                          variant: ButtonVariant::Outline,
-                          attrs: attributes! { type="submit" },
-                          "Estornar"
-                      )
-                  </form>
+                  if manual_money {
+                      <form method="post" action=(href!(page, Id(order_id.to_string()))) class="flex items-center gap-2">
+                          <input type="hidden" name="status" value="refunded">
+                          checkbox(attrs: attributes! { id="restock-refund" name="restock" value="1" })
+                          label(attrs: attributes! { for="restock-refund" }, "Devolver ao estoque")
+                          button(
+                              variant: ButtonVariant::Outline,
+                              attrs: attributes! { type="submit" },
+                              "Estornar"
+                          )
+                      </form>
+                  }
               </div>
           }
           if delivered {
               <div class="mt-2 flex flex-wrap items-center gap-3">
-                  <form method="post" action=(href!(page, Id(order_id.to_string()))) class="flex items-center gap-2">
-                      <input type="hidden" name="status" value="refunded">
-                      checkbox(attrs: attributes! { id="restock-refund" name="restock" value="1" })
-                      label(attrs: attributes! { for="restock-refund" }, "Devolver ao estoque")
-                      button(
-                          variant: ButtonVariant::Outline,
-                          attrs: attributes! { type="submit" },
-                          "Estornar"
-                      )
-                  </form>
+                  if manual_money {
+                      <form method="post" action=(href!(page, Id(order_id.to_string()))) class="flex items-center gap-2">
+                          <input type="hidden" name="status" value="refunded">
+                          checkbox(attrs: attributes! { id="restock-refund" name="restock" value="1" })
+                          label(attrs: attributes! { for="restock-refund" }, "Devolver ao estoque")
+                          button(
+                              variant: ButtonVariant::Outline,
+                              attrs: attributes! { type="submit" },
+                              "Estornar"
+                          )
+                      </form>
+                  }
               </div>
           }
           if reopenable {
@@ -409,14 +447,16 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                           "Reabrir pedido"
                       )
                   </form>
-                  <form method="post" action=(href!(page, Id(order_id.to_string())))>
-                      <input type="hidden" name="status" value="reopen_pay">
-                      button(
-                          variant: ButtonVariant::Outline,
-                          attrs: attributes! { type="submit" },
-                          "Recebido após expirar"
-                      )
-                  </form>
+                  if manual_money {
+                      <form method="post" action=(href!(page, Id(order_id.to_string())))>
+                          <input type="hidden" name="status" value="reopen_pay">
+                          button(
+                              variant: ButtonVariant::Outline,
+                              attrs: attributes! { type="submit" },
+                              "Recebido após expirar"
+                          )
+                      </form>
+                  }
               </div>
           }
 
@@ -623,4 +663,26 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
           )
       )
   })
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn mercado_pago_orders_refuse_manual_money_transitions() {
+    for event in [OrderEvent::Pay, OrderEvent::ReopenPay, OrderEvent::Refund] {
+      assert!(manual_money_event_blocked(true, event), "{event:?}");
+      assert!(!manual_money_event_blocked(false, event), "{event:?}");
+    }
+    for event in [
+      OrderEvent::Process,
+      OrderEvent::Ship,
+      OrderEvent::Deliver,
+      OrderEvent::Cancel,
+      OrderEvent::Reopen,
+    ] {
+      assert!(!manual_money_event_blocked(true, event), "{event:?}");
+    }
+  }
 }

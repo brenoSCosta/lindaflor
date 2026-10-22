@@ -218,10 +218,10 @@ async fn load_coupons(
      (SELECT COUNT(*) FROM coupon_redemptions r WHERE r.coupon_id = c.id) AS uses_count, \
      (SELECT COUNT(*) FROM coupon_assignments a WHERE a.coupon_id = c.id) AS assignee_count \
      FROM coupons c \
-     WHERE ($1 = '' OR c.code ILIKE '%' || $1 || '%') \
+     WHERE ($1 = '' OR c.code ILIKE '%' || $1 || '%' ESCAPE '\\') \
      ORDER BY c.created_at DESC",
   )
-  .bind(q)
+  .bind(crate::db::escape_like(q))
   .fetch_all(pool)
   .await?;
 

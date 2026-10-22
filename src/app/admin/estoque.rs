@@ -51,6 +51,8 @@ async fn stock_directory(cx: &Cx, q: String) -> Result<impl View> {
   let pool = app_context::<PgPool>(cx);
   let q = signal(cx, || clamp_stock_query(&q));
   let query = clamp_stock_query(&q.get());
+  // Literal match: `%`/`_`/`\` typed by the admin are not wildcards.
+  let like_query = crate::db::escape_like(&query);
 
   let inventory = sqlx::query!(
     "SELECT i.id, i.variant_id, i.warehouse_id, i.quantity, i.reserved,
@@ -60,9 +62,9 @@ async fn stock_directory(cx: &Cx, q: String) -> Result<impl View> {
          JOIN product_variants pv ON pv.id = i.variant_id
          JOIN products p ON p.id = pv.product_id
          JOIN warehouses w ON w.id = i.warehouse_id
-         WHERE ($1 = '' OR p.name ILIKE '%' || $1 || '%' OR pv.sku ILIKE '%' || $1 || '%')
+         WHERE ($1 = '' OR p.name ILIKE '%' || $1 || '%' ESCAPE '\\' OR pv.sku ILIKE '%' || $1 || '%' ESCAPE '\\')
          ORDER BY p.name, pv.sku",
-    query,
+    like_query,
   )
   .fetch_all(pool)
   .await?;

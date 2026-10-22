@@ -73,13 +73,15 @@ async fn order_directory(
   let current_page = signal(cx, || clamp_order_page(initial_page));
 
   let query = clamp_order_query(&q.get());
+  // Literal match: `%`/`_`/`\` typed by the admin are not wildcards.
+  let like_query = crate::db::escape_like(&query);
   let active_status = clamp_order_status(&status.get());
   let mut page_num = clamp_order_page(current_page.get());
   let page_size: i64 = 20;
 
   let total: i64 = sqlx::query_scalar!(
-    "SELECT COUNT(*) FROM orders o WHERE ($1 = '' OR o.guest_email ILIKE '%' || $1 || '%' OR o.tracking_code ILIKE '%' || $1 || '%') AND ($2 = 'all' OR o.status::text = $2)",
-    query,
+    "SELECT COUNT(*) FROM orders o WHERE ($1 = '' OR o.guest_email ILIKE '%' || $1 || '%' ESCAPE '\\' OR o.tracking_code ILIKE '%' || $1 || '%' ESCAPE '\\') AND ($2 = 'all' OR o.status::text = $2)",
+    like_query,
     active_status,
   )
   .fetch_one(pool)
@@ -99,12 +101,12 @@ async fn order_directory(
                 o.carrier, o.tracking_code,
                 (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) as item_count
          FROM orders o
-         WHERE ($1 = '' OR o.guest_email ILIKE '%' || $1 || '%'
-                OR o.tracking_code ILIKE '%' || $1 || '%')
+         WHERE ($1 = '' OR o.guest_email ILIKE '%' || $1 || '%' ESCAPE '\\'
+                OR o.tracking_code ILIKE '%' || $1 || '%' ESCAPE '\\')
            AND ($2 = 'all' OR o.status::text = $2)
          ORDER BY o.created_at DESC
          LIMIT $3 OFFSET $4",
-        query,
+        like_query,
         active_status,
         page_size,
         (page_num - 1) * page_size,

@@ -228,3 +228,70 @@ async fn security_headers_present_on_429() {
     None
   );
 }
+
+/// Every script/stylesheet the app's own pages emit is same-origin, so the
+/// prod CSP (no `unpkg`/`jsdelivr`) can't break them. The CDN-backed API
+/// docs are dev-only routes and stay on the dev CSP.
+#[tokio::test]
+async fn app_pages_emit_only_self_hosted_scripts() {
+  use http_body_util::BodyExt;
+  use lindaflor::security_headers::CONTENT_SECURITY_POLICY_VALUE;
+
+  let (_pool, router) = pool_and_router().await;
+  // The settings page renders the full app layout plus its own asset
+  // scripts (avatar cropper, toasts, dropdowns).
+  let _ = lindaflor::app::settings::page;
+  let _ = lindaflor::app::settings::settings_post;
+  let signed_up = test_support::sign_up(
+    &router,
+    "CSP User",
+    &test_support::unique_email("csp-scripts"),
+    "Harbor-Violet-Tiger-4821-Lantern!",
+  )
+  .await;
+  let cookie = signed_up.next_cookie.expect("session cookie");
+  let response = send(
+    &router,
+    Method::GET,
+    "/settings?tab=account",
+    &[("cookie", cookie.as_str())],
+    None,
+  )
+  .await;
+  assert_eq!(response.status(), StatusCode::OK);
+  let bytes = response
+    .into_body()
+    .collect()
+    .await
+    .expect("collect body")
+    .to_bytes();
+  let html = String::from_utf8_lossy(&bytes);
+
+  let mut external = Vec::new();
+  let mut scripts = 0;
+  for (tag, attr) in [("<script", "src=\""), ("<link", "href=\"")] {
+    for chunk in html.split(tag).skip(1) {
+      let open = chunk.split('>').next().unwrap_or("");
+      if tag == "<link" && !open.contains("stylesheet") {
+        continue;
+      }
+      let Some(rest) = open.split(attr).nth(1) else {
+        continue;
+      };
+      let url = rest.split('"').next().unwrap_or("");
+      if tag == "<script" {
+        scripts += 1;
+      }
+      if !url.starts_with('/') || url.starts_with("//") {
+        external.push(url.to_string());
+      }
+    }
+  }
+  assert!(scripts > 0, "expected the Topcoat runtime script");
+  assert!(external.is_empty(), "third-party assets: {external:?}");
+  for cdn in ["unpkg.com", "jsdelivr.net"] {
+    assert!(!CONTENT_SECURITY_POLICY_VALUE.contains(cdn));
+  }
+  // Topcoat's browser runtime compiles bindings with `new Function`.
+  assert!(CONTENT_SECURITY_POLICY_VALUE.contains("'unsafe-eval'"));
+}

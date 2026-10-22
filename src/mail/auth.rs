@@ -1,10 +1,14 @@
 //! Auth mail hooks: build the absolute link for a freshly issued one-time
 //! token and enqueue the message. The raw token only ever lives in the
 //! outbox body (scrubbed once delivered) — never in logs.
+//!
+//! Verification, reset and change-email mail can be triggered for any
+//! address, so they go through [`enqueue_throttled`] (per-recipient cap);
+//! a dropped mail is invisible to the caller.
 
 use sqlx::{PgExecutor, PgPool};
 
-use super::outbox::{enqueue, kind};
+use super::outbox::{enqueue, enqueue_throttled, kind};
 use super::{absolute_url, encode_query_value, templates};
 
 fn token_url(path: &str, token: &str) -> String {
@@ -32,7 +36,8 @@ pub async fn send_verify_email(
     &token_url(VERIFY_EMAIL_PATH, token),
     first_purchase_code.as_deref(),
   );
-  enqueue(pool, kind::VERIFY_EMAIL, to, &email, None).await
+  enqueue_throttled(pool, kind::VERIFY_EMAIL, to, &email).await?;
+  Ok(())
 }
 
 pub async fn send_password_reset<'e>(
@@ -43,7 +48,8 @@ pub async fn send_password_reset<'e>(
 ) -> Result<(), sqlx::Error> {
   let email =
     templates::password_reset(name, &token_url(RESET_PASSWORD_PATH, token));
-  enqueue(executor, kind::PASSWORD_RESET, to, &email, None).await
+  enqueue_throttled(executor, kind::PASSWORD_RESET, to, &email).await?;
+  Ok(())
 }
 
 /// Sent to the *new* address: following the link proves ownership of it.
@@ -58,7 +64,8 @@ pub async fn send_change_email<'e>(
     new_email,
     &token_url(CHANGE_EMAIL_PATH, token),
   );
-  enqueue(executor, kind::CHANGE_EMAIL, new_email, &email, None).await
+  enqueue_throttled(executor, kind::CHANGE_EMAIL, new_email, &email).await?;
+  Ok(())
 }
 
 pub async fn send_delete_account<'e>(

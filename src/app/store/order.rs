@@ -1158,6 +1158,22 @@ mod tests {
     .await
     .unwrap();
     assert_eq!(to, "a@b.co");
+    let shipped: String = sqlx::query_scalar(
+      "SELECT text_body FROM email_outbox
+       WHERE text_body LIKE $1 AND kind = 'order_shipped'",
+    )
+    .bind(format!("%/pedido/{order_id}?t=%"))
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    assert!(shipped.contains("Correios"), "{shipped}");
+    assert!(shipped.contains("AA123456789BR"), "{shipped}");
+    assert!(
+      shipped.contains(
+        "rastreamento.correios.com.br/app/index.php?objetos=AA123456789BR"
+      ),
+      "{shipped}"
+    );
     // Rolled back with the transition: nothing leaks out of the tx.
     tx.rollback().await.unwrap();
     assert!(outbox_kinds_for(&pool, order_id).await.is_empty());
