@@ -123,6 +123,8 @@ fn install_test_rate_limit_env() {
     std::env::set_var("RATE_LIMIT_AUTH_VERIFY_BACKUP_CODE_PER_MIN", "10000");
     std::env::set_var("RATE_LIMIT_PEDIDO_POLL_PER_MIN", "10000");
     std::env::set_var("RATE_LIMIT_PEDIDO_PAGE_PER_MIN", "10000");
+    std::env::set_var("RATE_LIMIT_COUPON_APPLY_PER_MIN", "10000");
+    std::env::set_var("RATE_LIMIT_COUPON_CART_PER_MIN", "10000");
   }
 }
 
@@ -239,8 +241,10 @@ pub fn build_auth_router(pool: PgPool) -> Router {
         DEFAULT_PEDIDO_PAGE_PER_MIN,
       )
       .with_skips(&["/pedido/status-proc"]),
-    )
-    .layer(lindaflor::logging::layer::RequestLoggingLayer::noop());
+    );
+  builder = lindaflor::rate_limit::apply_form_rate_limits(builder);
+  builder =
+    builder.layer(lindaflor::logging::layer::RequestLoggingLayer::noop());
   // APP_ENV is forced to development here, so HSTS stays off.
   lindaflor::security_headers::apply_security_header_tower_layers(builder)
     .build()
@@ -380,8 +384,10 @@ pub fn build_prod_router(pool: PgPool) -> Router {
         DEFAULT_PEDIDO_PAGE_PER_MIN,
       )
       .with_skips(&["/pedido/status-proc"]),
-    )
-    .layer(lindaflor::logging::layer::RequestLoggingLayer::noop());
+    );
+  builder = lindaflor::rate_limit::apply_form_rate_limits(builder);
+  builder =
+    builder.layer(lindaflor::logging::layer::RequestLoggingLayer::noop());
   lindaflor::security_headers::apply_security_header_tower_layers(builder)
     .build()
 }

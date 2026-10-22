@@ -53,12 +53,9 @@ fn safe_next(cx: &Cx, invite_id: Option<&str>, next: Option<&str>) -> String {
   if let Some(id) = invite_id.filter(|s| !s.is_empty()) {
     return format!("/accept-invitation?id={id}");
   }
-  match next {
-    Some(path) if path.starts_with('/') && !path.starts_with("//") => {
-      path.to_owned()
-    }
-    _ => href!(crate::app::dashboard::page).resolve(cx),
-  }
+  next
+    .and_then(crate::redirect::safe_local_redirect)
+    .unwrap_or_else(|| href!(crate::app::dashboard::page).resolve(cx))
 }
 
 #[component]

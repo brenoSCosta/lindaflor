@@ -188,8 +188,10 @@ pub fn router(
       // `/pedido/status-proc` has its own tighter scope; skip it here so
       // poll requests consume exactly one budget (true override).
       .with_skips(&["/pedido/status-proc"]),
-    )
-    .layer(RequestLoggingLayer::from_env());
+    );
+  // HTML-form twins of the auth API + coupon apply (POST-only budgets).
+  builder = crate::rate_limit::apply_form_rate_limits(builder);
+  builder = builder.layer(RequestLoggingLayer::from_env());
   builder =
     crate::security_headers::apply_security_header_tower_layers(builder);
   builder.runtime().build()
@@ -301,7 +303,7 @@ async fn stop_impersonating(
   }
   let redirect = body
     .and_then(|Form(b)| b.redirect)
-    .filter(|p| p.starts_with('/') && !p.starts_with("//"))
+    .and_then(|p| crate::redirect::safe_local_redirect(&p))
     .unwrap_or_else(|| href!(crate::app::dashboard::page).resolve(cx));
   Ok(see_other(redirect))
 }

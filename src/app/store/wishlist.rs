@@ -59,9 +59,7 @@ struct ToggleForm {
 
 /// Same-site path to return to; anything else falls back to the wishlist.
 fn return_path(next: Option<&str>) -> Option<String> {
-  let next = next?.trim();
-  (next.starts_with('/') && !next.starts_with("//") && !next.contains('\\'))
-    .then(|| next.to_string())
+  crate::redirect::safe_local_redirect(next?)
 }
 
 /// Path + query of a same-origin Referer, used when the form sends no `next`
@@ -229,6 +227,7 @@ mod tests {
     );
     assert_eq!(return_path(Some("//evil.example")), None);
     assert_eq!(return_path(Some("/\\evil.example")), None);
+    assert_eq!(return_path(Some("/\t/evil.example")), None);
     assert_eq!(return_path(Some("https://evil.example")), None);
     assert_eq!(return_path(None), None);
   }

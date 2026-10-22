@@ -16,6 +16,7 @@ pub async fn metrics(cx: &Cx) -> Result<impl IntoResponse> {
   if !metrics_request_is_authorized(
     authorization,
     crate::config::metrics_token().as_deref(),
+    crate::config::app_env() == "production",
   ) {
     return Err(unauthorized().into());
   }

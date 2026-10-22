@@ -114,7 +114,7 @@ pub async fn logout_page(
   crate::app::store::cart::clear_cart_token(cx);
   let redirect = body
     .and_then(|Form(b)| b.redirect)
-    .filter(|p| p.starts_with('/') && !p.starts_with("//"))
+    .and_then(|p| crate::redirect::safe_local_redirect(&p))
     .unwrap_or_else(|| href!(crate::app::page).resolve(cx));
   Ok(see_other(redirect))
 }

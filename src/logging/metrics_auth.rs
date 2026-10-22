@@ -15,13 +15,17 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
   acc == 0
 }
 
+/// `token` unset (or empty) means open metrics, except in production where
+/// it means closed: `/metrics` profiles traffic per route, so a missing
+/// `METRICS_TOKEN` must never expose it publicly (boot also refuses to
+/// start without one, see `config::Config::from_env`).
 pub fn metrics_request_is_authorized(
   authorization: Option<&str>,
   token: Option<&str>,
+  production: bool,
 ) -> bool {
   match token {
-    None => true,
-    Some("") => true,
+    None | Some("") => !production,
     Some(expected) => {
       presented_bearer_token(authorization).is_some_and(|presented| {
         constant_time_eq(presented.as_bytes(), expected.as_bytes())
@@ -36,16 +40,34 @@ mod tests {
 
   #[test]
   fn unset_or_empty_token_is_open() {
-    assert!(metrics_request_is_authorized(None, None));
-    assert!(metrics_request_is_authorized(None, Some("")));
-    assert!(metrics_request_is_authorized(Some("Bearer x"), None));
+    assert!(metrics_request_is_authorized(None, None, false));
+    assert!(metrics_request_is_authorized(None, Some(""), false));
+    assert!(metrics_request_is_authorized(Some("Bearer x"), None, false));
+  }
+
+  #[test]
+  fn unset_or_empty_token_is_closed_in_production() {
+    assert!(!metrics_request_is_authorized(None, None, true));
+    assert!(!metrics_request_is_authorized(None, Some(""), true));
+    assert!(!metrics_request_is_authorized(Some("Bearer x"), None, true));
+    assert!(!metrics_request_is_authorized(
+      Some("Bearer "),
+      Some(""),
+      true
+    ));
+    assert!(metrics_request_is_authorized(
+      Some("Bearer secret"),
+      Some("secret"),
+      true
+    ));
   }
 
   #[test]
   fn wrong_token_is_rejected() {
     assert!(!metrics_request_is_authorized(
       Some("Bearer other"),
-      Some("secret")
+      Some("secret"),
+      false
     ));
   }
 
@@ -53,20 +75,23 @@ mod tests {
   fn good_bearer_is_accepted() {
     assert!(metrics_request_is_authorized(
       Some("Bearer secret"),
-      Some("secret")
+      Some("secret"),
+      false
     ));
     assert!(metrics_request_is_authorized(
       Some("Bearer  secret  "),
-      Some("secret")
+      Some("secret"),
+      false
     ));
   }
 
   #[test]
   fn missing_header_is_rejected_when_token_set() {
-    assert!(!metrics_request_is_authorized(None, Some("secret")));
+    assert!(!metrics_request_is_authorized(None, Some("secret"), false));
     assert!(!metrics_request_is_authorized(
       Some("secret"),
-      Some("secret")
+      Some("secret"),
+      false
     ));
   }
 }

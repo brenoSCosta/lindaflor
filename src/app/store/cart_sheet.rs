@@ -19,9 +19,9 @@ use crate::components::input::input;
 use crate::components::separator::separator;
 
 use crate::app::store::cart::{
-  CartItem, cart_coupon_code, cart_subtotal_cents, hydrate_cart,
-  load_or_create_cart, remove_from_cart_proc, remove_set_from_cart_proc,
-  set_cart_coupon_proc, set_cart_quantity_proc, set_cart_set_quantity_proc,
+  CartItem, cart_coupon_code, cart_subtotal_cents, find_cart, hydrate_cart,
+  remove_from_cart_proc, remove_set_from_cart_proc, set_cart_coupon_proc,
+  set_cart_quantity_proc, set_cart_set_quantity_proc,
 };
 use crate::app::store::coupons::{CouponReject, resolve_coupon};
 use crate::app::store::pricing::pix_price;
@@ -102,19 +102,24 @@ fn group_set_lines(items: Vec<CartItem>) -> (Vec<CartItem>, Vec<SetGroup>) {
 pub async fn cart_sheet(cx: &Cx, open: Signal<bool>) -> Result<impl View> {
   let pool = app_context::<PgPool>(cx);
   let user_id = current_user_owned(cx).await?.map(|session| session.user.id);
-  let cart = load_or_create_cart(cx, pool, user_id).await?;
+  // Read-only: rendering the sheet must not create a cart row.
+  let cart = find_cart(cx, pool, user_id).await?;
 
-  let mut hydrated = hydrate_cart(pool, cart.id).await?;
+  let (mut items, notices, stored_coupon) = match cart {
+    Some(cart) => {
+      let hydrated = hydrate_cart(pool, cart.id).await?;
+      let coupon = cart_coupon_code(pool, cart.id).await?;
+      (hydrated.items, hydrated.notices, coupon)
+    }
+    None => (Vec::new(), Vec::new(), None),
+  };
   let store = crate::app::utils::object_store(cx);
-  for item in &mut hydrated.items {
+  for item in &mut items {
     item.image_url =
       crate::app::utils::resolve_storage_url(&store, item.image_url.as_deref())
         .await;
   }
-  let items = hydrated.items;
-  let notices = hydrated.notices;
   let subtotal = cart_subtotal_cents(&items).unwrap_or(0);
-  let stored_coupon = cart_coupon_code(pool, cart.id).await?;
   let coupon_initial = stored_coupon.clone().unwrap_or_default();
 
   let mut preview_tx = pool.begin().await?;
