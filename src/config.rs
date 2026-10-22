@@ -223,6 +223,11 @@ impl Config {
       totp_encryption_key()?;
       // `/metrics` must never be public in production.
       metrics_token().ok_or(ConfigError::MissingMetricsToken)?;
+      // Hashes one-time tokens and signs newsletter unsubscribe links.
+      let pepper = token_pepper();
+      if pepper.is_empty() || pepper == DEV_TOKEN_PEPPER {
+        return Err(ConfigError::MissingTokenPepper);
+      }
     }
     Ok(Self {
       port,
@@ -258,8 +263,13 @@ fn s3_from_env() -> Option<S3Config> {
 /// SHA-256. Rotate by setting a new value — outstanding tokens are
 /// invalidated (they are short-lived).
 pub fn token_pepper() -> String {
-  env_non_empty("TOKEN_PEPPER").unwrap_or_default()
+  read_env_or_file("TOKEN_PEPPER")
+    .map(|v| v.trim().to_string())
+    .unwrap_or_default()
 }
+
+/// Dev default from `devenv.nix`; never acceptable in production.
+const DEV_TOKEN_PEPPER: &str = "dev-pepper-change-me";
 
 /// Parse a raw `TOTP_ENCRYPTION_KEY` value into 32 key bytes.
 ///
@@ -569,6 +579,10 @@ pub enum ConfigError {
     "missing METRICS_TOKEN: set it (or METRICS_TOKEN_FILE) so /metrics is not public in production"
   )]
   MissingMetricsToken,
+  #[error(
+    "missing TOKEN_PEPPER: set a random value (or TOKEN_PEPPER_FILE) in production"
+  )]
+  MissingTokenPepper,
 }
 
 #[cfg(test)]
@@ -700,6 +714,7 @@ mod tests {
     );
     let _key_file = remove_env("TOTP_ENCRYPTION_KEY_FILE");
     let _metrics = set_env("METRICS_TOKEN", "scrape-secret");
+    let _pepper = set_env("TOKEN_PEPPER", "prod-random-pepper");
     Config::from_env().expect("prod boot with valid APP_ORIGIN");
   }
 
@@ -770,6 +785,30 @@ mod tests {
       matches!(err, ConfigError::MissingMetricsToken),
       "unexpected error: {err:?}"
     );
+  }
+
+  #[test]
+  fn from_env_fails_in_production_without_token_pepper() {
+    let _lock = ENV_LOCK.lock().expect("env lock");
+    let _env = set_env("APP_ENV", "production");
+    let _origin = set_env("APP_ORIGIN", "https://loja.example.com");
+    let _db = set_env("DATABASE_URL", "postgres://localhost/test");
+    let _key = set_env(
+      "TOTP_ENCRYPTION_KEY",
+      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    );
+    let _key_file = remove_env("TOTP_ENCRYPTION_KEY_FILE");
+    let _metrics = set_env("METRICS_TOKEN", "metrics-secret");
+    let _pepper_file = remove_env("TOKEN_PEPPER_FILE");
+    let _pepper = remove_env("TOKEN_PEPPER");
+    let err = Config::from_env().expect_err("missing pepper");
+    assert!(
+      matches!(err, ConfigError::MissingTokenPepper),
+      "unexpected error: {err:?}"
+    );
+    let _dev = set_env("TOKEN_PEPPER", DEV_TOKEN_PEPPER);
+    let err = Config::from_env().expect_err("dev pepper");
+    assert!(matches!(err, ConfigError::MissingTokenPepper));
   }
 
   #[test]

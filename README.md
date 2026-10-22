@@ -102,7 +102,7 @@ devenv exports the process environment. `DATABASE_URL` follows the Postgres port
 | `S3_ACCESS_KEY_ID`        | `rustfsadmin`                                             | RustFS access key |
 | `S3_SECRET_ACCESS_KEY`    | `rustfsadmin`                                             | RustFS secret key |
 | `S3_BUCKET`               | `lindaflor`                                               | Object bucket |
-| `TOKEN_PEPPER`            | `dev-pepper-change-me`                                    | Pepper for one-time tokens |
+| `TOKEN_PEPPER`            | `dev-pepper-change-me`                                    | Pepper for one-time tokens and signed newsletter-unsubscribe links (`TOKEN_PEPPER_FILE` supported). Required in production; the dev default is refused |
 | `LOG_SAMPLE_RATE`         | `1`                                                       | Sample rate for logging |
 | `LOG_SLOW_THRESHOLD_MS`   | `1000`                                                    | Slow request threshold in milliseconds |
 | `TRUSTED_PROXY_HOPS`      | `0`                                                       | Number of reverse proxies in front of the app (Topcoat trusted proxies); `0` = directly exposed, proxy headers ignored |
