@@ -191,8 +191,6 @@ pub async fn change_email(
     format!("{CHANGE_EMAIL_IDENTIFIER_PREFIX}{}:{new_email}", su.user.id);
   let expires_at = time::OffsetDateTime::now_utc()
     + time::Duration::seconds(CHANGE_EMAIL_TOKEN_TTL_SECS);
-  let expires_at =
-    time::PrimitiveDateTime::new(expires_at.date(), expires_at.time());
 
   sqlx::query!(
         r#"

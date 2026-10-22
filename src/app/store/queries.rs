@@ -164,6 +164,22 @@ pub fn format_price(cents: impl Into<i64>) -> String {
   format!("R$ {}", result)
 }
 
+/// Render a timestamp as `DD/MM/YYYY HH:MM` in Brasília time (UTC-3; Brazil
+/// has had no DST since 2019). Matches the `to_char(... AT TIME ZONE
+/// 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI')` used in SQL.
+pub fn format_datetime_br(at: time::OffsetDateTime) -> String {
+  let brt = time::UtcOffset::from_hms(-3, 0, 0).unwrap_or(time::UtcOffset::UTC);
+  let local = at.to_offset(brt);
+  format!(
+    "{:02}/{:02}/{:04} {:02}:{:02}",
+    local.day(),
+    u8::from(local.month()),
+    local.year(),
+    local.hour(),
+    local.minute()
+  )
+}
+
 pub fn category_label(category: &str) -> &'static str {
   match category {
     "biquini" => "Biquíni",

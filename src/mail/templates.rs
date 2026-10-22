@@ -146,15 +146,30 @@ const IGNORE_NOTE: &str =
 
 // --- Auth ---
 
-pub fn verify_email(name: &str, url: &str) -> Email {
+/// `first_purchase_code` is the storefront's welcome coupon
+/// (`store_settings.first_purchase_coupon_code`), shown to new customers.
+pub fn verify_email(
+  name: &str,
+  url: &str,
+  first_purchase_code: Option<&str>,
+) -> Email {
+  let mut paragraphs = vec![
+    greeting(name),
+    "Para ativar sua conta, confirme seu endereço de e-mail clicando no botão abaixo. O link vale por 24 horas.".to_string(),
+  ];
+  if let Some(code) = first_purchase_code
+    .map(str::trim)
+    .filter(|code| !code.is_empty())
+  {
+    paragraphs.push(format!(
+      "Presente de boas-vindas: use o cupom {code} na sua primeira compra."
+    ));
+  }
   render(
     format!("Confirme seu e-mail · {BRAND}"),
     Body {
       heading: "Confirme seu e-mail",
-      paragraphs: vec![
-        greeting(name),
-        "Para ativar sua conta, confirme seu endereço de e-mail clicando no botão abaixo. O link vale por 24 horas.".to_string(),
-      ],
+      paragraphs,
       action: Some(("Confirmar e-mail", url)),
       code: None,
       footnote: Some(IGNORE_NOTE),
@@ -389,7 +404,7 @@ mod tests {
   fn auth_templates_carry_link_in_both_parts() {
     let url = "https://loja.example.com/reset-password?token=abc123";
     for email in [
-      verify_email("Ana", url),
+      verify_email("Ana", url, None),
       password_reset("Ana", url),
       change_email("Ana", "nova@example.com", url),
       delete_account("Ana", url),
@@ -427,7 +442,18 @@ mod tests {
   }
 
   #[test]
+  fn verify_email_mentions_first_purchase_coupon() {
+    let url = "https://x/verify-email?token=t";
+    let with = verify_email("Ana", url, Some(" BEMVINDA10 "));
+    assert!(with.text.contains("use o cupom BEMVINDA10 na sua primeira"));
+    assert!(with.html.contains("BEMVINDA10"));
+    for code in [None, Some("  ")] {
+      assert!(!verify_email("Ana", url, code).text.contains("cupom"));
+    }
+  }
+
+  #[test]
   fn greeting_without_name() {
-    assert!(verify_email("  ", "https://x").text.contains("Olá!"));
+    assert!(verify_email("  ", "https://x", None).text.contains("Olá!"));
   }
 }

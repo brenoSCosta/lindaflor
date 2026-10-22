@@ -51,7 +51,7 @@
       {
         "ordinal": 9,
         "name": "ban_expires",
-        "type_info": "Timestamp"
+        "type_info": "Timestamptz"
       },
       {
         "ordinal": 10,

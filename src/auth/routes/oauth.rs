@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
-use time::PrimitiveDateTime;
+use time::OffsetDateTime;
 use topcoat::{
   Result,
   context::{Cx, app_context},
@@ -62,9 +62,8 @@ struct GoogleCallbackQuery {
   error_description: Option<String>,
 }
 
-fn expires_at_from_secs(secs: i64) -> PrimitiveDateTime {
-  let odt = time::OffsetDateTime::now_utc() + time::Duration::seconds(secs);
-  PrimitiveDateTime::new(odt.date(), odt.time())
+fn expires_at_from_secs(secs: i64) -> OffsetDateTime {
+  OffsetDateTime::now_utc() + time::Duration::seconds(secs)
 }
 
 /// Google's `email_verified` claim gates account linking.
@@ -502,7 +501,7 @@ pub struct GoogleAccountUpsert<'a> {
   pub refresh_token: Option<&'a str>,
   pub id_token: Option<&'a str>,
   pub scope: Option<&'a str>,
-  pub access_expires: Option<PrimitiveDateTime>,
+  pub access_expires: Option<OffsetDateTime>,
 }
 
 /// Link a Google account to an already-authenticated user (link-social flow).

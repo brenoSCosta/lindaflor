@@ -1,9 +1,9 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 use http::StatusCode;
 use serde::Deserialize;
 use sqlx::PgPool;
-use time::PrimitiveDateTime;
+use time::OffsetDateTime;
 use topcoat::{
   Result,
   context::{Cx, app_context},
@@ -27,12 +27,8 @@ pub struct SignUpEmailBody {
   pub password: String,
 }
 
-fn system_time_to_primitive(st: SystemTime) -> PrimitiveDateTime {
-  let duration = st.duration_since(UNIX_EPOCH).unwrap_or_default();
-  let odt =
-    time::OffsetDateTime::from_unix_timestamp(duration.as_secs() as i64)
-      .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
-  PrimitiveDateTime::new(odt.date(), odt.time())
+fn system_time_to_offset(st: SystemTime) -> OffsetDateTime {
+  OffsetDateTime::from(st)
 }
 
 #[utoipa::path(
@@ -132,7 +128,7 @@ pub async fn sign_up_email(
       ban_expires: None,
     },
     session_id,
-    expires_at: system_time_to_primitive(session.expires_at),
+    expires_at: system_time_to_offset(session.expires_at),
     impersonated_by: None,
   });
 

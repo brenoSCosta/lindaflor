@@ -6,6 +6,78 @@ use sha2::{Digest, Sha256};
 
 const PRESIGN_EXPIRY_SECS: u64 = 86_400;
 
+/// How long a presigned GET URL is reused before a fresh one is signed.
+/// Leaves 4h of validity on every URL handed out, so a page rendered just
+/// before the cache entry rolls over still loads its images.
+const PRESIGN_CACHE_TTL_SECS: i64 = 20 * 3600;
+
+/// Upper bound on cached presigned URLs (one per storage key).
+const PRESIGN_CACHE_MAX_ENTRIES: usize = 4096;
+
+type PresignEntries = HashMap<String, (time::OffsetDateTime, String)>;
+
+/// In-process cache of presigned GET URLs keyed by storage key.
+///
+/// The SigV4 signature covers the signing time, so presigning on every
+/// render gives each page view new image URLs and browsers/CDNs never hit
+/// their caches. Reusing one URL per key for most of its lifetime keeps them
+/// stable. Bounded: expired entries are swept when full, then the oldest
+/// entry is evicted.
+#[derive(Clone, Default)]
+pub struct PresignCache {
+  entries: Arc<Mutex<PresignEntries>>,
+}
+
+impl PresignCache {
+  fn lock(&self) -> std::sync::MutexGuard<'_, PresignEntries> {
+    self.entries.lock().unwrap_or_else(|err| err.into_inner())
+  }
+
+  /// Cached URL for `key` if it was signed less than
+  /// [`PRESIGN_CACHE_TTL_SECS`] before `now`.
+  pub fn get(&self, key: &str, now: time::OffsetDateTime) -> Option<String> {
+    let entries = self.lock();
+    let (signed_at, url) = entries.get(key)?;
+    (now - *signed_at < time::Duration::seconds(PRESIGN_CACHE_TTL_SECS))
+      .then(|| url.clone())
+  }
+
+  pub fn insert(
+    &self,
+    key: &str,
+    signed_at: time::OffsetDateTime,
+    url: String,
+  ) {
+    let mut entries = self.lock();
+    if entries.len() >= PRESIGN_CACHE_MAX_ENTRIES && !entries.contains_key(key)
+    {
+      let ttl = time::Duration::seconds(PRESIGN_CACHE_TTL_SECS);
+      entries.retain(|_, (at, _)| signed_at - *at < ttl);
+      if entries.len() >= PRESIGN_CACHE_MAX_ENTRIES
+        && let Some(oldest) = entries
+          .iter()
+          .min_by_key(|(_, (at, _))| *at)
+          .map(|(k, _)| k.clone())
+      {
+        entries.remove(&oldest);
+      }
+    }
+    entries.insert(key.to_string(), (signed_at, url));
+  }
+
+  pub fn remove(&self, key: &str) {
+    self.lock().remove(key);
+  }
+
+  pub fn len(&self) -> usize {
+    self.lock().len()
+  }
+
+  pub fn is_empty(&self) -> bool {
+    self.len() == 0
+  }
+}
+
 #[derive(Clone)]
 pub struct S3ObjectStore {
   http: reqwest::Client,
@@ -14,6 +86,7 @@ pub struct S3ObjectStore {
   region: String,
   access_key_id: String,
   secret_access_key: String,
+  presign_cache: PresignCache,
 }
 
 impl S3ObjectStore {
@@ -25,6 +98,7 @@ impl S3ObjectStore {
       region: config.region.clone(),
       access_key_id: config.access_key_id.clone(),
       secret_access_key: config.secret_access_key.clone(),
+      presign_cache: PresignCache::default(),
     }
   }
 
@@ -66,6 +140,7 @@ impl S3ObjectStore {
   }
 
   async fn delete(&self, key: &str) -> Result<(), StorageError> {
+    self.presign_cache.remove(key);
     let (amz_date, date_stamp) = amz_timestamps();
     let payload_hash = sha256_hex(&[]);
     let canonical_uri = self.object_canonical_uri(key);
@@ -95,8 +170,23 @@ impl S3ObjectStore {
   }
 
   async fn presign_get(&self, key: &str) -> Result<String, StorageError> {
-    let (amz_date, date_stamp) = amz_timestamps();
-    self.presigned_url(key, &amz_date, &date_stamp)
+    self.presign_get_at(key, time::OffsetDateTime::now_utc())
+  }
+
+  /// Presigned GET for `key` as of `now`, reusing the cached URL while it
+  /// is younger than [`PRESIGN_CACHE_TTL_SECS`].
+  fn presign_get_at(
+    &self,
+    key: &str,
+    now: time::OffsetDateTime,
+  ) -> Result<String, StorageError> {
+    if let Some(url) = self.presign_cache.get(key, now) {
+      return Ok(url);
+    }
+    let (amz_date, date_stamp) = amz_timestamps_at(now);
+    let url = self.presigned_url(key, &amz_date, &date_stamp)?;
+    self.presign_cache.insert(key, now, url.clone());
+    Ok(url)
   }
 
   async fn ensure_bucket(&self) -> Result<(), StorageError> {
@@ -373,7 +463,10 @@ fn signed_host(endpoint: &str) -> String {
 /// `(amz_date, date_stamp)` as `YYYYMMDDTHHMMSSZ` + `YYYYMMDD`,
 /// formatted manually from components (no `time` formatting feature).
 fn amz_timestamps() -> (String, String) {
-  let now = time::OffsetDateTime::now_utc();
+  amz_timestamps_at(time::OffsetDateTime::now_utc())
+}
+
+fn amz_timestamps_at(now: time::OffsetDateTime) -> (String, String) {
   let amz_date = format!(
     "{:04}{:02}{:02}T{:02}{:02}{:02}Z",
     now.year(),
@@ -659,6 +752,79 @@ mod tests {
       secret_access_key: "testsecret".to_string(),
       bucket: "test-bucket".to_string(),
     })
+  }
+
+  #[test]
+  fn s3_presign_cache_hit_returns_same_url() {
+    let store = test_store();
+    let key = "products/p/a.jpg";
+    let t0 = time::OffsetDateTime::from_unix_timestamp(1_767_268_800).unwrap();
+
+    let first = store.presign_get_at(key, t0).unwrap();
+    // Signing at a later time yields a different URL...
+    let (later_date, later_stamp) =
+      amz_timestamps_at(t0 + time::Duration::minutes(5));
+    let fresh = store.presigned_url(key, &later_date, &later_stamp).unwrap();
+    assert_ne!(first, fresh);
+    // ...but the cache keeps handing out the first one.
+    let cached = store
+      .presign_get_at(key, t0 + time::Duration::minutes(5))
+      .unwrap();
+    assert_eq!(first, cached);
+    let still_cached = store
+      .presign_get_at(key, t0 + time::Duration::hours(19))
+      .unwrap();
+    assert_eq!(first, still_cached);
+
+    // Past the cache TTL a new URL is signed (and then cached).
+    let renewed = store
+      .presign_get_at(key, t0 + time::Duration::hours(21))
+      .unwrap();
+    assert_ne!(first, renewed);
+    assert_eq!(
+      store
+        .presign_get_at(key, t0 + time::Duration::hours(22))
+        .unwrap(),
+      renewed
+    );
+  }
+
+  #[test]
+  fn s3_presign_cache_is_per_key() {
+    let store = test_store();
+    let t0 = time::OffsetDateTime::from_unix_timestamp(1_767_268_800).unwrap();
+    let a = store.presign_get_at("a.jpg", t0).unwrap();
+    let b = store.presign_get_at("b.jpg", t0).unwrap();
+    assert_ne!(a, b);
+    assert_eq!(store.presign_cache.len(), 2);
+    store.presign_cache.remove("a.jpg");
+    assert_eq!(store.presign_cache.len(), 1);
+    assert!(store.presign_cache.get("a.jpg", t0).is_none());
+  }
+
+  #[test]
+  fn presign_cache_is_bounded() {
+    let cache = PresignCache::default();
+    let t0 = time::OffsetDateTime::from_unix_timestamp(1_767_268_800).unwrap();
+    for i in 0..PRESIGN_CACHE_MAX_ENTRIES {
+      cache.insert(
+        &format!("k{i}"),
+        t0 + time::Duration::seconds(i as i64),
+        format!("u{i}"),
+      );
+    }
+    assert_eq!(cache.len(), PRESIGN_CACHE_MAX_ENTRIES);
+    // Full and nothing expired: the oldest entry makes room.
+    let late = t0 + time::Duration::hours(1);
+    cache.insert("new", late, "u-new".to_string());
+    assert_eq!(cache.len(), PRESIGN_CACHE_MAX_ENTRIES);
+    assert!(cache.get("k0", late).is_none());
+    assert_eq!(cache.get("k1", late).as_deref(), Some("u1"));
+    assert_eq!(cache.get("new", late).as_deref(), Some("u-new"));
+    // Full with everything expired: the sweep empties the map.
+    let much_later = t0 + time::Duration::days(2);
+    cache.insert("fresh", much_later, "u-fresh".to_string());
+    assert_eq!(cache.len(), 1);
   }
 
   #[tokio::test]

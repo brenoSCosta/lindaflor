@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT whatsapp_number, whatsapp_message_template, pix_key, pix_key_type::text AS pix_key_type, pix_merchant_name, pix_merchant_city, free_shipping_threshold_cents, pix_discount_percent, announcement_text, first_purchase_coupon_code\n         FROM store_settings ORDER BY created_at ASC LIMIT 1",
+  "query": "SELECT whatsapp_number, whatsapp_message_template, pix_key, pix_key_type::text AS pix_key_type, pix_merchant_name, pix_merchant_city, free_shipping_threshold_cents, pix_discount_percent, announcement_text, first_purchase_coupon_code\n         FROM store_settings WHERE id",
   "describe": {
     "columns": [
       {
@@ -70,5 +70,5 @@
       true
     ]
   },
-  "hash": "9113d2ab08bc53ec7b1e8bcef8ae04368db515da7c3a9099f1683c5baa2b44d6"
+  "hash": "fc2d3c72a04893ba6ef1d81a846f30724de3039154ede11dd2af7c00db6f1e90"
 }

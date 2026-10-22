@@ -12,7 +12,7 @@ use topcoat::{
 };
 use uuid::Uuid;
 
-use crate::auth::routes::dto::format_primitive;
+use crate::auth::routes::dto::format_timestamp;
 use crate::auth::session_store::{self, token_hash_hex};
 use crate::auth::user::current_user;
 
@@ -91,8 +91,8 @@ pub async fn list_sessions(cx: &Cx) -> Result<Json<Vec<ListedSessionJson>>> {
         token: id,
         user_agent: r.user_agent,
         ip_address: r.ip_address,
-        created_at: format_primitive(r.created_at),
-        expires_at: format_primitive(r.expires_at),
+        created_at: format_timestamp(r.created_at),
+        expires_at: format_timestamp(r.expires_at),
         current,
       }
     })

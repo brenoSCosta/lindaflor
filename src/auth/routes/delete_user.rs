@@ -185,8 +185,6 @@ pub async fn delete_user(
   let id = Uuid::now_v7();
   let expires_at = time::OffsetDateTime::now_utc()
     + time::Duration::seconds(DELETE_TOKEN_TTL_SECS);
-  let expires_at =
-    time::PrimitiveDateTime::new(expires_at.date(), expires_at.time());
 
   sqlx::query!(
         r#"

@@ -189,8 +189,8 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     "SELECT status::text AS status, guest_email, subtotal_cents, shipping_cents,
             discount_cents, total_cents, shipping_address, payment_meta,
             paid_at::text AS paid_at,
-            reservation_expires_at::text AS reservation_expires_at,
-            created_at::text AS created_at,
+            to_char(reservation_expires_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS reservation_expires_at,
+            to_char(created_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS created_at,
             carrier, tracking_code,
             to_char(shipped_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS shipped_at,
             to_char(delivered_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS delivered_at

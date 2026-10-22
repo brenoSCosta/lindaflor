@@ -64,11 +64,14 @@ COPY . .
 # `topcoat asset bundle` runs `cargo build` for the binary, then writes the
 # asset bundle (CSS, JS, icons, fonts + manifest.toml) to
 # `target/release/assets`, which the server loads from next to its executable.
+# `create-admin` (admin bootstrap CLI, see README) ships in the runtime image.
 RUN test -d .sqlx || { echo ".sqlx/ query cache missing: run prepare-sqlx and commit it" >&2; exit 1; } \
  && topcoat asset bundle --release --bin lindaflor \
  && test -f target/release/assets/manifest.toml \
+ && cargo build --release --locked --bin create-admin \
  && mkdir -p /out \
  && cp target/release/lindaflor /out/lindaflor \
+ && cp target/release/create-admin /out/create-admin \
  && cp -r target/release/assets /out/assets
 
 # ---------------------------------------------------------------------------
@@ -111,6 +114,7 @@ RUN apt-get update \
 WORKDIR /app
 # The bundle must sit beside the executable (`AssetBundle::load`).
 COPY --from=builder --chown=root:root /out/lindaflor /app/lindaflor
+COPY --from=builder --chown=root:root /out/create-admin /usr/local/bin/create-admin
 COPY --from=builder --chown=root:root /out/assets /app/assets
 # HOST defaults to 127.0.0.1 in the binary; containers must listen on all
 # interfaces. APP_ENV=production also disables MIGRATE_ON_BOOT and dotenv.

@@ -16,7 +16,7 @@ use crate::auth::CREDENTIAL_PROVIDER_ID;
 use crate::auth::google::{
   GOOGLE_PROVIDER_ID, GoogleOAuthConfig, safe_callback_path,
 };
-use crate::auth::routes::dto::{format_primitive, random_token};
+use crate::auth::routes::dto::{format_timestamp, random_token};
 use crate::auth::routes::oauth::{
   NewOAuthState, OAUTH_STATE_TTL_SECS, google_authorize_url,
   pkce_s256_challenge, store_oauth_state_full,
@@ -92,7 +92,7 @@ pub async fn list_accounts(cx: &Cx) -> Result<Json<Vec<AccountJson>>> {
       id: r.id.to_string(),
       provider_id: r.provider_id,
       account_id: r.account_id,
-      created_at: format_primitive(r.created_at),
+      created_at: format_timestamp(r.created_at),
     })
     .collect();
 

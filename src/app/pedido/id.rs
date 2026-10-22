@@ -132,7 +132,8 @@ async fn get_order(
     "SELECT id, status::text AS status, user_id, access_token,
             access_token_expires_at <= now() AS token_expired,
             guest_email, subtotal_cents, shipping_cents,
-            discount_cents, pix_discount_cents, total_cents, shipping_address, payment_meta, created_at::text AS created_at
+            discount_cents, pix_discount_cents, total_cents, shipping_address, payment_meta,
+            to_char(created_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS created_at
      FROM orders WHERE id = $1",
   )
   .bind(id)

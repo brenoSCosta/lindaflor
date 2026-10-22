@@ -1,7 +1,7 @@
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 use sqlx::PgPool;
-use time::PrimitiveDateTime;
+use time::OffsetDateTime;
 use topcoat::session::{Session, TokenHash};
 use uuid::Uuid;
 
@@ -12,12 +12,8 @@ pub fn token_hash_hex(hash: &TokenHash) -> String {
   hex::encode(**hash)
 }
 
-fn system_time_to_primitive(st: SystemTime) -> PrimitiveDateTime {
-  let duration = st.duration_since(UNIX_EPOCH).unwrap_or_default();
-  let secs = duration.as_secs() as i64;
-  let odt = time::OffsetDateTime::from_unix_timestamp(secs)
-    .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
-  PrimitiveDateTime::new(odt.date(), odt.time())
+fn system_time_to_offset(st: SystemTime) -> OffsetDateTime {
+  OffsetDateTime::from(st)
 }
 
 /// Insert a new session row after [`topcoat::session::start`].
@@ -33,7 +29,7 @@ pub async fn insert_session(
 ) -> Result<Uuid, sqlx::Error> {
   let id = Uuid::now_v7();
   let token = token_hash_hex(&session.token_hash);
-  let expires_at = system_time_to_primitive(session.expires_at);
+  let expires_at = system_time_to_offset(session.expires_at);
 
   sqlx::query!(
     r#"
@@ -61,8 +57,8 @@ pub async fn insert_session(
 #[derive(Debug, Clone)]
 pub struct SessionWithUser {
   pub session_id: Uuid,
-  pub expires_at: PrimitiveDateTime,
-  pub updated_at: PrimitiveDateTime,
+  pub expires_at: OffsetDateTime,
+  pub updated_at: OffsetDateTime,
   pub impersonated_by: Option<Uuid>,
   pub user_id: Uuid,
   pub name: String,
@@ -73,7 +69,7 @@ pub struct SessionWithUser {
   pub role: Option<String>,
   pub banned: bool,
   pub ban_reason: Option<String>,
-  pub ban_expires: Option<PrimitiveDateTime>,
+  pub ban_expires: Option<OffsetDateTime>,
 }
 
 /// Look up a non-expired session by token hash hex.
@@ -208,7 +204,7 @@ pub async fn update_expiry(
   expires_at: SystemTime,
 ) -> Result<(), sqlx::Error> {
   let token = token_hash_hex(hash);
-  let expires_at = system_time_to_primitive(expires_at);
+  let expires_at = system_time_to_offset(expires_at);
   sqlx::query!(
     r#"
         UPDATE sessions

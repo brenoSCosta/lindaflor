@@ -205,7 +205,18 @@ The build needs no database (`SQLX_OFFLINE=true` + committed `.sqlx/`) but does 
    ```
 
 2. Start: `APP_ORIGIN=https://<your-domain> docker compose -f docker-compose.prod.yml up -d --build`. Compose waits for Postgres, runs the `migrate` job to completion, then starts `web`. Put a TLS reverse proxy in front of `127.0.0.1:4200` (`TRUSTED_PROXY_HOPS=1` is the compose default).
-3. First admin: there is no production admin-bootstrap command yet. The `seed` binary is not shipped in the image and also inserts demo catalog data, so do not point it at production; until a one-shot admin-create exists, sign up normally and promote that user (`UPDATE users SET role = 'admin' WHERE email = …`) in a `psql` session.
+3. First admin: run the `create-admin` CLI shipped in the runtime image (never the `seed` binary, which inserts demo catalog data and is not in the image). It creates the user with a verified email and the `admin` role, or promotes an existing user, and records an `audit_events` row. The password is read from `ADMIN_PASSWORD_FILE` or one line on stdin (never argv) and must pass the normal sign-up policy (length + zxcvbn):
+
+   ```bash
+   # interactive-free: pipe the password on stdin
+   printf '%s\n' "$ADMIN_PASSWORD" | docker compose -f docker-compose.prod.yml \
+     run --rm -T web create-admin --email dona@lindaflor.com.br --name "Dona"
+   # promote an existing (signed-up) user without touching their password
+   docker compose -f docker-compose.prod.yml run --rm -T web \
+     create-admin --email cliente@example.com --no-password
+   ```
+
+   Re-running it with a password for an existing user resets that user's credential password (admin recovery). Locally: `cargo run --bin create-admin -- --email … < password.txt`. It uses the server's env (`DATABASE_URL[_FILE]`, and in production `APP_ORIGIN` + `TOTP_ENCRYPTION_KEY[_FILE]`) and refuses to run with pending migrations.
 
 Notes:
 
@@ -213,7 +224,7 @@ Notes:
 - **Migrations never run in the web process in production.** `MIGRATE_ON_BOOT` defaults off when `APP_ENV=production`, and the server refuses to boot while migrations are pending, dirty, or checksum-mismatched. Always run the migrate job first (compose does this; on other platforms use it as a release/pre-deploy job or init container: `docker run --rm -e DATABASE_URL=… lindaflor:migrate`).
 - Migrations are forward-only (no down files). Write them to be compatible with the previous release still running (expand → deploy → contract), since old replicas keep serving during a rollout.
 - Health: `/api/health` is liveness (image `HEALTHCHECK`); `/api/readyz` checks Postgres, Valkey and the bucket (use it for load-balancer readiness). `SIGTERM` drains in-flight requests for up to 30s.
-- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` are read from plain env only (no `*_FILE` variant yet).
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` also accept `GOOGLE_CLIENT_ID_FILE` / `GOOGLE_CLIENT_SECRET_FILE` (Docker secrets); the plain variable wins when both are set.
 
 ### Backups and restore
 

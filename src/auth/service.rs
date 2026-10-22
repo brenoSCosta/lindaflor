@@ -1,7 +1,7 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
 use sqlx::PgPool;
-use time::PrimitiveDateTime;
+use time::OffsetDateTime;
 use topcoat::{
   Result,
   context::Cx,
@@ -19,7 +19,7 @@ use crate::auth::password::{
   verify_password,
 };
 use crate::auth::routes::dto::{
-  client_meta, format_primitive, normalize_email, random_token,
+  client_meta, format_timestamp, normalize_email, random_token,
 };
 use crate::auth::routes::oauth::{
   NewOAuthState, OAUTH_STATE_TTL_SECS, google_authorize_url,
@@ -96,17 +96,12 @@ pub fn verification_token_hash_prefix(hash: &str) -> &str {
   hash.get(..8).unwrap_or(hash)
 }
 
-fn system_time_to_primitive(st: SystemTime) -> PrimitiveDateTime {
-  let duration = st.duration_since(UNIX_EPOCH).unwrap_or_default();
-  let odt =
-    time::OffsetDateTime::from_unix_timestamp(duration.as_secs() as i64)
-      .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
-  PrimitiveDateTime::new(odt.date(), odt.time())
+fn system_time_to_offset(st: SystemTime) -> OffsetDateTime {
+  OffsetDateTime::from(st)
 }
 
-fn now_plus(secs: i64) -> PrimitiveDateTime {
-  let odt = time::OffsetDateTime::now_utc() + time::Duration::seconds(secs);
-  PrimitiveDateTime::new(odt.date(), odt.time())
+fn now_plus(secs: i64) -> OffsetDateTime {
+  OffsetDateTime::now_utc() + time::Duration::seconds(secs)
 }
 
 /// Argon2id backup-code hashing/verification is blocking CPU work: run it
@@ -200,7 +195,7 @@ pub async fn start_session_for_user(
   Ok(SessionUser {
     user,
     session_id,
-    expires_at: system_time_to_primitive(session.expires_at),
+    expires_at: system_time_to_offset(session.expires_at),
     impersonated_by,
   })
 }
@@ -1074,8 +1069,8 @@ pub async fn list_user_sessions(
           id: r.id,
           user_agent: r.user_agent,
           ip_address: r.ip_address,
-          created_at: format_primitive(r.created_at),
-          expires_at: format_primitive(r.expires_at),
+          created_at: format_timestamp(r.created_at),
+          expires_at: format_timestamp(r.expires_at),
           current,
         }
       })
@@ -1134,7 +1129,7 @@ pub async fn list_linked_accounts(
         id: r.id,
         provider_id: r.provider_id,
         account_id: r.account_id,
-        created_at: format_primitive(r.created_at),
+        created_at: format_timestamp(r.created_at),
       })
       .collect(),
   )
@@ -1904,8 +1899,8 @@ pub async fn list_admin_user_sessions(
       .into_iter()
       .map(|r| AdminSessionRow {
         id: r.id,
-        created_at: format_primitive(r.created_at),
-        expires_at: format_primitive(r.expires_at),
+        created_at: format_timestamp(r.created_at),
+        expires_at: format_timestamp(r.expires_at),
         ip_address: r.ip_address,
         user_agent: r.user_agent,
       })

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use time::PrimitiveDateTime;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::auth::user::{SessionUser, User};
@@ -38,9 +38,8 @@ pub struct SessionPayload {
   pub session: AuthSessionJson,
 }
 
-pub fn format_primitive(dt: PrimitiveDateTime) -> String {
-  dt.assume_utc()
-    .format(&time::format_description::well_known::Rfc3339)
+pub fn format_timestamp(dt: OffsetDateTime) -> String {
+  dt.format(&time::format_description::well_known::Rfc3339)
     .unwrap_or_else(|_| dt.to_string())
 }
 
@@ -56,7 +55,7 @@ impl From<&User> for AuthUserJson {
       two_factor_enabled: user.two_factor_enabled,
       banned: user.banned,
       ban_reason: user.ban_reason.clone(),
-      ban_expires: user.ban_expires.map(format_primitive),
+      ban_expires: user.ban_expires.map(format_timestamp),
     }
   }
 }
@@ -64,13 +63,13 @@ impl From<&User> for AuthUserJson {
 impl AuthSessionJson {
   pub fn new(
     session_id: Uuid,
-    expires_at: PrimitiveDateTime,
+    expires_at: OffsetDateTime,
     user_id: Uuid,
     impersonated_by: Option<Uuid>,
   ) -> Self {
     Self {
       id: session_id.to_string(),
-      expires_at: format_primitive(expires_at),
+      expires_at: format_timestamp(expires_at),
       user_id: user_id.to_string(),
       impersonated_by: impersonated_by.map(|id| id.to_string()),
     }

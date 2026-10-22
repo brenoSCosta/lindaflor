@@ -207,7 +207,7 @@ async fn order_directory(
                           )
                           table_cell("R$ " (order.total_cents / 100))
                           table_cell(
-                              <span class="text-muted-foreground">(order.created_at.to_string())</span>
+                              <span class="text-muted-foreground">(crate::app::store::queries::format_datetime_br(order.created_at))</span>
                           )
                       )
                   }

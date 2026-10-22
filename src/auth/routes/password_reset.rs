@@ -70,8 +70,6 @@ pub async fn request_password_reset(
       let identifier = format!("{RESET_IDENTIFIER_PREFIX}{email}");
       let expires_at = time::OffsetDateTime::now_utc()
         + time::Duration::seconds(RESET_TOKEN_TTL_SECS);
-      let expires_at =
-        time::PrimitiveDateTime::new(expires_at.date(), expires_at.time());
 
       // Invalidate outstanding reset tokens so only the newest works.
       sqlx::query!(
