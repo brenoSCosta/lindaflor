@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE accounts\n            SET\n                access_token = $3,\n                refresh_token = COALESCE($4, refresh_token),\n                id_token = COALESCE($5, id_token),\n                scope = COALESCE($6, scope),\n                access_token_expires_at = $7,\n                updated_at = now()\n            WHERE provider_id = $1 AND account_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamp"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6e39b8840db15bcc31e42804f1164f9ca36a2abacff5cc078db2f7672f5e6890"
+}

@@ -198,9 +198,9 @@ Today: Google `Client::new()` per `exchange_code` / `fetch_userinfo` (`google.rs
 
 ### 3.1 No Dockerfile / compose / CI — repo root, `.github/` missing
 Only `devenv.nix` dev stack exists. Not reproducibly deployable.
-- [ ] Add multi-stage `Dockerfile` (pinned `rust:1.98.1-slim` per `rust-toolchain.toml`): `cargo chef`-style cache, `sqlx migrate run` as separate migrate-job (not in web boot — see §3.5), `topcoat asset bundle`, non-root user, `HEALTHCHECK`.
-- [ ] Add `.dockerignore`, `docker-compose.prod.yml` (web + postgres + valkey + rustfs), `fly.toml` or `render.yaml` per target.
-- [ ] Add `.github/workflows/ci.yml`: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, `cargo audit`, `sqlx migrate info`, `cargo sqlx prepare --check`, asset-bundle smoke.
+- [x] Add multi-stage `Dockerfile` (pinned `rust:1.98.1-slim` per `rust-toolchain.toml`): `cargo chef`-style cache, `sqlx migrate run` as separate migrate-job (not in web boot — see §3.5), `topcoat asset bundle`, non-root user, `HEALTHCHECK`.
+- [x] Add `.dockerignore`, `docker-compose.prod.yml` (web + migrate job + postgres + valkey + rustfs, secrets via `*_FILE`). `fly.toml` / `render.yaml` still open (pick a target).
+- [x] Add `.github/workflows/ci.yml`: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`, `cargo audit`, `sqlx migrate info`, `cargo sqlx prepare --check`, asset-bundle smoke.
 - [x] Pin prod toolchain outside devenv (landed: `flake.nix` uses `rust-overlay` `stable."1.98.1"` with `rust-src/clippy/rustfmt`).
 ### 3.2 Secrets leak via `Debug` + weak defaults — `src/config.rs:3,13`, `devenv.nix:34,42-48`, `README.md:53-54`
 ```rust
@@ -235,11 +235,12 @@ Landed: prod boot requires valid `APP_ORIGIN`; `OriginPolicy` always Verify (tru
 ### 3.5 Migrations on every boot, tiny pool — `src/db.rs:5-8`
 `sqlx::migrate!().run()` on boot: OK single-instance, unsafe multi-replica race; blocks serve on DB down. `max_connections(5)` hardcoded, no timeouts (`test_support.rs:34` uses 16 — divergence).
 - [x] Fix (landed): migrate-job pattern (`MIGRATE_ON_BOOT`, default on outside prod / off in prod, abort on pending/dirty/checksum mismatch); pool from env (`PG_MAX_CONN`, default 20 prod) + `acquire_timeout(5s)`, `idle_timeout(10m)`; no down-migrations in prod (forward-fix + PITR, enforced by `embedded_migrations_are_forward_only` test).
-- [ ] Remaining: pre-migrate backup step + `scripts/migrate.sh` / init-container wiring; document RPO/RTO.
+- [x] Pre-migrate backup step + `scripts/migrate.sh` (Dockerfile `migrate` target, compose `migrate` job gating `web`); RPO/RTO in README "Deploy & backups".
 
 ### 3.6 No backups / DR — `migrations/`, `devenv.nix:87`, `dump.rdb` in root
 No `pg_dump`/`pg_basebackup`/PITR, no Valkey `BGSAVE` schedule, no S3 versioning/lifecycle. `dump.rdb` (89B) is local persistence, not a backup.
-- [ ] Fix: nightly `pg_dump --format=custom` + WAL archiving / PITR (7d min), Valkey RDB+AOF + snapshot schedule, S3 versioning + cross-region copy, quarterly restore drill. Document RPO/RTO in README. Remove `dump.rdb` from repo working tree noise (already gitignored — keep ignored).
+- [~] Landed: `scripts/backup.sh` (custom-format dump, `pg_restore --list` verify, rotation, optional S3 upload), compose `backup` job for host cron, Valkey AOF+RDB in compose, restore + drill + RPO/RTO in README. Still open: WAL archiving/PITR (managed PG or pgBackRest/wal-g), S3 versioning/replication setup, first restore drill.
+- [ ] Original: nightly `pg_dump --format=custom` + WAL archiving / PITR (7d min), Valkey RDB+AOF + snapshot schedule, S3 versioning + cross-region copy, quarterly restore drill. Document RPO/RTO in README. Remove `dump.rdb` from repo working tree noise (already gitignored — keep ignored).
 
 ---
 

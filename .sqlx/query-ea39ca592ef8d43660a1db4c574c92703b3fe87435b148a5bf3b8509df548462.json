@@ -1,0 +1,67 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT p.id::text AS \"id!\", p.name, p.slug, p.category::text AS \"category!\", p.price_in_cents, p.active,\n                COUNT(DISTINCT pv.id) as variant_count,\n                COALESCE(SUM(GREATEST(i.quantity - i.reserved, 0)) FILTER (WHERE w.active = true), 0) as available_total\n         FROM products p\n         LEFT JOIN product_variants pv ON pv.product_id = p.id\n         LEFT JOIN inventory i ON i.variant_id = pv.id\n         LEFT JOIN warehouses w ON w.id = i.warehouse_id\n         WHERE ($1 = '' OR p.name ILIKE '%' || $1 || '%')\n           AND ($2 = 'all' OR p.active = ($2 = 'true'))\n         GROUP BY p.id\n         ORDER BY p.name\n         LIMIT $3 OFFSET $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "slug",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "category!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "price_in_cents",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "variant_count",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "available_total",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      false,
+      false,
+      null,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "ea39ca592ef8d43660a1db4c574c92703b3fe87435b148a5bf3b8509df548462"
+}

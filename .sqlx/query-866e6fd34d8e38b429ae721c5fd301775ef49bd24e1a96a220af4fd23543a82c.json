@@ -1,0 +1,48 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id::text AS \"id!\", guest_email, status::text AS \"status!\", total_cents, created_at\n         FROM orders\n         WHERE user_id = $1\n         ORDER BY created_at DESC\n         LIMIT $2 OFFSET $3",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "guest_email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "total_cents",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      true,
+      null,
+      false,
+      false
+    ]
+  },
+  "hash": "866e6fd34d8e38b429ae721c5fd301775ef49bd24e1a96a220af4fd23543a82c"
+}

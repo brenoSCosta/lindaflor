@@ -1,0 +1,174 @@
+name: CI
+
+on:
+  push:
+    branches: [main, migration]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  RUST_BACKTRACE: "1"
+  # Compile sqlx macros against the committed `.sqlx/` cache. The `sqlx` job
+  # below is the one place that talks to a live database to verify it.
+  SQLX_OFFLINE: "true"
+  SQLX_CLI_VERSION: "0.8.6"
+
+jobs:
+  fmt:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # Installs the channel pinned in rust-toolchain.toml (1.98.1).
+      - run: rustup toolchain install
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: debug
+      - run: cargo clippy --all-targets --locked -- -D warnings
+
+  test:
+    runs-on: ubuntu-24.04
+    env:
+      # postgresql_embedded downloads Postgres from GitHub releases; the token
+      # avoids anonymous API rate limits.
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: debug
+      - name: Cache embedded Postgres binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.theseus
+          key: theseus-pg-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - run: cargo test --locked --all-targets
+
+  sqlx:
+    name: sqlx (migrations + offline cache)
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17-bookworm
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: lindaflor
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/lindaflor
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: debug
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: sqlx-cli@${{ env.SQLX_CLI_VERSION }}
+      - name: Apply migrations to a fresh database
+        run: |
+          sqlx migrate run
+          sqlx migrate info
+      - name: Check .sqlx is up to date
+        env:
+          SQLX_OFFLINE: "false"
+        run: cargo sqlx prepare --check -- --all-targets
+
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo/advisory-db
+          key: advisory-db-${{ github.run_id }}
+          restore-keys: advisory-db-
+      - run: cargo audit
+
+  docker:
+    name: docker build smoke
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          failure-threshold: warning
+          # Debian package versions are not pinned (security updates win).
+          ignore: DL3008
+      - uses: docker/setup-buildx-action@v3
+      - name: Build runtime image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: runtime
+          tags: lindaflor:ci
+          load: true
+          push: false
+          cache-from: type=gha,scope=runtime
+          cache-to: type=gha,mode=max,scope=runtime
+      - name: Build migrate image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: migrate
+          tags: lindaflor-migrate:ci
+          load: true
+          push: false
+          cache-from: type=gha,scope=migrate
+          cache-to: type=gha,mode=max,scope=migrate
+      - name: Smoke-test images
+        run: |
+          docker run --rm --entrypoint /bin/sh lindaflor:ci -c \
+            'test -x /app/lindaflor && test -f /app/assets/manifest.toml && id -u | grep -qv "^0$"'
+          docker run --rm --entrypoint sqlx lindaflor-migrate:ci --version
+          mkdir -p secrets
+          for s in postgres_password database_url valkey_password valkey_url \
+            s3_access_key s3_secret_key token_pepper totp_encryption_key metrics_token; do
+            echo ci > "secrets/$s"
+          done
+          docker compose -f docker-compose.prod.yml config --quiet
+        env:
+          APP_ORIGIN: https://ci.invalid
+      - name: Boot against Postgres + Valkey (migrate job, then web)
+        run: |
+          set -euo pipefail
+          docker network create lf
+          docker run -d --name pg --network lf -e POSTGRES_PASSWORD=pg -e POSTGRES_DB=lindaflor postgres:17-bookworm
+          docker run -d --name valkey --network lf valkey/valkey:8-bookworm
+          for _ in $(seq 1 30); do docker exec pg pg_isready -h 127.0.0.1 -U postgres && break; sleep 2; done
+          docker run --rm --network lf -e DATABASE_URL=postgres://postgres:pg@pg:5432/lindaflor lindaflor-migrate:ci
+          docker run -d --name web --network lf -p 4200:4200 \
+            -e APP_ORIGIN=http://localhost:4200 \
+            -e DATABASE_URL=postgres://postgres:pg@pg:5432/lindaflor \
+            -e VALKEY_URL=redis://valkey:6379 \
+            -e TOTP_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
+            lindaflor:ci
+          for _ in $(seq 1 30); do curl -fsS http://localhost:4200/api/health && break; sleep 2; done
+          curl -fsS http://localhost:4200/api/health
+          curl -fsS -o /dev/null http://localhost:4200/
+      - if: failure()
+        run: docker logs web || true

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET ban_expires = now() + interval '1 hour' WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "245a8b126aa7fd739b5048568639e3fd01c5ebb5673ac0c6fd5151bb6a7f3f1d"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE users\n                SET image = COALESCE(image, $2), updated_at = now()\n                WHERE id = $1\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "74be57346df72cf74c98c55e2d20adf6fd7ac15b6124def1484cac110e2ea7d7"
+}

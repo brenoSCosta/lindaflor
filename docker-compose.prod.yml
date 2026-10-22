@@ -1,0 +1,230 @@
+# Single-host production stack: web + migrate job + Postgres + Valkey + RustFS.
+#
+#   (create ./secrets/* first — see README "Deploy & backups")
+#   APP_ORIGIN=https://example.com docker compose -f docker-compose.prod.yml up -d --build
+#
+# Rollout order is enforced by depends_on: postgres healthy -> migrate job
+# (pre-migrate pg_dump + `sqlx migrate run`) exits 0 -> web starts. The web
+# process never migrates in production and refuses to boot on pending
+# migrations.
+#
+# Secrets are files under ./secrets/ (gitignored), mounted at /run/secrets/<name>
+# and read through the app's `*_FILE` variables. Required files:
+#   postgres_password      Postgres superuser password (POSTGRES_PASSWORD_FILE)
+#   database_url           postgres://lindaflor:<postgres_password>@postgres:5432/lindaflor
+#   valkey_password        Valkey requirepass
+#   valkey_url             redis://:<valkey_password>@valkey:6379
+#   s3_access_key          RustFS access key (also S3_ACCESS_KEY_ID for the app)
+#   s3_secret_key          RustFS secret key
+#   token_pepper           `openssl rand -hex 32`
+#   totp_encryption_key    `openssl rand -base64 32` (losing it breaks every TOTP)
+#   metrics_token          bearer token for GET /metrics
+#
+# Scheduled backups (host cron, e.g. 03:15 daily):
+#   docker compose -f docker-compose.prod.yml run --rm backup
+
+name: lindaflor
+
+x-app-env: &app-env
+  APP_ENV: production
+  # Public origin (scheme + host, no path). Required in production.
+  APP_ORIGIN: ${APP_ORIGIN:?set APP_ORIGIN, e.g. https://lindaflor.com.br}
+  # Behind one reverse proxy (Caddy/nginx/Traefik) terminating TLS.
+  TRUSTED_PROXY_HOPS: ${TRUSTED_PROXY_HOPS:-1}
+  TRUSTED_PROXY_NETWORKS: ${TRUSTED_PROXY_NETWORKS:-}
+  DATABASE_URL_FILE: /run/secrets/database_url
+  PG_MAX_CONN: ${PG_MAX_CONN:-20}
+  VALKEY_URL_FILE: /run/secrets/valkey_url
+  S3_ENDPOINT: http://rustfs:9000
+  S3_REGION: us-east-1
+  S3_BUCKET: ${S3_BUCKET:-lindaflor}
+  S3_ACCESS_KEY_ID_FILE: /run/secrets/s3_access_key
+  S3_SECRET_ACCESS_KEY_FILE: /run/secrets/s3_secret_key
+  TOKEN_PEPPER_FILE: /run/secrets/token_pepper
+  TOTP_ENCRYPTION_KEY_FILE: /run/secrets/totp_encryption_key
+  METRICS_TOKEN_FILE: /run/secrets/metrics_token
+  # Google OAuth is read from plain env only (no *_FILE support yet).
+  GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+  GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+  RUST_LOG: ${RUST_LOG:-info}
+
+services:
+  web:
+    build:
+      context: .
+      target: runtime
+    image: ${LINDAFLOR_IMAGE:-lindaflor}:${LINDAFLOR_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      HOST: 0.0.0.0
+      PORT: "4200"
+    secrets:
+      - database_url
+      - valkey_url
+      - s3_access_key
+      - s3_secret_key
+      - token_pepper
+      - totp_encryption_key
+      - metrics_token
+    # Publish on loopback only; the TLS reverse proxy is the public edge.
+    ports:
+      - "127.0.0.1:4200:4200"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+      rustfs:
+        condition: service_started
+    # Readiness (DB + Valkey + bucket). The image HEALTHCHECK is liveness.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:4200/api/readyz"]
+      interval: 15s
+      timeout: 3s
+      start_period: 20s
+      retries: 3
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 40s # app drains in-flight requests for up to 30s
+
+  migrate:
+    build:
+      context: .
+      target: migrate
+    image: ${LINDAFLOR_IMAGE:-lindaflor}-migrate:${LINDAFLOR_TAG:-latest}
+    restart: "no"
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_url
+      BACKUP_DIR: /backups
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      BACKUP_KEEP_MIN: ${BACKUP_KEEP_MIN:-7}
+      BACKUP_S3_URI: ${BACKUP_S3_URI:-}
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      AWS_DEFAULT_REGION: ${BACKUP_S3_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${BACKUP_AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${BACKUP_AWS_SECRET_ACCESS_KEY:-}
+    secrets:
+      - database_url
+    volumes:
+      - backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # On-demand / cron: `docker compose -f docker-compose.prod.yml run --rm backup`
+  backup:
+    image: ${LINDAFLOR_IMAGE:-lindaflor}-migrate:${LINDAFLOR_TAG:-latest}
+    profiles: [ops]
+    restart: "no"
+    command: ["backup", "scheduled"]
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_url
+      BACKUP_DIR: /backups
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      BACKUP_KEEP_MIN: ${BACKUP_KEEP_MIN:-7}
+      BACKUP_S3_URI: ${BACKUP_S3_URI:-}
+      BACKUP_S3_ENDPOINT: ${BACKUP_S3_ENDPOINT:-}
+      AWS_DEFAULT_REGION: ${BACKUP_S3_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${BACKUP_AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${BACKUP_AWS_SECRET_ACCESS_KEY:-}
+    secrets:
+      - database_url
+    volumes:
+      - backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:17-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lindaflor
+      POSTGRES_DB: lindaflor
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lindaflor -d lindaflor"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    shm_size: 256mb
+
+  valkey:
+    image: valkey/valkey:8-bookworm
+    restart: unless-stopped
+    # AOF (fsync every second) + RDB snapshots: sessions/rate-limit state
+    # survive restarts. Valkey is not backed up off-host (cache-like data).
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        exec valkey-server --appendonly yes --appendfsync everysec
+        --save 900 1 --save 300 10 --save 60 10000
+        --requirepass "$$(cat /run/secrets/valkey_password)"
+    secrets:
+      - valkey_password
+    volumes:
+      - valkeydata:/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - REDISCLI_AUTH="$$(cat /run/secrets/valkey_password)" valkey-cli ping | grep -q PONG
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rustfs:
+    image: rustfs/rustfs:1.0.0
+    restart: unless-stopped
+    # RustFS reads credentials from env; load them from the secret files.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >-
+        export RUSTFS_ACCESS_KEY="$$(cat /run/secrets/s3_access_key)";
+        export RUSTFS_SECRET_KEY="$$(cat /run/secrets/s3_secret_key)";
+        exec /entrypoint.sh rustfs /data
+    environment:
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ENABLE: "false"
+    secrets:
+      - s3_access_key
+      - s3_secret_key
+    volumes:
+      - s3data:/data
+
+secrets:
+  postgres_password:
+    file: ./secrets/postgres_password
+  database_url:
+    file: ./secrets/database_url
+  valkey_password:
+    file: ./secrets/valkey_password
+  valkey_url:
+    file: ./secrets/valkey_url
+  s3_access_key:
+    file: ./secrets/s3_access_key
+  s3_secret_key:
+    file: ./secrets/s3_secret_key
+  token_pepper:
+    file: ./secrets/token_pepper
+  totp_encryption_key:
+    file: ./secrets/totp_encryption_key
+  metrics_token:
+    file: ./secrets/metrics_token
+
+volumes:
+  pgdata:
+  valkeydata:
+  s3data:
+  backups:

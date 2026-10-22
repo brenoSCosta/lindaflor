@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n              SELECT password\n              FROM accounts\n              WHERE user_id = $1 AND provider_id = $2\n              ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "password",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "39755cfec1004e8d59ad71d0adabe1289a78b90b3eab7bddb049bf40b527c220"
+}

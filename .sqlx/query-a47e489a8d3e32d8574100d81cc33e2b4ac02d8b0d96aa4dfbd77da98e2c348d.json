@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(*) FROM users\n        WHERE ($1 = '' OR name ILIKE $1 OR email ILIKE $1)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a47e489a8d3e32d8574100d81cc33e2b4ac02d8b0d96aa4dfbd77da98e2c348d"
+}

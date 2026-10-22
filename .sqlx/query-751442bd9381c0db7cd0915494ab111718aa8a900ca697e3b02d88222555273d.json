@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT sm.product_id, p.name FROM set_members sm\n      INNER JOIN products p ON p.id = sm.product_id\n      WHERE sm.set_id = $1 ORDER BY sm.sort_order ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "product_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "751442bd9381c0db7cd0915494ab111718aa8a900ca697e3b02d88222555273d"
+}

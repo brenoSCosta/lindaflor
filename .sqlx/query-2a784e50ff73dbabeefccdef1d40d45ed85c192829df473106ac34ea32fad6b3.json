@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO newsletter_subscribers (id, email, name, created_at) VALUES (gen_random_uuid(), $1, $2, now()) ON CONFLICT (lower(email)) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2a784e50ff73dbabeefccdef1d40d45ed85c192829df473106ac34ea32fad6b3"
+}

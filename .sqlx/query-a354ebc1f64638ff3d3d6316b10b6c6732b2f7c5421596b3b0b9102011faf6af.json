@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM verifications WHERE identifier LIKE $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a354ebc1f64638ff3d3d6316b10b6c6732b2f7c5421596b3b0b9102011faf6af"
+}
