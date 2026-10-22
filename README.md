@@ -115,12 +115,16 @@ devenv exports the process environment. `DATABASE_URL` follows the Postgres port
 | `SMTP_USERNAME` / `SMTP_PASSWORD` | _(unset)_                                         | SMTP credentials; both also accept `*_FILE` (Docker secrets). Never logged |
 | `MAIL_POLL_SECS`          | _(unset → `5`)_                                           | Outbox worker poll interval |
 | `MAIL_MAX_ATTEMPTS`       | _(unset → `8`)_                                           | Delivery attempts (exponential backoff 30s → 1h) before a row is marked `failed` |
+| `PAYMENT_PROVIDER`        | _(unset)_                                                 | `static_pix` (local BR Code, manual confirmation) or `mercadopago`. Unset = `mercadopago` when `MP_ACCESS_TOKEN` is set, else `static_pix`. Production refuses `static_pix` unless `ALLOW_STATIC_PIX=1` |
+| `MP_ACCESS_TOKEN`         | _(unset)_                                                 | Mercado Pago access token (server-only; `MP_ACCESS_TOKEN_FILE` supported) |
+| `MP_WEBHOOK_SECRET`       | _(unset)_                                                 | Secret that signs MP webhooks (`x-signature`); `MP_WEBHOOK_SECRET_FILE` supported. Webhook URL: `<APP_ORIGIN>/api/webhooks/mercadopago` |
+| `MP_API_BASE_URL`         | _(unset)_                                                 | Override of `https://api.mercadopago.com` (tests / proxies; must be https in production) |
 
 Avatars are stored in RustFS (S3 API). The console is http://127.0.0.1:4204.
 
 Transactional email (account links and order updates, pt-BR) is queued in the `email_outbox` table inside the same transaction as the change that triggers it, and a background worker delivers it with retries; request handlers never wait on SMTP. Bodies are blanked once a row is `sent`/`failed`. To see real messages locally, run [mailpit](https://mailpit.axllent.org/) (`docker run --rm -p 1025:1025 -p 8025:8025 axllent/mailpit`) and set `MAIL_TRANSPORT=smtp SMTP_HOST=127.0.0.1 SMTP_TLS=none`; the inbox is at http://127.0.0.1:8025.
 
-The app is same-origin only: there is no CORS layer and no `Access-Control-*` headers. Cross-origin browser POSTs (and other mutations) are rejected with 403 by Topcoat `OriginPolicy`. There is no public cross-origin API.
+The app is same-origin only: there is no CORS layer and no `Access-Control-*` headers. Cross-origin browser POSTs (and other mutations) are rejected with 403 by Topcoat `OriginPolicy`. There is no public cross-origin API. The one exemption is `POST /api/webhooks/mercadopago`, a cookie-less server-to-server call authenticated by its HMAC signature.
 
 ## Development
 

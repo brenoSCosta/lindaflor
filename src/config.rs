@@ -7,7 +7,7 @@ use zeroize::Zeroizing;
 /// Read `KEY`, falling back to Docker-secret style `KEY_FILE` (a path whose
 /// contents are the value, trailing newlines trimmed). Direct env wins; empty
 /// values are treated as unset.
-fn read_env_or_file(key: &str) -> Option<String> {
+pub(crate) fn read_env_or_file(key: &str) -> Option<String> {
   if let Ok(value) = env::var(key)
     && !value.is_empty()
   {

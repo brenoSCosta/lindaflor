@@ -65,12 +65,12 @@ use crate::components::toast::{ToasterOptions, take_toasts, toaster};
 use crate::logging::layer::RequestLoggingLayer;
 use crate::rate_limit::{
   DEFAULT_BACKUP_CODE_PER_MIN, DEFAULT_GLOBAL_PER_MIN,
-  DEFAULT_PASSWORD_RESET_PER_MIN, DEFAULT_PEDIDO_PAGE_PER_MIN,
-  DEFAULT_PEDIDO_POLL_PER_MIN, DEFAULT_SIGN_IN_PER_MIN,
-  DEFAULT_SIGN_UP_PER_MIN, DEFAULT_TOTP_PER_MIN, DEFAULT_VERIFY_EMAIL_PER_MIN,
-  RateLimitLayer, SCOPE_BACKUP_CODE, SCOPE_PASSWORD_RESET, SCOPE_PEDIDO_PAGE,
-  SCOPE_PEDIDO_POLL, SCOPE_SIGN_IN, SCOPE_SIGN_UP, SCOPE_TOTP,
-  SCOPE_VERIFY_EMAIL,
+  DEFAULT_MP_WEBHOOK_PER_MIN, DEFAULT_PASSWORD_RESET_PER_MIN,
+  DEFAULT_PEDIDO_PAGE_PER_MIN, DEFAULT_PEDIDO_POLL_PER_MIN,
+  DEFAULT_SIGN_IN_PER_MIN, DEFAULT_SIGN_UP_PER_MIN, DEFAULT_TOTP_PER_MIN,
+  DEFAULT_VERIFY_EMAIL_PER_MIN, RateLimitLayer, SCOPE_BACKUP_CODE,
+  SCOPE_MP_WEBHOOK, SCOPE_PASSWORD_RESET, SCOPE_PEDIDO_PAGE, SCOPE_PEDIDO_POLL,
+  SCOPE_SIGN_IN, SCOPE_SIGN_UP, SCOPE_TOTP, SCOPE_VERIFY_EMAIL,
 };
 
 /// Client-side reveal + `#sobre` landing behavior (see `assets/sobre.js`).
@@ -81,6 +81,7 @@ pub fn router(
   valkey: MultiplexedConnection,
   storage: crate::storage::ObjectStore,
   mailer: crate::mail::Mailer,
+  payments: crate::payments::PaymentProvider,
 ) -> Router {
   let mut builder = module_router!()
     .discover()
@@ -89,7 +90,8 @@ pub fn router(
     .app_context(pool)
     .app_context(valkey)
     .app_context(storage)
-    .app_context(mailer);
+    .app_context(mailer)
+    .app_context(payments);
 
   // Trust only the configured reverse proxies when resolving the
   // client IP (`valkey::client_ip` → Topcoat `client_ip`). Default 0 =
@@ -107,10 +109,13 @@ pub fn router(
   // emitted and there is no public cross-origin API. Browser mutations are
   // governed by OriginPolicy (plus SameSite=Lax cookies). OriginLayer is
   // the router's outermost check: non-GET|HEAD|OPTIONS and WebSocket
-  // upgrades; sec-fetch-site, else Origin==Host. No exempt_paths /
-  // dangerous_disable. Production boot requires APP_ORIGIN; when present
-  // it is also trusted (and used as base_url).
-  let mut origin_policy = OriginPolicy::new();
+  // upgrades; sec-fetch-site, else Origin==Host. No dangerous_disable.
+  // Only exempt path: the Mercado Pago webhook, a cookie-less
+  // server-to-server POST authenticated by its own HMAC signature.
+  // Production boot requires APP_ORIGIN; when present it is also trusted
+  // (and used as base_url).
+  let mut origin_policy =
+    OriginPolicy::new().exempt_paths([crate::payments::webhook::WEBHOOK_PATH]);
   if let Some(origin) = crate::auth::google::app_origin() {
     builder = builder.base_url(origin.as_str());
     origin_policy = origin_policy.trust_origins([origin]);
@@ -182,6 +187,11 @@ pub fn router(
       "/pedido/status-proc",
       SCOPE_PEDIDO_POLL,
       DEFAULT_PEDIDO_POLL_PER_MIN,
+    ))
+    .layer(RateLimitLayer::scoped(
+      crate::payments::webhook::WEBHOOK_PATH,
+      SCOPE_MP_WEBHOOK,
+      DEFAULT_MP_WEBHOOK_PER_MIN,
     ))
     .layer(
       RateLimitLayer::scoped(

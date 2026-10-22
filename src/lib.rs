@@ -11,6 +11,7 @@ pub mod logging;
 pub mod mail;
 pub mod maintenance;
 pub mod openapi;
+pub mod payments;
 pub mod rate_limit;
 pub mod redirect;
 pub mod security_headers;

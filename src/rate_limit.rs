@@ -55,6 +55,7 @@ pub const SCOPE_PEDIDO_POLL: &str = "pedido:poll";
 pub const SCOPE_PEDIDO_PAGE: &str = "pedido:page";
 pub const SCOPE_COUPON: &str = "coupon:apply";
 pub const SCOPE_COUPON_CART: &str = "coupon:cart";
+pub const SCOPE_MP_WEBHOOK: &str = "webhook:mercadopago";
 pub const SCOPE_GLOBAL: &str = "global";
 
 /// Default budgets: 5/min/IP on auth endpoints, 3/min on
@@ -72,6 +73,8 @@ pub const DEFAULT_PEDIDO_PAGE_PER_MIN: u32 = 30;
 /// Coupon apply: per IP (scoped layer) and per cart (in the procedure).
 pub const DEFAULT_COUPON_PER_MIN: u32 = 10;
 pub const DEFAULT_COUPON_CART_PER_MIN: u32 = 10;
+/// Mercado Pago notifies from a handful of IPs, in bursts after outages.
+pub const DEFAULT_MP_WEBHOOK_PER_MIN: u32 = 120;
 pub const DEFAULT_GLOBAL_PER_MIN: u32 = 600;
 
 /// Prefixes the global governor skips so those requests do not consume the
@@ -92,6 +95,7 @@ pub const GLOBAL_OVERRIDE_PREFIXES: &[&str] = &[
   "/api/auth/two-factor/verify-backup-code",
   "/pedido/status-proc",
   "/pedido",
+  "/api/webhooks/mercadopago",
   "/metrics",
   "/_topcoat/assets",
 ];

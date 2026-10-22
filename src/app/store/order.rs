@@ -534,7 +534,12 @@ pub async fn expire_pending_reservations(
   first_error.map_or(Ok(()), Err)
 }
 
-async fn expire_one(pool: &PgPool, order_id: Uuid) -> Result<(), ApplyError> {
+/// Cancel one expired pending order (no-op unless it is still pending and
+/// past its hold). Also used by the payment-aware sweep in `src/payments`.
+pub async fn expire_one(
+  pool: &PgPool,
+  order_id: Uuid,
+) -> Result<(), ApplyError> {
   let mut tx = pool.begin().await?;
   // Re-check under the lock: the order may have been paid, cancelled or
   // reclaimed by a checkout since the scan.
@@ -1157,9 +1162,7 @@ mod tests {
     let (order_id, _, _) = seed_order_with_stock(&pool, 2).await;
     let mut tx = pool.begin().await.unwrap();
     for event in [OrderEvent::Pay, OrderEvent::Process, OrderEvent::Ship] {
-      apply(&mut tx, order_id, event, ApplyOptions::default())
-        .await
-        .unwrap();
+      apply(&mut tx, order_id, event, ship_opts()).await.unwrap();
     }
     // Processing has no customer mail; pay and ship do.
     assert_eq!(
