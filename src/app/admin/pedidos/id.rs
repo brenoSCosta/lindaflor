@@ -15,13 +15,17 @@ use topcoat::{
 use uuid::Uuid;
 
 use crate::app::auth_helpers::require_admin;
-use crate::app::store::order::{ApplyOptions, OrderEvent, apply_with_audit};
+use crate::app::store::order::{
+  ApplyOptions, DEFAULT_CARRIER, OrderEvent, Tracking, apply_with_audit,
+  tracking_url,
+};
 use crate::app::store::queries::format_price;
 use crate::components::badge::{BadgeVariant, badge};
 use crate::components::button::{ButtonVariant, button};
 use crate::components::card::{card, card_content, card_header, card_title};
 use crate::components::checkbox::checkbox;
 use crate::components::container::container;
+use crate::components::input::input;
 use crate::components::label::label;
 use crate::components::separator::separator;
 use crate::components::table::{
@@ -35,6 +39,10 @@ path_param!(pub(crate) id: String, error = not_found);
 pub struct StatusInput {
   status: String,
   restock: Option<String>,
+  #[serde(default)]
+  carrier: String,
+  #[serde(default)]
+  tracking_code: String,
 }
 
 #[derive(sqlx::FromRow)]
@@ -50,6 +58,10 @@ struct OrderRow {
   paid_at: Option<String>,
   reservation_expires_at: Option<String>,
   created_at: String,
+  carrier: String,
+  tracking_code: Option<String>,
+  shipped_at: Option<String>,
+  delivered_at: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -87,7 +99,7 @@ fn status_badge_variant(status: &str) -> BadgeVariant {
 #[route(POST "/admin/pedidos/{id}")]
 async fn update_order(
   cx: &Cx,
-  Form(input): Form<StatusInput>,
+  Form(form): Form<StatusInput>,
 ) -> Result<Response> {
   let actor = require_admin(cx).await?;
   let id = path_param::<Id>(cx)?;
@@ -102,20 +114,26 @@ async fn update_order(
     toast_redirect(cx, back.clone())
   };
 
-  let Some(event) = OrderEvent::parse(input.status.trim()) else {
+  let Some(event) = OrderEvent::parse(form.status.trim()) else {
     return fail("Status inválido.");
   };
   // The checkbox is always the explicit restock choice: browsers omit an
   // unchecked box, so absent = "do not restock". The forms pre-check it for
   // Paid/Processing (the transition default) and leave it off otherwise.
-  let restock = input.restock.is_some();
+  let restock = form.restock.is_some();
+  // Only `Ship` reads the tracking; `apply` validates it in the same
+  // transaction as the status change.
+  let opts = ApplyOptions::with_restock(restock).with_tracking(Tracking {
+    carrier: form.carrier.as_str(),
+    code: form.tracking_code.as_str(),
+  });
   let pool = app_context::<PgPool>(cx);
   let mut tx = pool.begin().await?;
   let outcome = apply_with_audit(
     &mut tx,
     order_id,
     event,
-    ApplyOptions::with_restock(restock),
+    opts,
     Some(actor.user.id),
     Some(actor.user.name.as_str()),
   )
@@ -150,7 +168,10 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
             discount_cents, total_cents, shipping_address, payment_meta,
             paid_at::text AS paid_at,
             reservation_expires_at::text AS reservation_expires_at,
-            created_at::text AS created_at
+            created_at::text AS created_at,
+            carrier, tracking_code,
+            to_char(shipped_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS shipped_at,
+            to_char(delivered_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS delivered_at
      FROM orders WHERE id = $1",
   )
   .bind(order_id)
@@ -213,6 +234,11 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let expires = order.reservation_expires_at.clone().unwrap_or_default();
   let created = order.created_at.clone();
   let status = order.status.clone();
+  let can_ship = paid || processing;
+  let tracking_link = order
+    .tracking_code
+    .as_deref()
+    .and_then(|code| tracking_url(&order.carrier, code));
 
   Ok(view! {
       container(
@@ -253,14 +279,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                           "Em separação"
                       )
                   </form>
-                  <form method="post" action=(href!(page, Id(order_id.to_string())))>
-                      <input type="hidden" name="status" value="shipped">
-                      button(
-                          variant: ButtonVariant::Primary,
-                          attrs: attributes! { type="submit" },
-                          "Marcar como enviado"
-                      )
-                  </form>
                   <form method="post" action=(href!(page, Id(order_id.to_string()))) class="flex items-center gap-2">
                       <input type="hidden" name="status" value="cancelled">
                       checkbox(attrs: attributes! { id="restock-cancel" name="restock" value="1" checked=(true) })
@@ -285,14 +303,6 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
           }
           if processing {
               <div class="mt-2 flex flex-wrap items-center gap-3">
-                  <form method="post" action=(href!(page, Id(order_id.to_string())))>
-                      <input type="hidden" name="status" value="shipped">
-                      button(
-                          variant: ButtonVariant::Primary,
-                          attrs: attributes! { type="submit" },
-                          "Marcar como enviado"
-                      )
-                  </form>
                   <form method="post" action=(href!(page, Id(order_id.to_string()))) class="flex items-center gap-2">
                       <input type="hidden" name="status" value="cancelled">
                       checkbox(attrs: attributes! { id="restock-cancel" name="restock" value="1" checked=(true) })
@@ -380,6 +390,66 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                       )
                   </form>
               </div>
+          }
+
+          if can_ship {
+              card(
+                  card_header(card_title("Envio"))
+                  card_content(
+                      <form
+                          method="post"
+                          action=(href!(page, Id(order_id.to_string())))
+                          class="grid gap-3 @sm/page:grid-cols-[12rem_1fr_auto] @sm/page:items-end"
+                      >
+                          <input type="hidden" name="status" value="shipped">
+                          <div class="flex flex-col gap-1.5">
+                              label(attrs: attributes! { for="carrier" }, "Transportadora")
+                              input(attrs: attributes! {
+                                  id="carrier"
+                                  name="carrier"
+                                  value=(DEFAULT_CARRIER)
+                                  maxlength="40"
+                              })
+                          </div>
+                          <div class="flex flex-col gap-1.5">
+                              label(attrs: attributes! { for="tracking_code" }, "Código de rastreio")
+                              input(attrs: attributes! {
+                                  id="tracking_code"
+                                  name="tracking_code"
+                                  placeholder="AA123456789BR"
+                                  required=""
+                                  maxlength="40"
+                                  autocomplete="off"
+                              })
+                          </div>
+                          button(
+                              variant: ButtonVariant::Primary,
+                              attrs: attributes! { type="submit" },
+                              "Marcar como enviado"
+                          )
+                      </form>
+                  )
+              )
+          }
+
+          if let Some(code) = order.tracking_code.clone() {
+              card(
+                  card_header(card_title("Rastreamento"))
+                  card_content(
+                      <p class="text-sm">(order.carrier.clone()) ": " <span class="font-mono">(code)</span></p>
+                      if let Some(url) = tracking_link {
+                          <a href=(url) target="_blank" rel="noreferrer" class="text-sm text-primary hover:underline">
+                              "Abrir rastreamento"
+                          </a>
+                      }
+                      if let Some(at) = order.shipped_at.clone() {
+                          <p class="text-sm text-muted-foreground">"Enviado em " (at)</p>
+                      }
+                      if let Some(at) = order.delivered_at.clone() {
+                          <p class="text-sm text-muted-foreground">"Entregue em " (at)</p>
+                      }
+                  )
+              )
           }
 
           card(

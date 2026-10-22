@@ -36,8 +36,8 @@ fn clamp_order_query(raw: &str) -> String {
 
 fn clamp_order_status(raw: &str) -> String {
   match raw.trim() {
-    "pending_payment" | "paid" | "shipped" | "delivered" | "cancelled"
-    | "refunded" => raw.trim().to_string(),
+    "pending_payment" | "paid" | "processing" | "shipped" | "delivered"
+    | "cancelled" | "refunded" => raw.trim().to_string(),
     _ => "all".to_string(),
   }
 }
@@ -78,7 +78,7 @@ async fn order_directory(
   let page_size: i64 = 20;
 
   let total: i64 = sqlx::query_scalar!(
-    "SELECT COUNT(*) FROM orders o WHERE ($1 = '' OR o.guest_email ILIKE '%' || $1 || '%') AND ($2 = 'all' OR o.status::text = $2)",
+    "SELECT COUNT(*) FROM orders o WHERE ($1 = '' OR o.guest_email ILIKE '%' || $1 || '%' OR o.tracking_code ILIKE '%' || $1 || '%') AND ($2 = 'all' OR o.status::text = $2)",
     query,
     active_status,
   )
@@ -96,9 +96,11 @@ async fn order_directory(
 
   let orders = sqlx::query!(
         "SELECT o.id::text AS \"id!\", o.guest_email, o.status::text AS status, o.total_cents, o.created_at,
+                o.carrier, o.tracking_code,
                 (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) as item_count
          FROM orders o
-         WHERE ($1 = '' OR o.guest_email ILIKE '%' || $1 || '%')
+         WHERE ($1 = '' OR o.guest_email ILIKE '%' || $1 || '%'
+                OR o.tracking_code ILIKE '%' || $1 || '%')
            AND ($2 = 'all' OR o.status::text = $2)
          ORDER BY o.created_at DESC
          LIMIT $3 OFFSET $4",
@@ -122,12 +124,15 @@ async fn order_directory(
     format!("Página {page_num} de {total_pages}")
   };
 
-  const STATUSES: [(&str, &str); 5] = [
+  const STATUSES: [(&str, &str); 8] = [
     ("all", "Todos"),
     ("pending_payment", "Pendentes"),
     ("paid", "Pagos"),
+    ("processing", "Em separação"),
+    ("shipped", "Enviados"),
     ("delivered", "Entregues"),
     ("cancelled", "Cancelados"),
+    ("refunded", "Estornados"),
   ];
 
   Ok(view! {
@@ -135,7 +140,7 @@ async fn order_directory(
           input(attrs: attributes! {
               id="order-search"
               type="search"
-              placeholder="Buscar por e-mail"
+              placeholder="Buscar por e-mail ou rastreio"
               aria-label="Buscar pedidos"
               :value=$(q.get())
               @input=$(|e: Event| {
@@ -178,6 +183,7 @@ async fn order_directory(
                       table_head("Cliente")
                       table_head("Status")
                       table_head("Itens")
+                      table_head("Rastreio")
                       table_head("Total")
                       table_head("Data")
                   )
@@ -192,6 +198,13 @@ async fn order_directory(
                           table_cell((order.guest_email))
                           table_cell((order.status))
                           table_cell((order.item_count))
+                          table_cell(
+                              if let Some(code) = order.tracking_code {
+                                  <span class="font-mono text-xs">(order.carrier) " " (code)</span>
+                              } else {
+                                  <span class="text-muted-foreground">"—"</span>
+                              }
+                          )
                           table_cell("R$ " (order.total_cents / 100))
                           table_cell(
                               <span class="text-muted-foreground">(order.created_at.to_string())</span>

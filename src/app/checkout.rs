@@ -4,7 +4,7 @@ use topcoat::{
   Result,
   context::Cx,
   context::app_context,
-  router::{content::Form, error::redirect, href, page},
+  router::{content::Form, error::redirect, href, page, query_params},
   runtime::{expr, signal},
   view::{View, ViewExt, attributes, view},
 };
@@ -25,6 +25,10 @@ use crate::components::input::input;
 use crate::components::select::select;
 use crate::components::separator::separator;
 use crate::components::textarea::textarea;
+
+use crate::app::store::addresses::{self, AddressInput, SavedAddress};
+use crate::components::checkbox::checkbox;
+use crate::components::label::label;
 
 use crate::app::store::cart::{
   QuoteError, cart_coupon_code, cart_subtotal_cents, clear_items_in_tx,
@@ -87,6 +91,16 @@ pub struct CheckoutInput {
 
   #[serde(default)]
   intent: Option<String>,
+
+  /// "Salvar este endereço" (signed-in buyers only).
+  #[serde(default)]
+  save_address: Option<String>,
+}
+
+#[query_params(error = bad_request)]
+struct CheckoutQuery {
+  /// Saved address id to prefill the delivery fields with.
+  endereco: Option<String>,
 }
 
 #[page([GET, POST])]
@@ -180,6 +194,11 @@ pub async fn page(
     } else {
       match create_order(pool, cart.id, posted.clone(), session_user_id).await {
         Ok(created) => {
+          if let Some(user_id) = session_user_id
+            && posted.save_address.is_some()
+          {
+            save_checkout_address(pool, user_id, posted).await;
+          }
           let token = created.access_token.to_string();
           return Err(
             redirect(
@@ -202,8 +221,27 @@ pub async fn page(
     }
   }
 
-  let zip_digits: String = input_zip_digits(body.as_ref());
-  let state = input_state(body.as_ref());
+  // Signed-in buyers: a fresh GET prefills the delivery fields from
+  // `?endereco=` or the default saved address; a POST keeps what was typed.
+  let saved_addresses = match session_user_id {
+    Some(user_id) => addresses::list_for_user(pool, user_id).await?,
+    None => Vec::new(),
+  };
+  let picked = query_params::<CheckoutQuery>(cx)?.endereco.clone();
+  let prefill = body
+    .is_none()
+    .then(|| saved_address_prefill(&saved_addresses, picked.as_deref()))
+    .flatten();
+  let selected_address = prefill.as_ref().map(|(id, _)| *id);
+  let prefill = prefill.map(|(_, prefilled)| Form(prefilled));
+  let fill = body.as_ref().or(prefill.as_ref());
+  let can_save_address = session_user_id.is_some();
+  let save_address_checked = body
+    .as_ref()
+    .is_some_and(|posted| posted.0.save_address.is_some());
+
+  let zip_digits: String = input_zip_digits(fill);
+  let state = input_state(fill);
   let settings = get_store_settings(pool).await?;
   let pix_available = pix_configured(&settings);
   // Preview only: until the CEP resolves, estimate from the selected state.
@@ -232,14 +270,14 @@ pub async fn page(
     .saturating_add(shipping.0);
 
   let email_init = input_email(body.as_ref());
-  let name_init = input_name(body.as_ref());
-  let phone_init = input_phone(body.as_ref());
-  let street_init = input_street(body.as_ref());
-  let number_init = input_number(body.as_ref());
-  let complement_init = input_complement(body.as_ref());
-  let neighborhood_init = input_neighborhood(body.as_ref());
-  let city_init = input_city(body.as_ref());
-  let zip_init = input_zip(body.as_ref());
+  let name_init = input_name(fill);
+  let phone_init = input_phone(fill);
+  let street_init = input_street(fill);
+  let number_init = input_number(fill);
+  let complement_init = input_complement(fill);
+  let neighborhood_init = input_neighborhood(fill);
+  let city_init = input_city(fill);
+  let zip_init = input_zip(fill);
 
   let guest_email = signal(cx, || email_init);
   let guest_email_touched = signal(cx, || false);
@@ -448,6 +486,27 @@ pub async fn page(
                             card_title("Endereço de entrega")
                         )
                         card_content(
+                            if !saved_addresses.is_empty() {
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <span class="text-sm text-muted-foreground">"Endereços salvos:"</span>
+                                    for saved in saved_addresses.iter() {
+                                        let saved_id = saved.id.to_string();
+                                        <a
+                                            href=(href!(page).query([("endereco", saved_id.as_str())]))
+                                            class=(button_variants(
+                                                if selected_address == Some(saved.id) {
+                                                    ButtonVariant::Primary
+                                                } else {
+                                                    ButtonVariant::Outline
+                                                },
+                                                ButtonSize::Sm,
+                                            ))
+                                        >
+                                            (saved_address_title(saved))
+                                        </a>
+                                    }
+                                </div>
+                            }
                             <div class="grid gap-4 @sm/page:grid-cols-2">
                                 <div class="@sm/page:col-span-2">
                                     field(
@@ -625,6 +684,15 @@ pub async fn page(
                                         attrs: attributes! { id="zip-error" }
                                     )
                                 )
+                                if can_save_address {
+                                    <div class="flex items-center gap-2 @sm/page:col-span-2">
+                                        checkbox(attrs: attributes! {
+                                            id="save_address" name="save_address" value="1"
+                                            checked=(save_address_checked)
+                                        })
+                                        label(attrs: attributes! { for="save_address" }, "Salvar este endereço")
+                                    </div>
+                                }
                             </div>
                         )
                     )
@@ -1161,6 +1229,70 @@ fn pix_configured(
       .is_some_and(|key_type| !key_type.trim().is_empty())
 }
 
+/// `(id, form)` for the picked saved address, else the default one.
+fn saved_address_prefill(
+  saved: &[SavedAddress],
+  picked: Option<&str>,
+) -> Option<(Uuid, CheckoutInput)> {
+  let picked = picked.and_then(|raw| Uuid::parse_str(raw.trim()).ok());
+  let address = picked
+    .and_then(|id| saved.iter().find(|address| address.id == id))
+    .or_else(|| saved.iter().find(|address| address.is_default))?;
+  Some((
+    address.id,
+    CheckoutInput {
+      guest_email: String::new(),
+      name: address.recipient_name.clone(),
+      phone: address.phone.clone(),
+      street: address.street.clone(),
+      number: address.number.clone(),
+      complement: address.complement.clone(),
+      neighborhood: address.neighborhood.clone(),
+      city: address.city.clone(),
+      state: address.state.clone(),
+      zip_code: address.formatted_zip(),
+      notes: String::new(),
+      coupon_code: None,
+      intent: None,
+      save_address: None,
+    },
+  ))
+}
+
+fn saved_address_title(address: &SavedAddress) -> String {
+  if address.label.is_empty() {
+    format!("{}, {}", address.street, address.number)
+  } else {
+    address.label.clone()
+  }
+}
+
+/// Best effort: the order already exists, so a failure here is only logged.
+async fn save_checkout_address(
+  pool: &PgPool,
+  user_id: Uuid,
+  posted: &CheckoutInput,
+) {
+  let address = AddressInput {
+    label: String::new(),
+    recipient_name: posted.name.clone(),
+    zip_code: posted.zip_code.clone(),
+    street: posted.street.clone(),
+    number: posted.number.clone(),
+    complement: posted.complement.clone(),
+    neighborhood: posted.neighborhood.clone(),
+    city: posted.city.clone(),
+    state: posted.state.clone(),
+    phone: posted.phone.clone(),
+    is_default: None,
+  };
+  if let Err(error) =
+    addresses::save_from_checkout(pool, user_id, &address).await
+  {
+    tracing::warn!(%user_id, %error, "saving checkout address failed");
+  }
+}
+
 fn input_email(body: Option<&Form<CheckoutInput>>) -> String {
   body.map(|b| b.0.guest_email.clone()).unwrap_or_default()
 }
@@ -1270,6 +1402,7 @@ mod tests {
       notes: String::new(),
       coupon_code: Some(code.to_string()),
       intent: Some("pay".to_string()),
+      save_address: None,
     }
   }
 
@@ -2064,5 +2197,36 @@ mod tests {
         .await
         .expect("reserved b");
     assert_eq!((reserved_a, reserved_b), (0, 0));
+  }
+
+  #[test]
+  fn saved_address_prefill_prefers_picked_then_default() {
+    let address = |name: &str, is_default: bool| SavedAddress {
+      id: Uuid::now_v7(),
+      label: name.to_string(),
+      recipient_name: format!("Quem recebe {name}"),
+      zip_code: "49000000".to_string(),
+      street: "Rua A".to_string(),
+      number: "1".to_string(),
+      complement: String::new(),
+      neighborhood: "Centro".to_string(),
+      city: "Aracaju".to_string(),
+      state: "SE".to_string(),
+      phone: "79999816511".to_string(),
+      is_default,
+    };
+    let saved = vec![address("Casa", true), address("Trabalho", false)];
+    let (id, prefilled) = saved_address_prefill(&saved, None).unwrap();
+    assert_eq!(id, saved[0].id);
+    assert_eq!(prefilled.zip_code, "49000-000");
+    let picked = saved[1].id.to_string();
+    let (id, prefilled) = saved_address_prefill(&saved, Some(&picked)).unwrap();
+    assert_eq!(id, saved[1].id);
+    assert_eq!(prefilled.name, "Quem recebe Trabalho");
+    // Unknown ids (e.g. another user's address) fall back to the default.
+    let foreign = Uuid::now_v7().to_string();
+    let (id, _) = saved_address_prefill(&saved, Some(&foreign)).unwrap();
+    assert_eq!(id, saved[0].id);
+    assert!(saved_address_prefill(&[], None).is_none());
   }
 }

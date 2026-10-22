@@ -21,6 +21,23 @@ use crate::components::table::{
   table, table_body, table_cell, table_head, table_header, table_row,
 };
 
+use crate::app::store::order_timeline::{
+  OrderProgress, STEP_LABELS, reached_step, tracking_line,
+};
+
+fn status_label(status: &str) -> &'static str {
+  match status {
+    "pending_payment" => "Aguardando pagamento",
+    "paid" => "Pago",
+    "processing" => "Em separação",
+    "shipped" => "Enviado",
+    "delivered" => "Entregue",
+    "cancelled" => "Cancelado",
+    "refunded" => "Estornado",
+    _ => "Desconhecido",
+  }
+}
+
 fn status_variant(status: &str) -> BadgeVariant {
   match status {
     "paid" => BadgeVariant::Primary,
@@ -81,7 +98,8 @@ async fn my_orders(cx: &Cx, initial_page: i64) -> Result<impl View> {
   }
 
   let orders = sqlx::query!(
-        "SELECT id::text AS \"id!\", guest_email, status::text AS \"status!\", total_cents, created_at
+        "SELECT id::text AS \"id!\", guest_email, status::text AS \"status!\", total_cents, created_at,
+                carrier, tracking_code
          FROM orders
          WHERE user_id = $1
          ORDER BY created_at DESC
@@ -123,6 +141,8 @@ async fn my_orders(cx: &Cx, initial_page: i64) -> Result<impl View> {
                       table_row(
                           table_head("Pedido")
                           table_head("Status")
+                          table_head("Andamento")
+                          table_head("Rastreio")
                           table_head("Total")
                           table_head("Data")
                       )
@@ -132,6 +152,13 @@ async fn my_orders(cx: &Cx, initial_page: i64) -> Result<impl View> {
                       for order in orders {
                           let order_uuid = Uuid::parse_str(&order.id)
                             .unwrap_or_else(|_| Uuid::nil());
+                          let step = reached_step(&order.status);
+                          let progress = OrderProgress {
+                              status: order.status.clone(),
+                              carrier: order.carrier.clone(),
+                              tracking_code: order.tracking_code.clone(),
+                              ..OrderProgress::default()
+                          };
                           table_row(
                               table_cell(
                                   <a
@@ -141,7 +168,20 @@ async fn my_orders(cx: &Cx, initial_page: i64) -> Result<impl View> {
                                       (order.id.chars().take(8).collect::<String>())
                                   </a>
                               )
-                              table_cell(badge(variant: status_variant(&order.status), (order.status)))
+                              table_cell(badge(variant: status_variant(&order.status), (status_label(&order.status))))
+                              table_cell(
+                                  if let Some(step) = step {
+                                      <div class="flex items-center gap-2" title=(STEP_LABELS[step])>
+                                          for index in 0..STEP_LABELS.len() {
+                                              <span class=(if index <= step { "h-1.5 w-5 rounded-full bg-primary" } else { "h-1.5 w-5 rounded-full bg-border" })></span>
+                                          }
+                                          <span class="text-xs text-muted-foreground">(STEP_LABELS[step])</span>
+                                      </div>
+                                  } else {
+                                      <span class="text-xs text-muted-foreground">"—"</span>
+                                  }
+                              )
+                              table_cell(tracking_line(progress: progress))
                               table_cell("R$ " (order.total_cents / 100))
                               table_cell(<span class="text-muted-foreground">(order.created_at.to_string())</span>)
                           )
