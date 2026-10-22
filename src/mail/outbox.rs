@@ -37,11 +37,13 @@ pub mod kind {
   pub const ORDER_EXPIRED: &str = "order_expired";
   pub const ORDER_REFUNDED: &str = "order_refunded";
   pub const NEWSLETTER_WELCOME: &str = "newsletter_welcome";
+  pub const BACK_IN_STOCK: &str = "back_in_stock";
+  pub const ABANDONED_CART: &str = "abandoned_cart";
 
   /// Marketing mail: delivered with `List-Unsubscribe` /
   /// `List-Unsubscribe-Post` headers (RFC 8058) pointing at the signed
   /// unsubscribe link of the recipient.
-  pub const NEWSLETTER: [&str; 1] = [NEWSLETTER_WELCOME];
+  pub const NEWSLETTER: [&str; 2] = [NEWSLETTER_WELCOME, ABANDONED_CART];
 
   /// Auth mail anyone can trigger for an arbitrary address (sign-up /
   /// resend verification, password reset, change-email confirmation):

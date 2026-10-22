@@ -1,3 +1,4 @@
+pub mod abandoned_cart;
 pub mod addresses;
 pub mod cart;
 pub mod cart_sheet;
@@ -15,4 +16,5 @@ pub mod product_card;
 pub mod queries;
 pub mod shell;
 pub mod shipping;
+pub mod stock_alerts;
 pub mod wishlist;

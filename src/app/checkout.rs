@@ -109,6 +109,19 @@ pub async fn page(
     .as_ref()
     .map(|posted| posted.0.guest_email.as_str())
     .filter(|email| !email.trim().is_empty());
+  // Remember the typed address for the abandoned-cart reminder.
+  if let Some(Form(posted)) = body.as_ref()
+    && !honeypot_tripped(posted)
+    && let Ok(email) =
+      crate::auth::validation::validate_email(&posted.guest_email)
+    && let Err(error) =
+      crate::app::store::abandoned_cart::remember_checkout_email(
+        pool, cart.id, &email,
+      )
+      .await
+  {
+    tracing::warn!(%error, "could not remember checkout email");
+  }
 
   // DB-backed coupon validation. Preview reads through a rolled-back
   // transaction; order creation re-validates inside its own transaction

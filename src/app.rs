@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod app_sidebar;
 pub mod auth_helpers;
+pub mod avise_me;
 pub mod check_email;
 pub mod checkout;
 pub mod confirmar_email;

@@ -92,6 +92,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
           tracing::error!(error = %error, "data hygiene sweep failed");
         }
       }
+      // Back-in-stock alerts whose variant is sellable again.
+      match lindaflor::app::store::stock_alerts::notify_restocked(&sweep_pool)
+        .await
+      {
+        Ok(0) => {}
+        Ok(sent) => tracing::info!(sent, "back-in-stock alerts queued"),
+        Err(error) => {
+          tracing::error!(error = %error, "stock alert sweep failed");
+        }
+      }
+      if lindaflor::config::abandoned_cart_enabled() {
+        match lindaflor::app::store::abandoned_cart::send_reminders(
+          &sweep_pool,
+          lindaflor::config::abandoned_cart_after_minutes(),
+        )
+        .await
+        {
+          Ok(0) => {}
+          Ok(sent) => tracing::info!(sent, "abandoned-cart reminders queued"),
+          Err(error) => {
+            tracing::error!(error = %error, "abandoned-cart sweep failed");
+          }
+        }
+      }
       // Drop replenished governor buckets so the per-IP key maps do not
       // grow with every distinct IP ever seen.
       lindaflor::rate_limit::prune_limiters();

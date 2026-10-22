@@ -186,7 +186,18 @@ pub const UNSUBSCRIBE_PATH: &str = "/newsletter/cancelar";
 /// Dev/test key when `TOKEN_PEPPER` is unset (production sets it).
 const DEV_UNSUBSCRIBE_KEY: &str = "lindaflor-dev-newsletter-unsubscribe";
 
-fn unsubscribe_mac(email: &str, pepper: &str) -> hmac::Hmac<sha2::Sha256> {
+/// Domain tag of the newsletter unsubscribe token.
+const UNSUBSCRIBE_DOMAIN: &str = "newsletter-unsubscribe:v1:";
+
+/// HMAC-SHA256 over `domain` + the normalized address, keyed by the token
+/// pepper. `domain` separates each link kind (and the verification-token
+/// hashes on the same key), so a token minted for one purpose never
+/// verifies for another.
+fn email_mac(
+  domain: &str,
+  email: &str,
+  pepper: &str,
+) -> hmac::Hmac<sha2::Sha256> {
   use hmac::Mac;
   let key = if pepper.is_empty() {
     DEV_UNSUBSCRIBE_KEY
@@ -195,20 +206,44 @@ fn unsubscribe_mac(email: &str, pepper: &str) -> hmac::Hmac<sha2::Sha256> {
   };
   let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(key.as_bytes())
     .expect("HMAC accepts any key length");
-  // Domain-separated from the verification-token hashes on the same key.
-  mac.update(b"newsletter-unsubscribe:v1:");
+  mac.update(domain.as_bytes());
   mac.update(email.trim().to_lowercase().as_bytes());
   mac
 }
 
-/// Token for `email` (case-insensitive), hex HMAC-SHA256.
-pub fn unsubscribe_token_with_pepper(email: &str, pepper: &str) -> String {
-  use hmac::Mac;
-  hex::encode(unsubscribe_mac(email, pepper).finalize().into_bytes())
+/// Signed, non-expiring token binding `email` (case-insensitive) to the
+/// purpose `domain` (e.g. `"stock-alert-cancel:v1:"`), hex HMAC-SHA256.
+/// Shared by every one-click mail link; rotating `TOKEN_PEPPER`
+/// invalidates outstanding links.
+pub fn signed_email_token(domain: &str, email: &str) -> String {
+  signed_email_token_with_pepper(domain, email, &crate::config::token_pepper())
 }
 
-/// Constant-time check of an unsubscribe token.
-pub fn verify_unsubscribe_token_with_pepper(
+pub fn signed_email_token_with_pepper(
+  domain: &str,
+  email: &str,
+  pepper: &str,
+) -> String {
+  use hmac::Mac;
+  hex::encode(email_mac(domain, email, pepper).finalize().into_bytes())
+}
+
+/// Constant-time check of a [`signed_email_token`].
+pub fn verify_signed_email_token(
+  domain: &str,
+  email: &str,
+  token: &str,
+) -> bool {
+  verify_signed_email_token_with_pepper(
+    domain,
+    email,
+    token,
+    &crate::config::token_pepper(),
+  )
+}
+
+pub fn verify_signed_email_token_with_pepper(
+  domain: &str,
   email: &str,
   token: &str,
   pepper: &str,
@@ -217,7 +252,26 @@ pub fn verify_unsubscribe_token_with_pepper(
   let Ok(raw) = hex::decode(token.trim()) else {
     return false;
   };
-  unsubscribe_mac(email, pepper).verify_slice(&raw).is_ok()
+  email_mac(domain, email, pepper).verify_slice(&raw).is_ok()
+}
+
+/// Token for `email` (case-insensitive), hex HMAC-SHA256.
+pub fn unsubscribe_token_with_pepper(email: &str, pepper: &str) -> String {
+  signed_email_token_with_pepper(UNSUBSCRIBE_DOMAIN, email, pepper)
+}
+
+/// Constant-time check of an unsubscribe token.
+pub fn verify_unsubscribe_token_with_pepper(
+  email: &str,
+  token: &str,
+  pepper: &str,
+) -> bool {
+  verify_signed_email_token_with_pepper(
+    UNSUBSCRIBE_DOMAIN,
+    email,
+    token,
+    pepper,
+  )
 }
 
 fn verify_unsubscribe_token(email: &str, token: &str) -> bool {
@@ -239,20 +293,29 @@ pub fn unsubscribe_url(email: &str) -> String {
   ))
 }
 
-/// Flag the subscriber as unsubscribed (idempotent; unknown addresses are a
-/// no-op). Returns whether an active subscription was cancelled.
+/// Flag the address as unsubscribed (idempotent). Returns whether an
+/// active subscription was cancelled. An address that was never on the list
+/// gets a suppression row (already unsubscribed): the same link also stops
+/// other marketing mail, e.g. abandoned-cart reminders
+/// (`store::abandoned_cart`), so it must stick for non-subscribers too.
 pub async fn unsubscribe_email(
   pool: &PgPool,
   email: &str,
 ) -> Result<bool, sqlx::Error> {
-  let done = sqlx::query!(
-    "UPDATE newsletter_subscribers SET unsubscribed_at = now()
-     WHERE lower(email) = lower($1) AND unsubscribed_at IS NULL",
-    email.trim()
+  // `xmax <> 0`: the conflict update (an active row was cancelled); a fresh
+  // suppression insert reports false; no row: already unsubscribed.
+  let cancelled = sqlx::query_scalar!(
+    r#"INSERT INTO newsletter_subscribers (id, email, created_at, unsubscribed_at)
+       VALUES (gen_random_uuid(), $1, now(), now())
+       ON CONFLICT (lower(email)) DO UPDATE
+         SET unsubscribed_at = now()
+         WHERE newsletter_subscribers.unsubscribed_at IS NULL
+       RETURNING (xmax::text <> '0') AS "cancelled!""#,
+    email.trim().to_lowercase()
   )
-  .execute(pool)
+  .fetch_optional(pool)
   .await?;
-  Ok(done.rows_affected() > 0)
+  Ok(cancelled.unwrap_or(false))
 }
 
 #[query_params(error = bad_request)]

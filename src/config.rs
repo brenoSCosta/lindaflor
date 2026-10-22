@@ -425,6 +425,23 @@ pub fn reservation_sweep_secs() -> u64 {
   env_parse("RESERVATION_SWEEP_SECS", 60).max(1)
 }
 
+/// Abandoned-cart reminders on/off from `ABANDONED_CART_ENABLED` (default
+/// on; `0`/`false`/`no`/`off` disables).
+pub fn abandoned_cart_enabled() -> bool {
+  read_env_or_file("ABANDONED_CART_ENABLED").is_none_or(|v| {
+    !matches!(
+      v.trim().to_ascii_lowercase().as_str(),
+      "0" | "false" | "no" | "off"
+    )
+  })
+}
+
+/// Minutes a cart must sit untouched before its reminder, from
+/// `ABANDONED_CART_AFTER_MINUTES` (default 180, at least 1).
+pub fn abandoned_cart_after_minutes() -> i64 {
+  env_parse("ABANDONED_CART_AFTER_MINUTES", 180_i64).max(1)
+}
+
 /// Number of reverse proxies in front of the app from `TRUSTED_PROXY_HOPS`
 /// (default `0` = directly exposed). Feeds
 /// `TrustedProxies::new().nearest(n)` in `src/app.rs`: only set above zero

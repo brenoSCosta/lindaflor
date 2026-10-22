@@ -474,6 +474,91 @@ pub fn order_refunded(order: &OrderMail) -> Email {
   )
 }
 
+// --- Notifications ---
+
+/// Back-in-stock alert ("Avise-me"). `cancel_url` stops every pending alert
+/// of the address (signed link, see `store::stock_alerts`).
+pub fn back_in_stock(
+  product_name: &str,
+  variant_label: &str,
+  product_url: &str,
+  cancel_url: &str,
+) -> Email {
+  render_with_unsubscribe(
+    format!("{product_name} voltou ao estoque · {BRAND}"),
+    Body {
+      heading: "A peça que você queria voltou!",
+      paragraphs: vec![
+        "Olá!".to_string(),
+        format!(
+          "{product_name} ({variant_label}) está disponível de novo. O estoque é limitado: garanta a sua antes que acabe."
+        ),
+      ],
+      action: Some(("Ver peça", product_url)),
+      code: None,
+      footnote: Some(
+        "Você recebeu este e-mail porque pediu para ser avisada quando a peça voltasse. Este aviso é enviado uma única vez.",
+      ),
+    },
+    Some(cancel_url),
+  )
+}
+
+/// One line of an abandoned-cart reminder.
+#[derive(Debug, Clone)]
+pub struct CartReminderLine {
+  pub product_name: String,
+  /// Size + color, e.g. `M · Azul`.
+  pub variant_label: String,
+  pub quantity: i32,
+  pub unit_price_cents: i64,
+}
+
+/// Abandoned-cart reminder (marketing: carries the newsletter unsubscribe
+/// link, and the outbox adds `List-Unsubscribe`).
+pub fn abandoned_cart(
+  name: &str,
+  lines: &[CartReminderLine],
+  checkout_url: &str,
+  unsubscribe_url: &str,
+) -> Email {
+  let mut paragraphs = vec![
+    greeting(name),
+    "Você deixou algumas peças no carrinho. Separamos tudo para você finalizar a compra:".to_string(),
+  ];
+  for line in lines {
+    let quantity = if line.quantity > 1 {
+      format!(" (x{})", line.quantity)
+    } else {
+      String::new()
+    };
+    paragraphs.push(format!(
+      "• {} — {}{} — {}",
+      line.product_name,
+      line.variant_label,
+      quantity,
+      format_price(line.unit_price_cents)
+    ));
+  }
+  paragraphs.push(
+    "Os itens não ficam reservados até o pagamento: o estoque pode acabar."
+      .to_string(),
+  );
+  render_with_unsubscribe(
+    format!("Suas peças estão esperando · {BRAND}"),
+    Body {
+      heading: "Esqueceu algo no carrinho?",
+      paragraphs,
+      action: Some(("Finalizar compra", checkout_url)),
+      code: None,
+      footnote: Some(
+        "Abra o link no mesmo navegador em que você montou o carrinho.",
+      ),
+    },
+    Some(unsubscribe_url),
+  )
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

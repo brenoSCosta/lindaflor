@@ -488,6 +488,12 @@ pub async fn page(
                         )
                     )
 
+                    if selected_available == 0
+                        && let Some(variant_id) = selected_variant_id.clone()
+                    {
+                        crate::app::avise_me::stock_alert_form(variant_id: variant_id)
+                    }
+
                     separator(attrs: attributes! { class="my-4" })
 
                     accordion(
