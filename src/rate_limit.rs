@@ -53,6 +53,7 @@ pub const SCOPE_BACKUP_CODE: &str = "auth:verify-backup-code";
 pub const SCOPE_TWO_FACTOR: &str = "auth:two-factor";
 pub const SCOPE_PEDIDO_POLL: &str = "pedido:poll";
 pub const SCOPE_PEDIDO_PAGE: &str = "pedido:page";
+pub const SCOPE_MP_WEBHOOK: &str = "webhook:mercadopago";
 pub const SCOPE_GLOBAL: &str = "global";
 
 /// Default budgets: 5/min/IP on auth endpoints, 3/min on
@@ -67,6 +68,8 @@ pub const DEFAULT_BACKUP_CODE_PER_MIN: u32 = 3;
 pub const DEFAULT_TWO_FACTOR_PER_MIN: u32 = 10;
 pub const DEFAULT_PEDIDO_POLL_PER_MIN: u32 = 10;
 pub const DEFAULT_PEDIDO_PAGE_PER_MIN: u32 = 30;
+/// Mercado Pago notifies from a handful of IPs, in bursts after outages.
+pub const DEFAULT_MP_WEBHOOK_PER_MIN: u32 = 120;
 pub const DEFAULT_GLOBAL_PER_MIN: u32 = 600;
 
 /// Prefixes the global governor skips so those requests do not consume the
@@ -87,6 +90,7 @@ pub const GLOBAL_OVERRIDE_PREFIXES: &[&str] = &[
   "/api/auth/two-factor/verify-backup-code",
   "/pedido/status-proc",
   "/pedido",
+  "/api/webhooks/mercadopago",
   "/metrics",
   "/_topcoat/assets",
 ];

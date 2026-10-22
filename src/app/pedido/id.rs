@@ -262,12 +262,45 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   } else {
     status_label(&order.status)
   };
-  let pix_code = order
-    .payment_meta
+  // Mercado Pago orders show the PSP's QR / copy-paste code (created
+  // lazily here if MP was down at checkout); static orders keep the local
+  // BR Code from `payment_meta`.
+  let payment = if is_pending {
+    crate::payments::service::order_payment(
+      pool,
+      &crate::payments::PaymentProvider::from_cx(cx),
+      order.id,
+    )
+    .await?
+  } else {
+    crate::payments::service::OrderPayment::StaticPix
+  };
+  let (is_mp, mp_charge) = match payment {
+    crate::payments::service::OrderPayment::MercadoPago(charge) => {
+      (true, charge)
+    }
+    crate::payments::service::OrderPayment::StaticPix => (false, None),
+  };
+  let pix_code = if is_mp {
+    mp_charge.as_ref().and_then(|charge| charge.qr_code.clone())
+  } else {
+    order
+      .payment_meta
+      .as_ref()
+      .and_then(|m| m.get("pix_copy_paste"))
+      .and_then(|v| v.as_str())
+      .map(|s| s.to_string())
+  };
+  let mp_qr_image = mp_charge
     .as_ref()
-    .and_then(|m| m.get("pix_copy_paste"))
-    .and_then(|v| v.as_str())
-    .map(|s| s.to_string());
+    .and_then(|charge| charge.qr_code_base64.as_deref())
+    .map(|b64| format!("data:image/png;base64,{b64}"));
+  let mp_ticket_url = mp_charge
+    .as_ref()
+    .and_then(|charge| charge.ticket_url.clone());
+  let mp_expires = mp_charge
+    .as_ref()
+    .and_then(|charge| charge.expires_label.clone());
   let order_id_short = order.id.to_string().chars().take(8).collect::<String>();
   let order_total = format_price(order.total_cents);
   let settings = get_store_settings(pool).await?;
@@ -355,12 +388,25 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                 "Pague exatamente "
                                 <strong class="font-medium text-foreground">(format_price(order.total_cents))</strong>
                             </li>
-                            <li>"Avise a loja no WhatsApp para confirmarmos o pagamento"</li>
+                            if is_mp {
+                                <li>"A confirmação é automática: depois de pagar, toque em Atualizar status"</li>
+                            } else {
+                                <li>"Avise a loja no WhatsApp para confirmarmos o pagamento"</li>
+                            }
                         </ol>
                         separator(attrs: attributes! { class="my-3" })
-                        <p class="text-sm text-muted-foreground">
-                            "A reserva de estoque é válida por 24 horas após a criação do pedido."
-                        </p>
+                        if let Some(expires) = mp_expires {
+                            <p class="text-sm text-muted-foreground">
+                                "O código PIX e a reserva de estoque valem até " (expires) "."
+                            </p>
+                        } else {
+                            <p class="text-sm text-muted-foreground">
+                                "A reserva de estoque é válida por 24 horas após a criação do pedido."
+                            </p>
+                        }
+                        if let Some(src) = mp_qr_image {
+                            <img src=(src) alt="QR Code PIX" class="mx-auto my-3 h-56 w-56 rounded-lg border border-border">
+                        }
                         if let Some(code) = pix_code {
                             let code_text = code.clone();
                             <div class="space-y-2">
@@ -384,7 +430,16 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                 >
                                     $(if copied.get() { "Copiado!" } else { "Copiar código PIX" })
                                 </button>
+                                if let Some(url) = mp_ticket_url {
+                                    <a href=(url) target="_blank" rel="noreferrer" class="block text-sm underline">
+                                        "Abrir pagamento no Mercado Pago"
+                                    </a>
+                                }
                             </div>
+                        } else if is_mp {
+                            <p class="text-sm text-destructive">
+                                (crate::payments::PAYMENT_UNAVAILABLE_MESSAGE) " Atualize a página para gerar o código PIX."
+                            </p>
                         } else {
                             <p class="text-sm text-destructive">
                                 "Instruções de pagamento indisponíveis. Fale conosco no WhatsApp."

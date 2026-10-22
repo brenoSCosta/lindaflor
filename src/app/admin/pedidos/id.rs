@@ -102,6 +102,29 @@ async fn update_order(
     toast_redirect(cx, back.clone())
   };
 
+  let pool = app_context::<PgPool>(cx);
+  // "Sincronizar com Mercado Pago" / "Estornar no Mercado Pago".
+  if let Some(action) =
+    crate::payments::service::AdminAction::parse(input.status.trim())
+  {
+    let provider = crate::payments::PaymentProvider::from_cx(cx);
+    let actor = crate::payments::service::Actor {
+      id: Some(actor.user.id),
+      name: actor.user.name.as_str(),
+    };
+    return match crate::payments::service::run_admin_action(
+      pool, &provider, order_id, action, actor,
+    )
+    .await
+    {
+      Ok(message) => {
+        set_toast(cx, Toast::success(message));
+        toast_redirect(cx, back)
+      }
+      Err(message) => fail(&message),
+    };
+  }
+
   let Some(event) = OrderEvent::parse(input.status.trim()) else {
     return fail("Status inválido.");
   };
@@ -109,7 +132,6 @@ async fn update_order(
   // unchecked box, so absent = "do not restock". The forms pre-check it for
   // Paid/Processing (the transition default) and leave it off otherwise.
   let restock = input.restock.is_some();
-  let pool = app_context::<PgPool>(cx);
   let mut tx = pool.begin().await?;
   let outcome = apply_with_audit(
     &mut tx,
@@ -210,6 +232,12 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     .and_then(|value| value.as_str())
     .unwrap_or("")
     .to_string();
+  let payment = crate::payments::service::admin_payment_info(pool, order_id)
+    .await?
+    .filter(|info| info.provider == crate::payments::ProviderKind::MercadoPago);
+  let mp_refundable = payment
+    .as_ref()
+    .is_some_and(|info| info.refundable(&order.status));
   let expires = order.reservation_expires_at.clone().unwrap_or_default();
   let created = order.created_at.clone();
   let status = order.status.clone();
@@ -380,6 +408,51 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                       )
                   </form>
               </div>
+          }
+
+          if let Some(info) = payment {
+              card(
+                  card_header(card_title("Mercado Pago"))
+                  card_content(
+                      <p class="text-sm">
+                          "Pagamento: "
+                          <span class="font-mono">
+                              (info.mp_payment_id.map(|id| id.to_string()).unwrap_or_else(|| "não criado".to_string()))
+                          </span>
+                      </p>
+                      <p class="text-sm">
+                          "Status MP: " (info.mp_status.clone().unwrap_or_else(|| "—".to_string()))
+                          if let Some(detail) = info.mp_status_detail.clone() {
+                              " (" (detail) ")"
+                          }
+                      </p>
+                      if let Some(synced) = info.synced_at.clone() {
+                          <p class="text-sm text-muted-foreground">"Última sincronização: " (synced)</p>
+                      }
+                      if info.mp_payment_id.is_some() {
+                          <div class="mt-2 flex flex-wrap gap-3">
+                              <form method="post" action=(href!(page, Id(order_id.to_string())))>
+                                  <input type="hidden" name="status" value="mp_sync">
+                                  button(
+                                      variant: ButtonVariant::Outline,
+                                      attrs: attributes! { type="submit" },
+                                      "Sincronizar com Mercado Pago"
+                                  )
+                              </form>
+                              if mp_refundable {
+                                  <form method="post" action=(href!(page, Id(order_id.to_string())))>
+                                      <input type="hidden" name="status" value="mp_refund">
+                                      button(
+                                          variant: ButtonVariant::Destructive,
+                                          attrs: attributes! { type="submit" },
+                                          "Estornar no Mercado Pago"
+                                      )
+                                  </form>
+                              }
+                          </div>
+                      }
+                  )
+              )
           }
 
           card(

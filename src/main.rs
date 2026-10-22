@@ -22,6 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   let _ = openapi::openapi_json;
   let _ = openapi::scalar_docs;
   let _ = openapi::swagger_docs;
+  let _ = lindaflor::payments::webhook::mercadopago_webhook;
 
   let cfg = lindaflor::config::Config::from_env()?;
   let pool = lindaflor::db::create_pool(&cfg.database_url).await?;
@@ -38,6 +39,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     None => lindaflor::storage::ObjectStore::unavailable(),
   };
 
+  let payment_config = lindaflor::payments::PaymentConfig::from_env()?;
+  let payments =
+    lindaflor::payments::PaymentProvider::from_config(&payment_config);
+  tracing::info!(provider = payments.kind().as_str(), "payment provider");
+
   let host = std::env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
   let listener = TcpListener::bind((host.as_str(), cfg.port)).await?;
   tracing::info!("listening on http://{}", listener.local_addr()?);
@@ -47,15 +53,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   // finish before the process exits.
   let pool_for_shutdown = pool.clone();
   let sweep_pool = pool.clone();
+  let sweep_payments = payments.clone();
   let sweep_secs = lindaflor::config::reservation_sweep_secs();
   tokio::spawn(async move {
     let mut interval =
       tokio::time::interval(std::time::Duration::from_secs(sweep_secs));
     loop {
       interval.tick().await;
+      // Payment-aware: MP orders are re-checked with MP before cancelling.
       if let Err(error) =
-        lindaflor::app::store::order::expire_pending_reservations(&sweep_pool)
-          .await
+        lindaflor::payments::service::expire_pending_reservations(
+          &sweep_pool,
+          &sweep_payments,
+        )
+        .await
       {
         tracing::error!(error = %error, "reservation sweep failed");
       }
@@ -64,8 +75,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
       lindaflor::rate_limit::prune_limiters();
     }
   });
-  topcoat::serve(listener, lindaflor::app::router(pool, valkey_conn, storage))
-    .await?;
+  topcoat::serve(
+    listener,
+    lindaflor::app::router(pool, valkey_conn, storage, payments),
+  )
+  .await?;
   pool_for_shutdown.close().await;
 
   Ok(())

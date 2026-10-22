@@ -103,10 +103,14 @@ devenv exports the process environment. `DATABASE_URL` follows the Postgres port
 | `LOG_SLOW_THRESHOLD_MS`   | `1000`                                                    | Slow request threshold in milliseconds |
 | `TRUSTED_PROXY_HOPS`      | `0`                                                       | Number of reverse proxies in front of the app (Topcoat trusted proxies); `0` = directly exposed, proxy headers ignored |
 | `TRUSTED_PROXY_NETWORKS`  | _(unset)_                                                 | Comma-separated trusted proxy CIDRs/IPs (e.g. `10.0.0.0/8, 192.168.0.0/16`), combined with `TRUSTED_PROXY_HOPS` |
+| `PAYMENT_PROVIDER`        | _(unset)_                                                 | `static_pix` (local BR Code, manual confirmation) or `mercadopago`. Unset = `mercadopago` when `MP_ACCESS_TOKEN` is set, else `static_pix`. Production refuses `static_pix` unless `ALLOW_STATIC_PIX=1` |
+| `MP_ACCESS_TOKEN`         | _(unset)_                                                 | Mercado Pago access token (server-only; `MP_ACCESS_TOKEN_FILE` supported) |
+| `MP_WEBHOOK_SECRET`       | _(unset)_                                                 | Secret that signs MP webhooks (`x-signature`); `MP_WEBHOOK_SECRET_FILE` supported. Webhook URL: `<APP_ORIGIN>/api/webhooks/mercadopago` |
+| `MP_API_BASE_URL`         | _(unset)_                                                 | Override of `https://api.mercadopago.com` (tests / proxies; must be https in production) |
 
 Avatars are stored in RustFS (S3 API). The console is http://127.0.0.1:4204.
 
-The app is same-origin only: there is no CORS layer and no `Access-Control-*` headers. Cross-origin browser POSTs (and other mutations) are rejected with 403 by Topcoat `OriginPolicy`. There is no public cross-origin API.
+The app is same-origin only: there is no CORS layer and no `Access-Control-*` headers. Cross-origin browser POSTs (and other mutations) are rejected with 403 by Topcoat `OriginPolicy`. There is no public cross-origin API. The one exemption is `POST /api/webhooks/mercadopago`, a cookie-less server-to-server call authenticated by its HMAC signature.
 
 ## Development
 

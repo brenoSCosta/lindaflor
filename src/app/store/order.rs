@@ -398,7 +398,12 @@ pub async fn expire_pending_reservations(
   first_error.map_or(Ok(()), Err)
 }
 
-async fn expire_one(pool: &PgPool, order_id: Uuid) -> Result<(), ApplyError> {
+/// Cancel one expired pending order (no-op unless it is still pending and
+/// past its hold). Also used by the payment-aware sweep in `src/payments`.
+pub async fn expire_one(
+  pool: &PgPool,
+  order_id: Uuid,
+) -> Result<(), ApplyError> {
   let mut tx = pool.begin().await?;
   // Re-check under the lock: the order may have been paid, cancelled or
   // reclaimed by a checkout since the scan.

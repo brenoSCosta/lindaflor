@@ -175,7 +175,16 @@ pub async fn page(
     if let Err(message) = validate_pay_fields(posted) {
       checkout_error = Some(message);
     } else {
-      match create_order(pool, cart.id, posted.clone(), session_user_id).await {
+      let provider = crate::payments::PaymentProvider::from_cx(cx);
+      match create_order_with(
+        pool,
+        &provider,
+        cart.id,
+        posted.clone(),
+        session_user_id,
+      )
+      .await
+      {
         Ok(created) => {
           let token = created.access_token.to_string();
           return Err(
@@ -202,7 +211,10 @@ pub async fn page(
   let zip_digits: String = input_zip_digits(body.as_ref());
   let state = input_state(body.as_ref());
   let settings = get_store_settings(pool).await?;
-  let pix_available = pix_configured(&settings);
+  let pix_available = payment_available(
+    &crate::payments::PaymentProvider::from_cx(cx),
+    &settings,
+  );
   // Preview only: until the CEP resolves, estimate from the selected state.
   // The charged rate is always derived from the CEP in `create_order`.
   let preview_uf = uf_from_cep(&zip_digits).unwrap_or_else(|| {
@@ -769,8 +781,27 @@ struct CreatedOrder {
   access_token: Uuid,
 }
 
+/// Static-PIX order creation (the pre-PSP path the tests exercise).
+#[cfg(test)]
 async fn create_order(
   pool: &PgPool,
+  cart_id: Uuid,
+  form_data: CheckoutInput,
+  user_id: Option<Uuid>,
+) -> Result<CreatedOrder, CheckoutError> {
+  create_order_with(
+    pool,
+    &crate::payments::PaymentProvider::StaticPix,
+    cart_id,
+    form_data,
+    user_id,
+  )
+  .await
+}
+
+async fn create_order_with(
+  pool: &PgPool,
+  provider: &crate::payments::PaymentProvider,
   cart_id: Uuid,
   form_data: CheckoutInput,
   user_id: Option<Uuid>,
@@ -779,8 +810,20 @@ async fn create_order(
     validate_pay_fields(&form_data).map_err(CheckoutError::Form)?;
 
   let settings = crate::app::store::queries::get_store_settings(pool).await?;
-  if !pix_configured(&settings) {
-    return Err(CheckoutError::Form(PIX_UNAVAILABLE_MESSAGE.to_string()));
+  let provider_kind = provider.kind();
+  match provider_kind {
+    crate::payments::ProviderKind::StaticPix if !pix_configured(&settings) => {
+      return Err(CheckoutError::Form(PIX_UNAVAILABLE_MESSAGE.to_string()));
+    }
+    // Circuit open: fail fast before holding stock for an unpayable order.
+    crate::payments::ProviderKind::MercadoPago
+      if !provider.accepting_charges() =>
+    {
+      return Err(CheckoutError::Form(
+        crate::payments::PAYMENT_UNAVAILABLE_MESSAGE.to_string(),
+      ));
+    }
+    _ => {}
   }
   let order_id = Uuid::now_v7();
   let access_token = Uuid::new_v4();
@@ -802,12 +845,22 @@ async fn create_order(
       user_id,
       zip_digits: &zip_digits,
       shipping_uf,
+      provider_kind,
     },
   )
   .await;
   match outcome {
     Ok(()) => {
       tx.commit().await?;
+      // Charge after commit (no PSP call while holding row locks). On
+      // failure the order page retries with the same idempotency key.
+      if provider_kind == crate::payments::ProviderKind::MercadoPago
+        && let Err(error) =
+          crate::payments::service::ensure_charge(pool, provider, order_id)
+            .await
+      {
+        tracing::warn!(%order_id, %error, "charge creation deferred");
+      }
       Ok(CreatedOrder {
         id: order_id,
         access_token,
@@ -832,6 +885,7 @@ struct CreateOrderParams<'a> {
   zip_digits: &'a str,
   /// Derived from the CEP; the posted `state` is never trusted for pricing.
   shipping_uf: &'static str,
+  provider_kind: crate::payments::ProviderKind,
 }
 
 async fn create_order_in_tx(
@@ -847,6 +901,7 @@ async fn create_order_in_tx(
     user_id,
     zip_digits,
     shipping_uf,
+    provider_kind,
   } = params;
   // No global expiry sweep here (the background sweeper owns it); the quote
   // only reclaims expired holds on this cart's own inventory rows.
@@ -1001,18 +1056,25 @@ async fn create_order_in_tx(
     record_redemption(tx, coupon, user_id, order_id, guest_email).await?;
   }
 
-  let pix_code = generate_pix_payload(
-    settings.pix_key.as_deref().unwrap_or(""),
-    settings.pix_key_type.as_deref().unwrap_or("phone"),
-    settings
-      .pix_merchant_name
-      .as_deref()
-      .unwrap_or("Linda Flor"),
-    settings.pix_merchant_city.as_deref().unwrap_or("Aracaju"),
-    total,
-    &order_id.to_string(),
-  )
-  .map_err(|message| CheckoutError::Form(message.to_string()))?;
+  // Mercado Pago orders get their PIX code from the PSP after commit.
+  let pix_code = if provider_kind == crate::payments::ProviderKind::StaticPix {
+    Some(
+      generate_pix_payload(
+        settings.pix_key.as_deref().unwrap_or(""),
+        settings.pix_key_type.as_deref().unwrap_or("phone"),
+        settings
+          .pix_merchant_name
+          .as_deref()
+          .unwrap_or("Linda Flor"),
+        settings.pix_merchant_city.as_deref().unwrap_or("Aracaju"),
+        total,
+        &order_id.to_string(),
+      )
+      .map_err(|message| CheckoutError::Form(message.to_string()))?,
+    )
+  } else {
+    None
+  };
 
   let payment_meta = serde_json::json!({
       "pix_copy_paste": pix_code,
@@ -1022,15 +1084,30 @@ async fn create_order_in_tx(
       "discount_cents": discount,
   });
 
-  sqlx::query("UPDATE orders SET payment_meta = $1 WHERE id = $2")
-    .bind(payment_meta)
-    .bind(order_id)
-    .execute(&mut **tx)
-    .await?;
+  sqlx::query(
+    "UPDATE orders SET payment_meta = $1, payment_provider = $3 WHERE id = $2",
+  )
+  .bind(payment_meta)
+  .bind(order_id)
+  .bind(provider_kind.as_str())
+  .execute(&mut **tx)
+  .await?;
 
   clear_items_in_tx(tx, cart_id).await?;
 
   Ok(())
+}
+
+/// Whether checkout can take payment: Mercado Pago (breaker closed) or a
+/// configured static PIX key.
+fn payment_available(
+  provider: &crate::payments::PaymentProvider,
+  settings: &crate::app::store::queries::StoreSettings,
+) -> bool {
+  match provider.kind() {
+    crate::payments::ProviderKind::MercadoPago => provider.accepting_charges(),
+    crate::payments::ProviderKind::StaticPix => pix_configured(settings),
+  }
 }
 
 fn pix_configured(
@@ -1925,5 +2002,99 @@ mod tests {
         .await
         .expect("reserved b");
     assert_eq!((reserved_a, reserved_b), (0, 0));
+  }
+
+  #[tokio::test]
+  async fn mercadopago_checkout_charges_server_total() {
+    let pool = crate::test_support::fresh_pool().await;
+    let mock = crate::payments::test_mock::MockMp::start().await;
+    let provider = mock.provider();
+    let (_product_id, variant_id) =
+      seed_variant(&pool, UNIT_PRICE_CENTS, 3).await;
+    let cart_id = seed_cart(&pool, variant_id, 2).await;
+    let email = format!("mp-{}@example.com", Uuid::now_v7().simple());
+    let order_id = create_order_with(
+      &pool,
+      &provider,
+      cart_id,
+      checkout_input(&email, ""),
+      None,
+    )
+    .await
+    .expect("create order")
+    .id;
+
+    let (total, provider_kind, mp_payment_id, static_code): (
+      i64,
+      String,
+      Option<i64>,
+      Option<String>,
+    ) = sqlx::query_as(
+      "SELECT total_cents, payment_provider, mp_payment_id,
+              payment_meta->>'pix_copy_paste'
+       FROM orders WHERE id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .expect("order");
+    assert_eq!(provider_kind, "mercadopago");
+    assert!(mp_payment_id.is_some(), "charge created after commit");
+    assert_eq!(static_code, None, "no local BR Code for MP orders");
+    let creates: Vec<_> = mock
+      .requests()
+      .into_iter()
+      .filter(|r| r.method == "POST")
+      .collect();
+    assert_eq!(creates.len(), 1);
+    assert_eq!(
+      creates[0].body["transaction_amount"],
+      serde_json::json!(total as f64 / 100.0)
+    );
+    assert_eq!(
+      creates[0].idempotency_key.as_deref(),
+      Some(order_id.to_string().as_str())
+    );
+  }
+
+  #[tokio::test]
+  async fn mercadopago_checkout_fails_fast_when_circuit_open() {
+    let pool = crate::test_support::fresh_pool().await;
+    let mock = crate::payments::test_mock::MockMp::start().await;
+    let provider =
+      mock.provider_with(crate::payments::circuit::CircuitBreaker::new(
+        1,
+        std::time::Duration::from_secs(60),
+      ));
+    mock.force(&[500, 500, 500]);
+    let _ = provider.fetch_status(1).await;
+    let requests_before = mock.requests().len();
+
+    let (_product_id, variant_id) =
+      seed_variant(&pool, UNIT_PRICE_CENTS, 3).await;
+    let cart_id = seed_cart(&pool, variant_id, 1).await;
+    let email = format!("mp-open-{}@example.com", Uuid::now_v7().simple());
+    let err = create_order_with(
+      &pool,
+      &provider,
+      cart_id,
+      checkout_input(&email, ""),
+      None,
+    )
+    .await
+    .expect_err("circuit open");
+    assert_eq!(
+      err.to_string(),
+      crate::payments::PAYMENT_UNAVAILABLE_MESSAGE
+    );
+    let reserved: i32 = sqlx::query_scalar(
+      "SELECT reserved FROM inventory WHERE variant_id = $1",
+    )
+    .bind(variant_id)
+    .fetch_one(&pool)
+    .await
+    .expect("reserved");
+    assert_eq!(reserved, 0, "no order, no hold");
+    assert_eq!(mock.requests().len(), requests_before, "no MP call");
   }
 }
