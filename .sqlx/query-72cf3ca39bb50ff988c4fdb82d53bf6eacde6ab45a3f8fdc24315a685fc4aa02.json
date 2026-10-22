@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, name, email, email_verified, image, two_factor_enabled, role,\n               banned, ban_reason, ban_expires\n        FROM users\n        WHERE ($1 = '' OR name ILIKE $1 OR email ILIKE $1)\n        ORDER BY created_at DESC, id DESC\n        LIMIT $2 OFFSET $3\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "email_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "image",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "two_factor_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "role",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "banned",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "ban_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "ban_expires",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "72cf3ca39bb50ff988c4fdb82d53bf6eacde6ab45a3f8fdc24315a685fc4aa02"
+}

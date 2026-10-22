@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            s.id AS session_id,\n            s.expires_at,\n            s.updated_at,\n            s.impersonated_by,\n            u.id AS user_id,\n            u.name,\n            u.email,\n            u.email_verified,\n            u.image,\n            u.two_factor_enabled,\n            u.role,\n            u.banned,\n            u.ban_reason,\n            u.ban_expires\n        FROM sessions s\n        INNER JOIN users u ON u.id = s.user_id\n        WHERE s.token = $1\n          AND s.expires_at > now()\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "expires_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 2,
+        "name": "updated_at",
+        "type_info": "Timestamp"
+      },
+      {
+        "ordinal": 3,
+        "name": "impersonated_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "email_verified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "image",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "two_factor_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "role",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "banned",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "ban_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "ban_expires",
+        "type_info": "Timestamp"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "2025288d0694314c98a5baf9f021cc1843b27f3c3a6bdd9f9b694de336700119"
+}

@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) FROM inventory i\n       INNER JOIN warehouses w ON w.id = i.warehouse_id\n       WHERE w.active = true AND (i.quantity - i.reserved) <= 5",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "81b536f32c30925b27a4171b5b97894ecc9dcbb647faeeac93f69d4fcb970254"
+}

@@ -1,0 +1,23 @@
+# Build context for the Dockerfile. Keep `.sqlx/` (offline query cache) in.
+**/target
+.git
+.github
+.devenv
+.devenv.flake.nix
+.direnv
+.envrc
+.env
+.env.*
+.vscode
+.idea
+.claude
+node_modules
+dump.rdb
+*.log
+backups
+Dockerfile
+.dockerignore
+docker-compose*.yml
+# Docs are not needed to build the binary.
+*.md
+design

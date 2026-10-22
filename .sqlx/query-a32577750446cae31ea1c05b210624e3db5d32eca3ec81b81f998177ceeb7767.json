@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id::text AS \"id!\", name, slug, description, price_in_cents, compare_at_price_in_cents, category::text AS \"category!\", featured, active FROM products WHERE id::text = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "slug",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "price_in_cents",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "compare_at_price_in_cents",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "category!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "featured",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "active",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      false,
+      false,
+      true,
+      false,
+      true,
+      null,
+      false,
+      false
+    ]
+  },
+  "hash": "a32577750446cae31ea1c05b210624e3db5d32eca3ec81b81f998177ceeb7767"
+}

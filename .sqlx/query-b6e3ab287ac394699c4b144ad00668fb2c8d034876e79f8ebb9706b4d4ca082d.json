@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users\n       SET banned = false, ban_reason = NULL, ban_expires = NULL\n       WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b6e3ab287ac394699c4b144ad00668fb2c8d034876e79f8ebb9706b4d4ca082d"
+}

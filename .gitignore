@@ -2,5 +2,10 @@
 .*
 !.gitignore
 !.vscode
+!.dockerignore
+!.github
+!.sqlx
 dump.rdb
 node_modules/
+backups/
+secrets/

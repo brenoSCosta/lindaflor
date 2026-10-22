@@ -1,0 +1,62 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT s.id, s.name, s.slug, s.price_in_cents, s.active,\n            (SELECT si.url FROM set_images si WHERE si.set_id = s.id ORDER BY si.sort_order ASC LIMIT 1) AS cover_url,\n            (SELECT COUNT(*) FROM set_members sm WHERE sm.set_id = s.id) AS \"member_count!\",\n            (SELECT COUNT(*) FROM set_images si WHERE si.set_id = s.id) AS \"image_count!\"\n       FROM sets s ORDER BY s.name ASC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "slug",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "price_in_cents",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "cover_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "member_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "image_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "63ee71c46ad283b708b3eb320543c1bd2fce72e8dbb008fd70fdcb0b506c6d0e"
+}

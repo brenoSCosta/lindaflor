@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO two_factor (id, backup_codes, user_id, verified, secret_nonce, secret_ciphertext, secret_key_version)\n        VALUES ($1, $2, $3, false, $4, $5, $6)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Bytea",
+        "Bytea",
+        "Int2"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "31c526ccb8586d90d1fde09e58541fa36e41d333ed892f73388623da3ea15131"
+}
