@@ -7,7 +7,7 @@ use topcoat::{
 };
 use uuid::Uuid;
 
-use crate::app::store::inventory::lock_cart_inventory;
+use crate::app::store::inventory::{LIVE_AVAILABLE_SQL, lock_cart_inventory};
 use crate::app::store::queries::size_label;
 use crate::auth::user::current_user_owned;
 use crate::config::app_env;
@@ -301,11 +301,11 @@ async fn variant_availability(
   pool: &PgPool,
   variant_id: Uuid,
 ) -> Result<Option<(bool, i32)>, sqlx::Error> {
-  let row = sqlx::query_as::<_, (bool, i32)>(
+  let row = sqlx::query_as::<_, (bool, i32)>(&format!(
     r#"
         SELECT p.active,
             COALESCE((
-                SELECT SUM(GREATEST(i.quantity - i.reserved, 0))::int
+                SELECT SUM({LIVE_AVAILABLE_SQL})::int
                 FROM inventory i
                 INNER JOIN warehouses w ON w.id = i.warehouse_id
                 WHERE i.variant_id = pv.id AND w.active = true
@@ -314,7 +314,7 @@ async fn variant_availability(
         INNER JOIN products p ON p.id = pv.product_id
         WHERE pv.id = $1
         "#,
-  )
+  ))
   .bind(variant_id)
   .fetch_optional(pool)
   .await?;
@@ -893,7 +893,7 @@ pub async fn hydrate_cart_in_tx(
     .fetch_one(&mut **tx)
     .await?;
 
-  let rows = sqlx::query_as::<_, HydrateRow>(
+  let rows = sqlx::query_as::<_, HydrateRow>(&format!(
     r#"
         SELECT
             ci.id AS cart_item_id,
@@ -908,7 +908,7 @@ pub async fn hydrate_cart_in_tx(
             pv.color,
             pv.price_in_cents AS variant_price,
             COALESCE((
-                SELECT SUM(GREATEST(i.quantity - i.reserved, 0))::int
+                SELECT SUM({LIVE_AVAILABLE_SQL})::int
                 FROM inventory i
                 INNER JOIN warehouses w ON w.id = i.warehouse_id
                 WHERE i.variant_id = pv.id AND w.active = true
@@ -928,7 +928,7 @@ pub async fn hydrate_cart_in_tx(
         WHERE ci.cart_id = $1
         FOR UPDATE OF ci
         "#,
-  )
+  ))
   .bind(cart_id)
   .fetch_all(&mut **tx)
   .await?;

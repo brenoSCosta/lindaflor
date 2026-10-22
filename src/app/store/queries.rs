@@ -697,9 +697,15 @@ pub async fn get_product_by_slug(
     .fetch_all(pool)
     .await?;
 
+  // Inline copy of `inventory::LIVE_AVAILABLE_SQL` (`query!` needs a literal).
   let variants = sqlx::query!(
         "SELECT id, sku, size::text AS \"size!\", color, price_in_cents,
-            COALESCE((SELECT SUM(GREATEST(i.quantity - i.reserved, 0))::int
+            COALESCE((SELECT SUM(GREATEST(i.quantity - GREATEST(i.reserved - COALESCE((
+                    SELECT SUM(r.quantity) FROM inventory_reservations r
+                    INNER JOIN orders o ON o.id = r.order_id
+                    WHERE r.inventory_id = i.id
+                      AND o.status = 'pending_payment'
+                      AND o.reservation_expires_at < now()), 0), 0), 0))::int
                 FROM inventory i
                 INNER JOIN warehouses w ON w.id = i.warehouse_id
                 WHERE i.variant_id = product_variants.id AND w.active = true), 0) AS available
@@ -837,10 +843,11 @@ pub async fn set_available_quantity(
   pool: &PgPool,
   set_id: Uuid,
 ) -> Result<i64, sqlx::Error> {
-  sqlx::query_scalar::<_, i64>(
+  use crate::app::store::inventory::LIVE_AVAILABLE_SQL;
+  sqlx::query_scalar::<_, i64>(&format!(
     "SELECT COALESCE(MIN(slot_qty), 0)::bigint FROM (
        SELECT COALESCE(SUM(COALESCE((
-         SELECT SUM(GREATEST(i.quantity - i.reserved, 0))
+         SELECT SUM({LIVE_AVAILABLE_SQL})
          FROM inventory i
          INNER JOIN warehouses w ON w.id = i.warehouse_id
          WHERE i.variant_id = o.variant_id AND w.active = true
@@ -850,7 +857,7 @@ pub async fn set_available_quantity(
        WHERE s.set_id = $1
        GROUP BY s.id
      ) t",
-  )
+  ))
   .bind(set_id)
   .fetch_one(pool)
   .await

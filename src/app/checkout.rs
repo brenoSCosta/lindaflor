@@ -34,7 +34,6 @@ use crate::app::store::coupons::{
   CouponReject, ResolvedCoupon, resolve_coupon,
 };
 use crate::app::store::inventory::{ReserveLine, reserve_for_order};
-use crate::app::store::order::expire_pending_reservations_in_tx;
 use crate::app::store::pix::{PIX_UNAVAILABLE_MESSAGE, generate_pix_payload};
 use crate::app::store::pricing::pix_discount_cents;
 use crate::app::store::queries::{format_price, get_store_settings};
@@ -825,14 +824,8 @@ async fn create_order_in_tx(
     user_id,
     zip_digits,
   } = params;
-  expire_pending_reservations_in_tx(tx)
-    .await
-    .map_err(|error| match error {
-      crate::app::store::order::ApplyError::Db(error) => {
-        CheckoutError::Db(error)
-      }
-      other => CheckoutError::Form(other.to_string()),
-    })?;
+  // No global expiry sweep here (the background sweeper owns it); the quote
+  // only reclaims expired holds on this cart's own inventory rows.
   let items = quote_cart_for_checkout(tx, cart_id)
     .await
     .map_err(|error| match error {

@@ -368,12 +368,64 @@ pub async fn apply_with_audit(
   Ok(outcome.next)
 }
 
+/// Background sweep (see `main.rs`): cancel every pending order whose hold
+/// has expired, one transaction per order. A single transaction cancelling
+/// several orders would lock each order's inventory rows in turn, which
+/// breaks the ascending-`id` lock order (see `inventory.rs`). Orders another
+/// transaction holds are skipped and picked up on the next run.
 pub async fn expire_pending_reservations(
   pool: &PgPool,
 ) -> Result<(), ApplyError> {
+  let expired: Vec<Uuid> = sqlx::query_scalar(
+    r#"
+        SELECT id FROM orders
+        WHERE status = 'pending_payment'
+          AND reservation_expires_at IS NOT NULL
+          AND reservation_expires_at < now()
+        ORDER BY id
+        "#,
+  )
+  .fetch_all(pool)
+  .await?;
+
+  let mut first_error = None;
+  for order_id in expired {
+    if let Err(error) = expire_one(pool, order_id).await {
+      tracing::error!(%order_id, %error, "reservation expiry failed");
+      first_error.get_or_insert(error);
+    }
+  }
+  first_error.map_or(Ok(()), Err)
+}
+
+async fn expire_one(pool: &PgPool, order_id: Uuid) -> Result<(), ApplyError> {
   let mut tx = pool.begin().await?;
-  match expire_pending_reservations_in_tx(&mut tx).await {
-    Ok(()) => {
+  // Re-check under the lock: the order may have been paid, cancelled or
+  // reclaimed by a checkout since the scan.
+  let claimed: Option<Uuid> = sqlx::query_scalar(
+    r#"
+        SELECT id FROM orders
+        WHERE id = $1
+          AND status = 'pending_payment'
+          AND reservation_expires_at < now()
+        FOR UPDATE SKIP LOCKED
+        "#,
+  )
+  .bind(order_id)
+  .fetch_optional(&mut *tx)
+  .await?;
+  if claimed.is_none() {
+    return Ok(());
+  }
+  match apply(
+    &mut tx,
+    order_id,
+    OrderEvent::Cancel,
+    ApplyOptions::default(),
+  )
+  .await
+  {
+    Ok(_) => {
       tx.commit().await?;
       Ok(())
     }
@@ -382,27 +434,6 @@ pub async fn expire_pending_reservations(
       Err(error)
     }
   }
-}
-
-pub async fn expire_pending_reservations_in_tx(
-  tx: &mut Transaction<'_, Postgres>,
-) -> Result<(), ApplyError> {
-  let expired: Vec<Uuid> = sqlx::query_scalar(
-    r#"
-        SELECT id FROM orders
-        WHERE status = 'pending_payment'
-          AND reservation_expires_at IS NOT NULL
-          AND reservation_expires_at < now()
-        FOR UPDATE SKIP LOCKED
-        "#,
-  )
-  .fetch_all(&mut **tx)
-  .await?;
-
-  for order_id in expired {
-    apply(tx, order_id, OrderEvent::Cancel, ApplyOptions::default()).await?;
-  }
-  Ok(())
 }
 
 #[cfg(test)]
