@@ -10,6 +10,7 @@ pub mod auth;
 pub mod newsletter;
 pub mod orders;
 pub mod outbox;
+pub mod returns;
 pub mod templates;
 
 use std::time::Duration;

@@ -14,6 +14,8 @@ pub mod pix;
 pub mod pricing;
 pub mod product_card;
 pub mod queries;
+pub mod reports;
+pub mod returns;
 pub mod reviews;
 pub mod shell;
 pub mod shipping;

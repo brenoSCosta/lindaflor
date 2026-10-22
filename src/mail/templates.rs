@@ -559,6 +559,140 @@ pub fn abandoned_cart(
   )
 }
 
+// --- Returns / exchanges (see `crate::app::store::returns`) ---
+
+/// What every return-request email needs. Built by [`super::returns`].
+#[derive(Debug, Clone)]
+pub struct ReturnMail {
+  /// Order code ([`order_code`]).
+  pub order_code: String,
+  pub name: String,
+  /// "Troca de tamanho" / "Devolução" / "Defeito".
+  pub kind_label: String,
+  /// One line per returned item, e.g. "1x Biquíni Flor (M / azul)".
+  pub items: Vec<String>,
+  /// Absolute `/pedido/{id}?t=...` link.
+  pub url: String,
+}
+
+fn return_paragraphs(mail: &ReturnMail, lead: String) -> Vec<String> {
+  let mut paragraphs = vec![greeting(&mail.name), lead];
+  if !mail.items.is_empty() {
+    paragraphs.push(format!("Itens: {}.", mail.items.join("; ")));
+  }
+  paragraphs
+}
+
+pub fn return_requested(mail: &ReturnMail) -> Email {
+  render(
+    format!(
+      "Solicitação de troca/devolução · pedido #{} · {BRAND}",
+      mail.order_code
+    ),
+    Body {
+      heading: "Recebemos sua solicitação",
+      paragraphs: return_paragraphs(
+        mail,
+        format!(
+          "Recebemos sua solicitação ({}) para o pedido #{}. Vamos analisar e responder por e-mail com as instruções de envio.",
+          mail.kind_label, mail.order_code
+        ),
+      ),
+      action: Some(("Acompanhar solicitação", &mail.url)),
+      code: None,
+      footnote: Some(
+        "Lembre-se: a peça deve estar sem uso, com etiquetas e na embalagem original.",
+      ),
+    },
+  )
+}
+
+pub fn return_approved(mail: &ReturnMail, instructions: &str) -> Email {
+  render(
+    format!(
+      "Troca/devolução aprovada · pedido #{} · {BRAND}",
+      mail.order_code
+    ),
+    Body {
+      heading: "Solicitação aprovada — envie a peça",
+      paragraphs: return_paragraphs(
+        mail,
+        format!(
+          "Sua solicitação ({}) do pedido #{} foi aprovada. Siga as instruções abaixo para enviar a peça de volta.",
+          mail.kind_label, mail.order_code
+        ),
+      ),
+      action: Some(("Ver pedido", &mail.url)),
+      code: Some(("Instruções de envio:", instructions)),
+      footnote: Some(
+        "O frete de devolução por arrependimento é por conta do cliente, exceto em casos de defeito ou erro no envio.",
+      ),
+    },
+  )
+}
+
+pub fn return_rejected(mail: &ReturnMail, reason: &str) -> Email {
+  render(
+    format!(
+      "Solicitação de troca/devolução · pedido #{} · {BRAND}",
+      mail.order_code
+    ),
+    Body {
+      heading: "Não pudemos aceitar sua solicitação",
+      paragraphs: {
+        let mut paragraphs = return_paragraphs(
+          mail,
+          format!(
+            "Analisamos sua solicitação ({}) do pedido #{} e infelizmente não pudemos aceitá-la.",
+            mail.kind_label, mail.order_code
+          ),
+        );
+        paragraphs.push(format!("Motivo: {reason}"));
+        paragraphs.push(
+          "Se tiver dúvidas, fale com a gente pelos canais de atendimento."
+            .to_string(),
+        );
+        paragraphs
+      },
+      action: Some(("Ver pedido", &mail.url)),
+      code: None,
+      footnote: None,
+    },
+  )
+}
+
+/// `refund_cents`: `Some` for a refund, `None` for a completed exchange.
+pub fn return_resolved(mail: &ReturnMail, refund_cents: Option<i64>) -> Email {
+  let lead = match refund_cents {
+    Some(cents) => format!(
+      "Recebemos e conferimos a peça do pedido #{}. O reembolso de {} foi processado e é devolvido via PIX para a conta de origem do pagamento.",
+      mail.order_code,
+      format_price(cents)
+    ),
+    None => format!(
+      "Recebemos e conferimos a peça do pedido #{}. A troca foi concluída e a nova peça segue para você; avisaremos o código de rastreio.",
+      mail.order_code
+    ),
+  };
+  render(
+    format!(
+      "Troca/devolução concluída · pedido #{} · {BRAND}",
+      mail.order_code
+    ),
+    Body {
+      heading: if refund_cents.is_some() {
+        "Reembolso concluído"
+      } else {
+        "Troca concluída"
+      },
+      paragraphs: return_paragraphs(mail, lead),
+      action: Some(("Ver pedido", &mail.url)),
+      code: None,
+      footnote: None,
+    },
+  )
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

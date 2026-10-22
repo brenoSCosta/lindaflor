@@ -439,6 +439,8 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     .tracking_code
     .as_deref()
     .and_then(|code| tracking_url(&order.carrier, code));
+  let returns =
+    crate::app::store::returns::requests_for_order(pool, order_id).await?;
 
   Ok(view! {
       container(
@@ -663,6 +665,8 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                   )
               )
           }
+
+          crate::app::admin::trocas::order_returns_card(requests: returns)
 
           if let Some(info) = payment {
               card(

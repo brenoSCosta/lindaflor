@@ -6,7 +6,9 @@ pub mod estoque;
 pub mod newsletter;
 pub mod pedidos;
 pub mod produtos;
+pub mod relatorios;
 pub mod sets;
+pub mod trocas;
 pub mod usuarios;
 
 use sqlx::PgPool;

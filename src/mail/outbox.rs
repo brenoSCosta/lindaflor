@@ -39,6 +39,10 @@ pub mod kind {
   pub const NEWSLETTER_WELCOME: &str = "newsletter_welcome";
   pub const BACK_IN_STOCK: &str = "back_in_stock";
   pub const ABANDONED_CART: &str = "abandoned_cart";
+  pub const RETURN_REQUESTED: &str = "return_requested";
+  pub const RETURN_APPROVED: &str = "return_approved";
+  pub const RETURN_REJECTED: &str = "return_rejected";
+  pub const RETURN_RESOLVED: &str = "return_resolved";
 
   /// Marketing mail: delivered with `List-Unsubscribe` /
   /// `List-Unsubscribe-Post` headers (RFC 8058) pointing at the signed
