@@ -151,9 +151,36 @@ impl CatalogParams {
   }
 }
 
+/// Catalog head: one canonical URL per category (other filters, sorting and
+/// pagination fold into it); search results are `noindex`.
+fn catalog_head(params: &CatalogParams) -> crate::seo::PageHead {
+  let label = CATEGORIES
+    .iter()
+    .find(|(key, _)| *key == params.category && *key != "all")
+    .map(|(_, label)| *label);
+  let head = match label {
+    Some(label) => crate::seo::PageHead::new(format!("{label} — Moda Praia"))
+      .description(format!(
+        "{label} Linda Flor: moda praia feita em Aracaju, com frete para todo o Brasil e desconto no Pix."
+      ))
+      .canonical(format!("/produtos?category={}", params.category)),
+    None => crate::seo::PageHead::new("Catálogo de Moda Praia")
+      .description(
+        "Catálogo Linda Flor: biquínis, maiôs, saídas de praia e acessórios. Moda praia feita em Aracaju, com frete para todo o Brasil.",
+      )
+      .canonical("/produtos"),
+  };
+  if params.search.is_empty() {
+    head
+  } else {
+    head.noindex()
+  }
+}
+
 #[page]
 pub async fn page(cx: &Cx) -> Result<impl View> {
   let query = request::uri(cx).query().unwrap_or("").to_owned();
+  crate::seo::set_head(cx, catalog_head(&CatalogParams::from_query(&query)));
   Ok(view! {
       catalog_results(query: query)
   })

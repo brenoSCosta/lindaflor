@@ -7,12 +7,19 @@ use crate::components::container::{ContainerVariant, container};
 use crate::components::separator::separator;
 use topcoat::{
   Result,
+  context::Cx,
   router::{href, page},
   view::{View, attributes, view},
 };
 
 #[page]
-pub async fn page() -> Result<impl View> {
+pub async fn page(cx: &Cx) -> Result<impl View> {
+  crate::seo::set_head(
+    cx,
+    crate::seo::PageHead::new("Trocas e Devoluções")
+      .description("Política de trocas e devoluções da Linda Flor: prazo de 7 dias após o recebimento, condições e como solicitar.")
+      .canonical("/trocas-devolucoes"),
+  );
   Ok(view! {
       container(
           variant: ContainerVariant::Narrow,

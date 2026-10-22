@@ -9,12 +9,19 @@ use crate::components::table::{
 };
 use topcoat::{
   Result,
+  context::Cx,
   router::{href, page},
   view::{View, attributes, view},
 };
 
 #[page]
-pub async fn page() -> Result<impl View> {
+pub async fn page(cx: &Cx) -> Result<impl View> {
+  crate::seo::set_head(
+    cx,
+    crate::seo::PageHead::new("Guia de Medidas")
+      .description("Guia de medidas Linda Flor: tabela de tamanhos PP a GG para biquínis, maiôs e saídas de praia.")
+      .canonical("/guia-de-medidas"),
+  );
   Ok(view! {
       container(
           variant: ContainerVariant::Narrow,
