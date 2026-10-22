@@ -196,7 +196,7 @@ async fn seed_settings(pool: &PgPool) -> Result<(), SeedError> {
   sqlx::query(
     "INSERT INTO coupons (id, code, discount_type, discount_value, min_subtotal_cents, active, usage_type, per_user_limit, created_at, updated_at)
      VALUES ($1, $2, 'percent', 10, 0, true, 'unlimited', 1, now(), now())
-     ON CONFLICT (code) DO NOTHING",
+     ON CONFLICT ((upper(code))) DO NOTHING",
   )
   .bind(Uuid::now_v7())
   .bind(FIRST_PURCHASE_COUPON)

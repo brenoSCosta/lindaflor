@@ -64,13 +64,44 @@ pub fn calc_coupon_discount(coupon: &CouponRow, subtotal_cents: i64) -> i64 {
   }
 }
 
+/// Normalize an email for per-person coupon limits: trim + lowercase, drop a
+/// `+tag` from the local part, and fold Gmail aliases (dots in the local part,
+/// `googlemail.com`) onto one `@gmail.com` address. Returns `None` for blank
+/// input. Keep in sync with the backfill in `0018_coupon_identity.sql`.
+pub fn normalize_email(raw: &str) -> Option<String> {
+  let lower = raw.trim().to_lowercase();
+  if lower.is_empty() {
+    return None;
+  }
+  let Some((local, domain)) = lower.rsplit_once('@') else {
+    return Some(lower);
+  };
+  let local = local.split_once('+').map_or(local, |(base, _)| base);
+  if local.is_empty() || domain.is_empty() {
+    return Some(lower);
+  }
+  if domain == "gmail.com" || domain == "googlemail.com" {
+    return Some(format!("{}@gmail.com", local.replace('.', "")));
+  }
+  Some(format!("{local}@{domain}"))
+}
+
 pub struct ResolvedCoupon {
   pub id: Uuid,
   pub code: String,
   pub discount_cents: i64,
+  /// Normalized identity email the per-user limit was checked against; stored
+  /// on the redemption by [`record_redemption`].
+  pub email_norm: Option<String>,
 }
 
+/// User-facing message for [`CouponReject::Gone`].
+pub const COUPON_GONE_MESSAGE: &str = "Cupom inválido.";
+
 pub enum CouponReject {
+  /// The code doesn't exist or the coupon was deactivated. Checkout drops it
+  /// from the cart instead of blocking the order.
+  Gone,
   Invalid(String),
   Db(sqlx::Error),
 }
@@ -89,9 +120,12 @@ impl From<sqlx::Error> for CouponReject {
 /// assigned logged-in user may use it — guests are rejected), global
 /// `COUNT(*) vs effective_max_uses` (`unique` counts as 1 even when
 /// `max_uses` is NULL), and per-identity `COUNT(*) vs per_user_limit`
-/// keyed by `COALESCE(user_id::text, lower(guest_email))`. Active
-/// redemptions only (`refunded_at IS NULL`). Missing identity on a
-/// per-user coupon is a reject (login or checkout email).
+/// matching `user_id = $uid OR email_norm = $email`, where the email is the
+/// account email for logged-in users and the checkout email for guests, both
+/// passed through [`normalize_email`] (so logging out, `+tag` or Gmail-dot
+/// variants share one limit). Active redemptions only (`refunded_at IS
+/// NULL`). Missing identity on a per-user coupon is a reject (login or
+/// checkout email). Unknown or inactive codes are [`CouponReject::Gone`].
 ///
 /// Discount math is shared via [`calc_coupon_discount`]. Shipping is computed
 /// on the pre-discount subtotal by the caller. Pass `for_update = true`
@@ -121,13 +155,13 @@ pub async fn resolve_coupon(
   .await?;
 
   let Some(coupon) = coupon else {
-    return Err(CouponReject::Invalid("Cupom inválido.".to_string()));
+    return Err(CouponReject::Gone);
   };
 
   let coupon_id = coupon.id;
 
   if !coupon.active {
-    return Err(CouponReject::Invalid("Cupom inválido.".to_string()));
+    return Err(CouponReject::Gone);
   }
   let now = time::OffsetDateTime::now_utc();
   if coupon.starts_at.is_some_and(|starts_at| starts_at > now) {
@@ -191,26 +225,34 @@ pub async fn resolve_coupon(
     }
   }
 
-  let identity = user_id.map(|id| id.to_string()).or_else(|| {
-    guest_email
-      .map(str::trim)
-      .filter(|email| !email.is_empty())
-      .map(|email| email.to_ascii_lowercase())
-  });
-  let Some(identity) = identity else {
+  let account_email: Option<String> = match user_id {
+    Some(uid) => {
+      sqlx::query_scalar("SELECT email FROM users WHERE id = $1")
+        .bind(uid)
+        .fetch_optional(&mut **tx)
+        .await?
+    }
+    None => None,
+  };
+  let email_norm = account_email
+    .as_deref()
+    .and_then(normalize_email)
+    .or_else(|| guest_email.and_then(normalize_email));
+  if user_id.is_none() && email_norm.is_none() {
     return Err(CouponReject::Invalid(
       "Entre para usar este cupom, ou informe seu e-mail no checkout."
         .to_string(),
     ));
-  };
+  }
   let personal_redemptions: i64 = sqlx::query_scalar(
     "SELECT COUNT(*) FROM coupon_redemptions
      WHERE coupon_id = $1
        AND refunded_at IS NULL
-       AND COALESCE(user_id::text, lower(guest_email)) = $2",
+       AND (user_id = $2 OR email_norm = $3)",
   )
   .bind(coupon_id)
-  .bind(&identity)
+  .bind(user_id)
+  .bind(email_norm.as_deref())
   .fetch_one(&mut **tx)
   .await?;
   if personal_redemptions >= i64::from(coupon.per_user_limit) {
@@ -223,7 +265,34 @@ pub async fn resolve_coupon(
     id: coupon.id,
     code: coupon.code.clone(),
     discount_cents: calc_coupon_discount(&coupon, subtotal_cents),
+    email_norm,
   }))
+}
+
+/// Record that `order_id` consumed `coupon`. `guest_email` is the raw
+/// checkout email, kept for guests only; the normalized identity email is
+/// always stored so later per-user checks match across login state.
+pub async fn record_redemption(
+  tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+  coupon: &ResolvedCoupon,
+  user_id: Option<Uuid>,
+  order_id: Uuid,
+  guest_email: Option<&str>,
+) -> Result<(), sqlx::Error> {
+  sqlx::query(
+    "INSERT INTO coupon_redemptions
+       (id, coupon_id, user_id, order_id, guest_email, email_norm)
+     VALUES ($1, $2, $3, $4, $5, $6)",
+  )
+  .bind(Uuid::now_v7())
+  .bind(coupon.id)
+  .bind(user_id)
+  .bind(order_id)
+  .bind(guest_email)
+  .bind(coupon.email_norm.as_deref())
+  .execute(&mut **tx)
+  .await?;
+  Ok(())
 }
 
 pub async fn restore_redemption_for_order(
@@ -444,14 +513,16 @@ mod tests {
     guest_email: Option<&str>,
   ) {
     sqlx::query(
-      "INSERT INTO coupon_redemptions (id, coupon_id, user_id, order_id, guest_email)
-       VALUES ($1, $2, $3, $4, $5)",
+      "INSERT INTO coupon_redemptions
+         (id, coupon_id, user_id, order_id, guest_email, email_norm)
+       VALUES ($1, $2, $3, $4, $5, $6)",
     )
     .bind(Uuid::now_v7())
     .bind(coupon_id)
     .bind(user_id)
     .bind(order_id)
     .bind(guest_email)
+    .bind(guest_email.and_then(normalize_email))
     .execute(&mut **tx)
     .await
     .expect("insert redemption");
@@ -463,6 +534,7 @@ mod tests {
     match result {
       Ok(Some(coupon)) => coupon,
       Ok(None) => panic!("expected a coupon"),
+      Err(CouponReject::Gone) => panic!("rejected: gone"),
       Err(CouponReject::Invalid(message)) => panic!("rejected: {message}"),
       Err(CouponReject::Db(error)) => panic!("db error: {error}"),
     }
@@ -477,8 +549,41 @@ mod tests {
         panic!("expected rejection, resolved {}", coupon.code)
       }
       Ok(None) => panic!("expected rejection, got none"),
+      Err(CouponReject::Gone) => panic!("expected invalid, got gone"),
       Err(CouponReject::Db(error)) => panic!("db error: {error}"),
     }
+  }
+
+  #[test]
+  fn normalize_email_folds_aliases() {
+    assert_eq!(normalize_email("  "), None);
+    assert_eq!(
+      normalize_email(" Maria@Example.COM ").as_deref(),
+      Some("maria@example.com")
+    );
+    assert_eq!(
+      normalize_email("maria+promo@example.com").as_deref(),
+      Some("maria@example.com")
+    );
+    // Dots only fold on Gmail.
+    assert_eq!(
+      normalize_email("ma.ria@example.com").as_deref(),
+      Some("ma.ria@example.com")
+    );
+    assert_eq!(
+      normalize_email("Ma.Ria+x@Gmail.com").as_deref(),
+      Some("maria@gmail.com")
+    );
+    assert_eq!(
+      normalize_email("m.a.r.i.a@googlemail.com").as_deref(),
+      Some("maria@gmail.com")
+    );
+    // Degenerate inputs stay as lowercased raw text.
+    assert_eq!(
+      normalize_email("+tag@example.com").as_deref(),
+      Some("+tag@example.com")
+    );
+    assert_eq!(normalize_email("NoAt").as_deref(), Some("noat"));
   }
 
   #[tokio::test]
@@ -498,27 +603,24 @@ mod tests {
     let pool = crate::test_support::fresh_pool().await;
     let mut tx = pool.begin().await.expect("begin tx");
 
-    let unknown = unwrap_invalid(
-      resolve_coupon(
-        &mut tx,
-        &unique_code("missing"),
-        5_000,
-        None,
-        Some("g@x.co"),
-        false,
-      )
-      .await,
-    );
-    assert_eq!(unknown, "Cupom inválido.");
+    let unknown = resolve_coupon(
+      &mut tx,
+      &unique_code("missing"),
+      5_000,
+      None,
+      Some("g@x.co"),
+      false,
+    )
+    .await;
+    assert!(matches!(unknown, Err(CouponReject::Gone)));
 
     let code = unique_code("off");
     let mut coupon = new_coupon(&code);
     coupon.active = false;
     insert_coupon(&mut tx, &coupon).await;
-    let inactive = unwrap_invalid(
-      resolve_coupon(&mut tx, &code, 5_000, None, Some("g@x.co"), false).await,
-    );
-    assert_eq!(inactive, "Cupom inválido.");
+    let inactive =
+      resolve_coupon(&mut tx, &code, 5_000, None, Some("g@x.co"), false).await;
+    assert!(matches!(inactive, Err(CouponReject::Gone)));
 
     tx.rollback().await.expect("rollback");
   }
@@ -824,6 +926,111 @@ mod tests {
         .await,
     );
     assert_eq!(after_restore.code, code);
+
+    tx.rollback().await.expect("rollback");
+  }
+
+  #[tokio::test]
+  async fn per_user_cap_follows_email_across_login_and_aliases() {
+    let pool = crate::test_support::fresh_pool().await;
+    let mut tx = pool.begin().await.expect("begin tx");
+
+    let code = unique_code("Primeira");
+    let mut coupon = new_coupon(&code);
+    coupon.per_user_limit = 1;
+    insert_coupon(&mut tx, &coupon).await;
+
+    let local = format!("maria.{}", Uuid::now_v7().simple());
+    let user = Uuid::now_v7();
+    sqlx::query("INSERT INTO users (id, name, email) VALUES ($1, $2, $3)")
+      .bind(user)
+      .bind("Maria")
+      .bind(format!("{local}@Gmail.com"))
+      .execute(&mut *tx)
+      .await
+      .expect("insert user");
+
+    // Logged-in checkout with a different typed email: the account email is
+    // what gets recorded.
+    let resolved = unwrap_coupon(
+      resolve_coupon(
+        &mut tx,
+        &code,
+        5_000,
+        Some(user),
+        Some("whatever@example.com"),
+        true,
+      )
+      .await,
+    );
+    let order_id = insert_order(&mut tx, Some(user)).await;
+    record_redemption(&mut tx, &resolved, Some(user), order_id, None)
+      .await
+      .expect("record redemption");
+    let stored: Option<String> = sqlx::query_scalar(
+      "SELECT email_norm FROM coupon_redemptions WHERE order_id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&mut *tx)
+    .await
+    .expect("stored email");
+    let canonical = format!("{}@gmail.com", local.replace('.', ""));
+    assert_eq!(stored.as_deref(), Some(canonical.as_str()));
+
+    let limit = "Você já utilizou este cupom o máximo de vezes permitido.";
+    let (dotless, rest) = local.split_once('.').expect("dotted local");
+    for guest in [
+      format!("{local}@gmail.com"),
+      format!("{}@GMAIL.com", local.to_uppercase()),
+      format!("{local}+promo@gmail.com"),
+      format!("{dotless}{rest}@googlemail.com"),
+      format!("{dotless}.{rest}+x@googlemail.com"),
+    ] {
+      let message = unwrap_invalid(
+        resolve_coupon(&mut tx, &code, 5_000, None, Some(&guest), false).await,
+      );
+      assert_eq!(message, limit, "guest {guest}");
+    }
+
+    // A different person is unaffected.
+    let other = unwrap_coupon(
+      resolve_coupon(
+        &mut tx,
+        &code,
+        5_000,
+        None,
+        Some(&format!("outra.{}@gmail.com", Uuid::now_v7().simple())),
+        false,
+      )
+      .await,
+    );
+    assert_eq!(other.code, code);
+
+    tx.rollback().await.expect("rollback");
+  }
+
+  #[tokio::test]
+  async fn code_is_unique_case_insensitively() {
+    let pool = crate::test_support::fresh_pool().await;
+    let mut tx = pool.begin().await.expect("begin tx");
+
+    let code = unique_code("Dup");
+    insert_coupon(&mut tx, &new_coupon(&code)).await;
+    let duplicate = sqlx::query(
+      "INSERT INTO coupons (id, code, discount_type, discount_value)
+       VALUES ($1, $2, 'fixed', 100)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(code.to_lowercase())
+    .execute(&mut *tx)
+    .await;
+    let error = duplicate.expect_err("case-variant code must collide");
+    assert!(
+      error
+        .as_database_error()
+        .is_some_and(|db| db.is_unique_violation()),
+      "unexpected error: {error}"
+    );
 
     tx.rollback().await.expect("rollback");
   }

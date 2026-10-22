@@ -789,7 +789,9 @@ pub async fn set_cart_coupon_proc(
   cx: &Cx,
   code: String,
 ) -> topcoat::Result<String> {
-  use crate::app::store::coupons::{CouponReject, resolve_coupon};
+  use crate::app::store::coupons::{
+    COUPON_GONE_MESSAGE, CouponReject, resolve_coupon,
+  };
 
   let pool = app_context::<PgPool>(cx);
   let user_id = current_user_owned(cx).await?.map(|session| session.user.id);
@@ -817,6 +819,10 @@ pub async fn set_cart_coupon_proc(
     Ok(None) => {
       set_cart_coupon(pool, cart.id, None).await?;
       Ok(String::new())
+    }
+    Err(CouponReject::Gone) => {
+      set_cart_coupon(pool, cart.id, None).await?;
+      Ok(COUPON_GONE_MESSAGE.to_string())
     }
     Err(CouponReject::Invalid(message)) => {
       set_cart_coupon(pool, cart.id, None).await?;
