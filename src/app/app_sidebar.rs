@@ -165,6 +165,7 @@ pub async fn app_shell(
   let stock_active = path_prefix(&pathname, "/admin/estoque");
   let settings_active = path_prefix(&pathname, "/admin/configuracoes");
   let coupons_active = path_prefix(&pathname, "/admin/cupons");
+  let reviews_active = path_prefix(&pathname, "/admin/avaliacoes");
   let name = user.user.name.clone();
   let email = user.user.email.clone();
   let user_initials = initials(&name);
@@ -190,6 +191,7 @@ pub async fn app_shell(
   let store_settings_href =
     href!(crate::app::admin::configuracoes::page).resolve(cx);
   let coupons_href = href!(crate::app::admin::cupons::page).resolve(cx);
+  let reviews_href = href!(crate::app::admin::avaliacoes::page).resolve(cx);
 
   Ok(view! {
       sidebar_provider(
@@ -351,6 +353,15 @@ pub async fn app_shell(
                                           tooltip: Some("Cupons"),
                                           icon(data: iconify_icon!("lucide:ticket-percent"))
                                           <span>"Cupons"</span>
+                                      )
+                                  )
+                                  sidebar_menu_item(
+                                      sidebar_menu_button(
+                                          href: Some(reviews_href.as_str()),
+                                          active: reviews_active,
+                                          tooltip: Some("Avaliações"),
+                                          icon(data: iconify_icon!("lucide:star"))
+                                          <span>"Avaliações"</span>
                                       )
                                   )
                               )
