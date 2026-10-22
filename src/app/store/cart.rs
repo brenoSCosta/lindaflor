@@ -349,11 +349,13 @@ async fn add_item_to_cart(
   }
   let add_qty = quantity.max(1).min(available);
 
+  // Loose line only (`set_id IS NULL`): never touches set-member rows, so a
+  // variant that is also in a set gets a separate full-price line.
   sqlx::query(
     r#"
         INSERT INTO cart_items (id, cart_id, variant_id, quantity)
         VALUES ($1, $2, $3, $4)
-        ON CONFLICT (cart_id, variant_id)
+        ON CONFLICT (cart_id, variant_id) WHERE set_id IS NULL
         DO UPDATE SET
             quantity = LEAST(cart_items.quantity + EXCLUDED.quantity, $5),
             updated_at = now()
@@ -437,15 +439,19 @@ pub async fn add_set_to_cart(
   }
   let add_qty = quantity.max(1).min(min_available);
 
-  for (variant_id, available) in &lines {
+  // One row per member, all sharing the same added quantity capped by the
+  // minimum availability: members of a set group always move together, so a
+  // repeated add can never overfill a single member. The conflict target only
+  // matches this set's member lines; loose lines of the same variant (and
+  // other sets' lines) are separate rows.
+  for (variant_id, _) in &lines {
     sqlx::query(
       r#"
         INSERT INTO cart_items (id, cart_id, variant_id, quantity, set_id)
         VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (cart_id, variant_id)
+        ON CONFLICT (cart_id, set_id, variant_id) WHERE set_id IS NOT NULL
         DO UPDATE SET
             quantity = LEAST(cart_items.quantity + EXCLUDED.quantity, $6),
-            set_id = EXCLUDED.set_id,
             updated_at = now()
         "#,
     )
@@ -454,7 +460,7 @@ pub async fn add_set_to_cart(
     .bind(variant_id)
     .bind(add_qty)
     .bind(set_id)
-    .bind(available)
+    .bind(min_available)
     .execute(pool)
     .await?;
   }
@@ -476,6 +482,8 @@ pub async fn set_available_for_display(
   crate::app::store::queries::set_available_quantity(pool, set_id).await
 }
 
+/// Loose-line quantity only (`set_id IS NULL`): never changes set-member
+/// rows. Use [`set_set_quantity`] for a whole set group.
 pub async fn set_quantity(
   pool: &PgPool,
   cart_id: Uuid,
@@ -499,7 +507,7 @@ pub async fn set_quantity(
   let qty = quantity.min(available);
   let updated = sqlx::query(
     "UPDATE cart_items SET quantity = $3, updated_at = now()
-     WHERE cart_id = $1 AND variant_id = $2",
+     WHERE cart_id = $1 AND variant_id = $2 AND set_id IS NULL",
   )
   .bind(cart_id)
   .bind(variant_id)
@@ -512,14 +520,83 @@ pub async fn set_quantity(
   Ok(())
 }
 
+/// Set the whole set group's quantity: every member line gets the same
+/// quantity, clamped by the minimum member availability. All members of a
+/// set group must always share one quantity (see §1.2); per-member controls
+/// are not offered in the UI.
+pub async fn set_set_quantity(
+  pool: &PgPool,
+  cart_id: Uuid,
+  set_id: Uuid,
+  quantity: i32,
+) -> Result<(), CartError> {
+  if quantity <= 0 {
+    remove_set(pool, cart_id, set_id).await?;
+    return Ok(());
+  }
+  let member_variants: Vec<Uuid> = sqlx::query_scalar(
+    "SELECT variant_id FROM cart_items WHERE cart_id = $1 AND set_id = $2",
+  )
+  .bind(cart_id)
+  .bind(set_id)
+  .fetch_all(pool)
+  .await?;
+  if member_variants.is_empty() {
+    return Ok(());
+  }
+  let mut min_available = i32::MAX;
+  for variant_id in &member_variants {
+    let Some((active, available)) =
+      variant_availability(pool, *variant_id).await?
+    else {
+      remove_set(pool, cart_id, set_id).await?;
+      return Err(CartError::InvalidVariant);
+    };
+    if !active || available <= 0 {
+      remove_set(pool, cart_id, set_id).await?;
+      return Err(CartError::OutOfStock);
+    }
+    min_available = min_available.min(available);
+  }
+  let qty = quantity.max(1).min(min_available);
+  sqlx::query(
+    "UPDATE cart_items SET quantity = $3, updated_at = now()
+     WHERE cart_id = $1 AND set_id = $2",
+  )
+  .bind(cart_id)
+  .bind(set_id)
+  .bind(qty)
+  .execute(pool)
+  .await?;
+  Ok(())
+}
+
+/// Loose-line remove only (`set_id IS NULL`): set-member rows survive. Use
+/// [`remove_set`] to drop a whole set group.
 pub async fn remove_item(
   pool: &PgPool,
   cart_id: Uuid,
   variant_id: Uuid,
 ) -> Result<(), sqlx::Error> {
-  sqlx::query("DELETE FROM cart_items WHERE cart_id = $1 AND variant_id = $2")
+  sqlx::query(
+    "DELETE FROM cart_items WHERE cart_id = $1 AND variant_id = $2 AND set_id IS NULL",
+  )
+  .bind(cart_id)
+  .bind(variant_id)
+  .execute(pool)
+  .await?;
+  Ok(())
+}
+
+/// Remove every member line of one set group.
+pub async fn remove_set(
+  pool: &PgPool,
+  cart_id: Uuid,
+  set_id: Uuid,
+) -> Result<(), sqlx::Error> {
+  sqlx::query("DELETE FROM cart_items WHERE cart_id = $1 AND set_id = $2")
     .bind(cart_id)
-    .bind(variant_id)
+    .bind(set_id)
     .execute(pool)
     .await?;
   Ok(())
@@ -656,6 +733,51 @@ pub async fn set_cart_quantity_proc(
     }
     Err(CartError::Db(error)) => Err(error.into()),
   }
+}
+
+/// JS fast-path for the cart-page set-group − / + control. Sets the whole
+/// group's quantity (every member moves together). Returns the new item
+/// count. Argument types mirror [`set_cart_quantity_proc`] (`String` only).
+#[procedure("/carrinho/conjunto/quantidade")]
+pub async fn set_cart_set_quantity_proc(
+  cx: &Cx,
+  set_id: String,
+  quantity: String,
+) -> topcoat::Result<String> {
+  let pool = app_context::<PgPool>(cx);
+  let user_id = current_user_owned(cx).await?.map(|session| session.user.id);
+  let set_id = Uuid::parse_str(set_id.trim())
+    .map_err(|_| topcoat::Error::msg("Conjunto inválido."))?;
+  let quantity: i32 = quantity
+    .trim()
+    .parse()
+    .map_err(|_| topcoat::Error::msg("Quantidade inválida."))?;
+  let cart = load_or_create_cart(cx, pool, user_id).await?;
+  match set_set_quantity(pool, cart.id, set_id, quantity).await {
+    Ok(()) | Err(CartError::InvalidVariant | CartError::OutOfStock) => {
+      let n =
+        cart_item_count_for_token(pool, cart.token).await?.max(0) as usize;
+      Ok(n.to_string())
+    }
+    Err(CartError::Db(error)) => Err(error.into()),
+  }
+}
+
+/// JS fast-path for the cart-page set-group remove control. Removes every
+/// member line of the set. Returns the new item count.
+#[procedure("/carrinho/conjunto/remover")]
+pub async fn remove_set_from_cart_proc(
+  cx: &Cx,
+  set_id: String,
+) -> topcoat::Result<String> {
+  let pool = app_context::<PgPool>(cx);
+  let user_id = current_user_owned(cx).await?.map(|session| session.user.id);
+  let set_id = Uuid::parse_str(set_id.trim())
+    .map_err(|_| topcoat::Error::msg("Conjunto inválido."))?;
+  let cart = load_or_create_cart(cx, pool, user_id).await?;
+  remove_set(pool, cart.id, set_id).await?;
+  let n = cart_item_count_for_token(pool, cart.token).await?.max(0) as usize;
+  Ok(n.to_string())
 }
 
 /// Sheet fast-path for the coupon form. Returns the domain outcome as data
@@ -813,6 +935,10 @@ pub async fn hydrate_cart_in_tx(
 
   let mut items = Vec::new();
   let mut notices = Vec::new();
+  // Set groups that lost a member below: the rest of the group is dropped
+  // after the loop, since a partial set can never be quoted.
+  let mut broken_sets: std::collections::HashSet<Uuid> =
+    std::collections::HashSet::new();
 
   for row in rows {
     let product_name = row
@@ -826,6 +952,7 @@ pub async fn hydrate_cart_in_tx(
         .bind(row.cart_item_id)
         .execute(&mut **tx)
         .await?;
+      broken_sets.extend(row.set_id);
       notices.push(CartNotice::ItemRemoved { product_name });
       continue;
     };
@@ -834,6 +961,7 @@ pub async fn hydrate_cart_in_tx(
         .bind(row.cart_item_id)
         .execute(&mut **tx)
         .await?;
+      broken_sets.extend(row.set_id);
       notices.push(CartNotice::ItemRemoved { product_name });
       continue;
     }
@@ -881,12 +1009,89 @@ pub async fn hydrate_cart_in_tx(
     });
   }
 
+  normalize_set_groups(tx, cart_id, &mut items, &mut notices, &broken_sets)
+    .await?;
+
   Ok(HydratedCart {
     cart_id,
     token,
     items,
     notices,
   })
+}
+
+/// Keep every set group whole and uniform after per-row stock clamping:
+/// a group that lost a member is removed entirely, and a group whose
+/// members were clamped to different quantities is lowered to its smallest
+/// member quantity. Without this a partial or uneven set (one member sold
+/// out, or capped alone on login merge) would sit in the cart and fail
+/// every checkout quote.
+async fn normalize_set_groups(
+  tx: &mut Transaction<'_, Postgres>,
+  cart_id: Uuid,
+  items: &mut Vec<CartItem>,
+  notices: &mut Vec<CartNotice>,
+  broken_sets: &std::collections::HashSet<Uuid>,
+) -> Result<(), sqlx::Error> {
+  for set_id in broken_sets {
+    sqlx::query("DELETE FROM cart_items WHERE cart_id = $1 AND set_id = $2")
+      .bind(cart_id)
+      .bind(set_id)
+      .execute(&mut **tx)
+      .await?;
+    let key = set_id.to_string();
+    let set_name = items
+      .iter()
+      .find(|item| item.set_id.as_deref() == Some(key.as_str()))
+      .and_then(|item| item.set_name.clone());
+    items.retain(|item| item.set_id.as_deref() != Some(key.as_str()));
+    if let Some(set_name) = set_name {
+      notices.push(CartNotice::ItemRemoved {
+        product_name: set_name,
+      });
+    }
+  }
+
+  let mut group_min: std::collections::BTreeMap<String, i32> =
+    std::collections::BTreeMap::new();
+  for item in items.iter() {
+    if let Some(set_id) = &item.set_id {
+      let min = group_min.entry(set_id.clone()).or_insert(item.quantity);
+      *min = (*min).min(item.quantity);
+    }
+  }
+  for (set_id, min) in group_min {
+    let uneven = items.iter().any(|item| {
+      item.set_id.as_deref() == Some(set_id.as_str()) && item.quantity != min
+    });
+    if !uneven {
+      continue;
+    }
+    let Ok(set_uuid) = Uuid::parse_str(&set_id) else {
+      continue;
+    };
+    sqlx::query(
+      "UPDATE cart_items SET quantity = $3, updated_at = now()
+       WHERE cart_id = $1 AND set_id = $2",
+    )
+    .bind(cart_id)
+    .bind(set_uuid)
+    .bind(min)
+    .execute(&mut **tx)
+    .await?;
+    let mut set_name = None;
+    for item in items.iter_mut() {
+      if item.set_id.as_deref() == Some(set_id.as_str()) {
+        item.quantity = min;
+        set_name = set_name.or_else(|| item.set_name.clone());
+      }
+    }
+    notices.push(CartNotice::QtyAdjusted {
+      product_name: set_name.unwrap_or_else(|| "Conjunto".to_string()),
+      quantity: min,
+    });
+  }
+  Ok(())
 }
 
 fn display_item_from_row(row: &HydrateRow) -> Option<CartItem> {
@@ -975,10 +1180,19 @@ pub async fn quote_cart_for_checkout(
   let mut items = Vec::new();
   let mut set_groups: std::collections::BTreeMap<Uuid, Vec<usize>> =
     std::collections::BTreeMap::new();
+  // The same variant can appear on several lines (one loose line plus one
+  // member line per set): availability covers the summed quantity, so split
+  // lines can never oversell stock the single-line check would catch.
+  let mut totals: std::collections::HashMap<Uuid, i32> =
+    std::collections::HashMap::new();
+  for row in &rows {
+    *totals.entry(row.variant_id).or_default() += row.quantity;
+  }
   for row in &rows {
     let active = row.product_active.unwrap_or(false);
     let available = row.available.unwrap_or(0);
-    if row.product_id.is_none() || !active || available < row.quantity {
+    let total = totals.get(&row.variant_id).copied().unwrap_or(0);
+    if row.product_id.is_none() || !active || available < total {
       return Err(QuoteError::Insufficient);
     }
     let Some(item) = display_item_from_row(row) else {
@@ -993,8 +1207,18 @@ pub async fn quote_cart_for_checkout(
   // Bundle atomicity + bundle pricing. A set is never partially quoted: if
   // any member of a `set_id` group is missing (partial set after a single
   // member remove, or admin recomposition) or the set lost its price /
-  // active flag, the whole quote fails with `Insufficient`.
+  // active flag, the whole quote fails with `Insufficient`. Member
+  // quantities must also be equal: each member is priced at `set_price / n`
+  // per unit, so unequal quantities would hand extra units the cheaper set
+  // share (§1.2).
   for (set_id, member_indices) in &set_groups {
+    let first_qty = rows[member_indices[0]].quantity;
+    if member_indices
+      .iter()
+      .any(|&i| rows[i].quantity != first_qty)
+    {
+      return Err(QuoteError::Insufficient);
+    }
     let set_row: Option<(String, bool, Option<i64>)> = sqlx::query_as(
       "SELECT name, active, price_in_cents FROM sets WHERE id = $1",
     )
@@ -1083,6 +1307,54 @@ pub async fn set_cart_coupon(
   Ok(())
 }
 
+/// Merge one guest set-member line into the same set's member line of the
+/// user's cart, capped at live stock. Single-line upsert (no group
+/// equalization here): [`clamp_cart_to_stock`] caps rows afterwards and the
+/// quote rejects unequal groups.
+async fn merge_set_member_line(
+  pool: &PgPool,
+  cart_id: Uuid,
+  set_id: Uuid,
+  variant_id: Uuid,
+  quantity: i32,
+) -> Result<(), CartError> {
+  let Some((active, available)) =
+    variant_availability(pool, variant_id).await?
+  else {
+    return Err(CartError::InvalidVariant);
+  };
+  if !active {
+    return Err(CartError::InvalidVariant);
+  }
+  if available <= 0 {
+    return Err(CartError::OutOfStock);
+  }
+  let add_qty = quantity.max(1).min(available);
+  sqlx::query(
+    r#"
+        INSERT INTO cart_items (id, cart_id, variant_id, quantity, set_id)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (cart_id, set_id, variant_id) WHERE set_id IS NOT NULL
+        DO UPDATE SET
+            quantity = LEAST(cart_items.quantity + EXCLUDED.quantity, $6),
+            updated_at = now()
+        "#,
+  )
+  .bind(Uuid::now_v7())
+  .bind(cart_id)
+  .bind(variant_id)
+  .bind(add_qty)
+  .bind(set_id)
+  .bind(available)
+  .execute(pool)
+  .await?;
+  sqlx::query("UPDATE carts SET updated_at = now() WHERE id = $1")
+    .bind(cart_id)
+    .execute(pool)
+    .await?;
+  Ok(())
+}
+
 /// Merge a guest cart into the signed-in user's cart and point the cookie
 /// at the surviving token.
 pub async fn merge_guest_cart_on_login(
@@ -1146,15 +1418,32 @@ pub async fn merge_carts_for_user(
         return Ok(user_cart.token);
       }
 
-      let guest_items = sqlx::query_as::<_, (Uuid, i32)>(
-        "SELECT variant_id, quantity FROM cart_items WHERE cart_id = $1",
+      let guest_items = sqlx::query_as::<_, (Uuid, i32, Option<Uuid>)>(
+        "SELECT variant_id, quantity, set_id FROM cart_items WHERE cart_id = $1",
       )
       .bind(guest_id)
       .fetch_all(pool)
       .await?;
 
-      for (variant_id, quantity) in guest_items {
-        match add_item_to_cart(pool, user_cart.id, variant_id, quantity).await {
+      // Loose lines merge into loose lines; set-member lines merge into the
+      // same set's lines, so neither side rewrites the other's `set_id`.
+      for (variant_id, quantity, set_id) in guest_items {
+        let outcome = match set_id {
+          None => {
+            add_item_to_cart(pool, user_cart.id, variant_id, quantity).await
+          }
+          Some(set_id) => {
+            merge_set_member_line(
+              pool,
+              user_cart.id,
+              set_id,
+              variant_id,
+              quantity,
+            )
+            .await
+          }
+        };
+        match outcome {
           Ok(()) | Err(CartError::InvalidVariant | CartError::OutOfStock) => {}
           Err(CartError::Db(error)) => return Err(error),
         }
@@ -1598,13 +1887,304 @@ mod tests {
       .await
       .expect("add set");
 
-    remove_item(&pool, cart_id, variants[0])
-      .await
-      .expect("remove member");
+    // Simulate a legacy partial group (e.g. admin recomposition): one member
+    // row deleted straight in SQL, bypassing the group-level `remove_set`.
+    sqlx::query(
+      "DELETE FROM cart_items WHERE cart_id = $1 AND set_id = $2 AND variant_id = $3",
+    )
+    .bind(cart_id)
+    .bind(set_id)
+    .bind(variants[0])
+    .execute(&pool)
+    .await
+    .expect("remove member");
 
     let mut tx = pool.begin().await.expect("tx");
     let outcome = quote_cart_for_checkout(&mut tx, cart_id).await;
     tx.rollback().await.expect("rollback");
     assert!(matches!(outcome, Err(QuoteError::Insufficient)));
+  }
+
+  #[tokio::test]
+  async fn set_group_quantity_change_applies_to_all_members() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (set_id, variants) =
+      seed_set(&pool, Some(10_000), &[6_000, 7_000], &[5, 5]).await;
+    let cart_id = new_cart(&pool).await;
+    add_set_to_cart(&pool, cart_id, set_id, 1)
+      .await
+      .expect("add set");
+
+    set_set_quantity(&pool, cart_id, set_id, 3)
+      .await
+      .expect("group quantity");
+
+    let rows: Vec<(Uuid, i32)> = sqlx::query_as(
+      "SELECT variant_id, quantity FROM cart_items WHERE cart_id = $1 AND set_id = $2",
+    )
+    .bind(cart_id)
+    .bind(set_id)
+    .fetch_all(&pool)
+    .await
+    .expect("rows");
+    assert_eq!(rows.len(), 2);
+    for (variant_id, quantity) in &rows {
+      assert!(variants.contains(variant_id));
+      assert_eq!(*quantity, 3);
+    }
+
+    let mut tx = pool.begin().await.expect("tx");
+    let items = quote_cart_for_checkout(&mut tx, cart_id)
+      .await
+      .expect("quote");
+    tx.rollback().await.expect("rollback");
+    let total: i64 = items
+      .iter()
+      .map(|item| item.unit_price_cents * i64::from(item.quantity))
+      .sum();
+    assert_eq!(total, 10_000 * 3);
+  }
+
+  async fn set_variant_stock(pool: &PgPool, variant_id: Uuid, quantity: i32) {
+    sqlx::query(
+      "UPDATE inventory SET quantity = $2, reserved = 0 WHERE variant_id = $1",
+    )
+    .bind(variant_id)
+    .bind(quantity)
+    .execute(pool)
+    .await
+    .expect("set stock");
+  }
+
+  #[tokio::test]
+  async fn hydrate_drops_whole_set_when_a_member_sells_out() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (set_id, variants) =
+      seed_set(&pool, Some(10_000), &[6_000, 7_000], &[5, 5]).await;
+    let cart_id = new_cart(&pool).await;
+    add_set_to_cart(&pool, cart_id, set_id, 2)
+      .await
+      .expect("add set");
+    set_variant_stock(&pool, variants[0], 0).await;
+
+    let hydrated = hydrate_cart(&pool, cart_id).await.expect("hydrate");
+    assert!(hydrated.items.is_empty());
+    let left: i64 = sqlx::query_scalar(
+      "SELECT COUNT(*) FROM cart_items WHERE cart_id = $1 AND set_id = $2",
+    )
+    .bind(cart_id)
+    .bind(set_id)
+    .fetch_one(&pool)
+    .await
+    .expect("count");
+    assert_eq!(left, 0);
+  }
+
+  #[tokio::test]
+  async fn hydrate_lowers_set_group_to_smallest_member() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (set_id, variants) =
+      seed_set(&pool, Some(10_000), &[6_000, 7_000], &[5, 5]).await;
+    let cart_id = new_cart(&pool).await;
+    add_set_to_cart(&pool, cart_id, set_id, 3)
+      .await
+      .expect("add set");
+    set_variant_stock(&pool, variants[1], 1).await;
+
+    let hydrated = hydrate_cart(&pool, cart_id).await.expect("hydrate");
+    assert_eq!(hydrated.items.len(), 2);
+    assert!(hydrated.items.iter().all(|item| item.quantity == 1));
+
+    let mut tx = pool.begin().await.expect("tx");
+    let items = quote_cart_for_checkout(&mut tx, cart_id)
+      .await
+      .expect("uniform group quotes");
+    tx.rollback().await.expect("rollback");
+    let total: i64 = items
+      .iter()
+      .map(|item| item.unit_price_cents * i64::from(item.quantity))
+      .sum();
+    assert_eq!(total, 10_000);
+  }
+
+  #[tokio::test]
+  async fn loose_unit_of_set_variant_is_a_separate_full_price_line() {
+    let pool = crate::test_support::fresh_pool().await;
+    // Member list prices 8000 + 7000; set price 10000 (cheaper per unit).
+    let (set_id, variants) =
+      seed_set(&pool, Some(10_000), &[8_000, 7_000], &[5, 5]).await;
+    let cart_id = new_cart(&pool).await;
+    add_set_to_cart(&pool, cart_id, set_id, 1)
+      .await
+      .expect("add set");
+    // Extra unit of a member variant through the normal add path.
+    add_item(&pool, cart_id, variants[0], 1)
+      .await
+      .expect("loose");
+
+    let rows: Vec<(Uuid, i32, Option<Uuid>)> = sqlx::query_as(
+      "SELECT variant_id, quantity, set_id FROM cart_items WHERE cart_id = $1",
+    )
+    .bind(cart_id)
+    .fetch_all(&pool)
+    .await
+    .expect("rows");
+    assert_eq!(rows.len(), 3);
+    let loose: Vec<_> = rows
+      .iter()
+      .filter(|(_, _, set_id)| set_id.is_none())
+      .collect();
+    assert_eq!(loose.len(), 1);
+    assert_eq!(loose[0].0, variants[0]);
+
+    let mut tx = pool.begin().await.expect("tx");
+    let items = quote_cart_for_checkout(&mut tx, cart_id)
+      .await
+      .expect("quote");
+    tx.rollback().await.expect("rollback");
+    assert_eq!(items.len(), 3);
+    // Set group totals 10000; loose unit keeps its 8000 list price.
+    let loose_item = items
+      .iter()
+      .find(|item| item.set_id.is_none())
+      .expect("loose item");
+    assert_eq!(loose_item.unit_price_cents, 8_000);
+    let total: i64 = items
+      .iter()
+      .map(|item| item.unit_price_cents * i64::from(item.quantity))
+      .sum();
+    assert_eq!(total, 10_000 + 8_000);
+  }
+
+  #[tokio::test]
+  async fn quote_rejects_mismatched_member_quantities() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (set_id, variants) =
+      seed_set(&pool, Some(10_000), &[6_000, 7_000], &[5, 5]).await;
+    let cart_id = new_cart(&pool).await;
+    add_set_to_cart(&pool, cart_id, set_id, 1)
+      .await
+      .expect("add set");
+
+    // Simulate the old exploit: extra units on one member only.
+    sqlx::query(
+      "UPDATE cart_items SET quantity = 4
+       WHERE cart_id = $1 AND set_id = $2 AND variant_id = $3",
+    )
+    .bind(cart_id)
+    .bind(set_id)
+    .bind(variants[0])
+    .execute(&pool)
+    .await
+    .expect("skew member");
+
+    let mut tx = pool.begin().await.expect("tx");
+    let outcome = quote_cart_for_checkout(&mut tx, cart_id).await;
+    tx.rollback().await.expect("rollback");
+    assert!(matches!(outcome, Err(QuoteError::Insufficient)));
+  }
+
+  #[tokio::test]
+  async fn quote_sums_shared_variant_across_loose_and_set_lines() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (set_id, variants) =
+      seed_set(&pool, Some(10_000), &[8_000, 7_000], &[3, 5]).await;
+    let cart_id = new_cart(&pool).await;
+    add_set_to_cart(&pool, cart_id, set_id, 2)
+      .await
+      .expect("add set");
+    // Shared variant has 3 in stock: 2 via the set + 2 loose = 4 > 3.
+    add_item(&pool, cart_id, variants[0], 2)
+      .await
+      .expect("loose");
+
+    let mut tx = pool.begin().await.expect("tx");
+    let outcome = quote_cart_for_checkout(&mut tx, cart_id).await;
+    tx.rollback().await.expect("rollback");
+    assert!(matches!(outcome, Err(QuoteError::Insufficient)));
+  }
+
+  async fn seed_set_with_variants(
+    pool: &PgPool,
+    name: &str,
+    price_cents: i64,
+    member_variants: &[Uuid],
+  ) -> Uuid {
+    let set_id = Uuid::now_v7();
+    sqlx::query(
+      "INSERT INTO sets (id, name, slug, active, price_in_cents)
+       VALUES ($1, $2, $3, true, $4)",
+    )
+    .bind(set_id)
+    .bind(name)
+    .bind(format!("conj-{set_id}"))
+    .bind(price_cents)
+    .execute(pool)
+    .await
+    .expect("set");
+    for (index, variant_id) in member_variants.iter().enumerate() {
+      let slot_id = Uuid::now_v7();
+      sqlx::query(
+        "INSERT INTO set_slots (id, set_id, sort_order) VALUES ($1, $2, $3)",
+      )
+      .bind(slot_id)
+      .bind(set_id)
+      .bind(index as i32)
+      .execute(pool)
+      .await
+      .expect("slot");
+      sqlx::query(
+        "INSERT INTO set_slot_options (slot_id, variant_id) VALUES ($1, $2)",
+      )
+      .bind(slot_id)
+      .bind(variant_id)
+      .execute(pool)
+      .await
+      .expect("slot option");
+    }
+    set_id
+  }
+
+  #[tokio::test]
+  async fn two_sets_sharing_a_variant_coexist_in_cart() {
+    let pool = crate::test_support::fresh_pool().await;
+    let shared = seed_set_variant(&pool, 8_000, 6).await;
+    let other_a = seed_set_variant(&pool, 7_000, 6).await;
+    let other_b = seed_set_variant(&pool, 6_000, 6).await;
+    let set_a =
+      seed_set_with_variants(&pool, "Conjunto A", 10_000, &[shared, other_a])
+        .await;
+    let set_b =
+      seed_set_with_variants(&pool, "Conjunto B", 12_000, &[shared, other_b])
+        .await;
+    let cart_id = new_cart(&pool).await;
+
+    add_set_to_cart(&pool, cart_id, set_a, 1)
+      .await
+      .expect("add set a");
+    add_set_to_cart(&pool, cart_id, set_b, 1)
+      .await
+      .expect("add set b");
+
+    let lines: i64 =
+      sqlx::query_scalar("SELECT COUNT(*) FROM cart_items WHERE cart_id = $1")
+        .bind(cart_id)
+        .fetch_one(&pool)
+        .await
+        .expect("lines");
+    // Two member rows per set; the shared variant has one row per set.
+    assert_eq!(lines, 4);
+
+    let mut tx = pool.begin().await.expect("tx");
+    let items = quote_cart_for_checkout(&mut tx, cart_id)
+      .await
+      .expect("quote");
+    tx.rollback().await.expect("rollback");
+    assert_eq!(items.len(), 4);
+    let total: i64 = items
+      .iter()
+      .map(|item| item.unit_price_cents * i64::from(item.quantity))
+      .sum();
+    assert_eq!(total, 10_000 + 12_000);
   }
 }

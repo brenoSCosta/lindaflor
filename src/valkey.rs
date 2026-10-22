@@ -70,24 +70,13 @@ pub fn conn_from(cx: &topcoat::context::Cx) -> Option<MultiplexedConnection> {
 // Client identity (mirrors `client_meta`, without depending on auth routes)
 // ---------------------------------------------------------------------------
 
-/// Best-effort client IP: first `X-Forwarded-For` entry, else `X-Real-IP`,
-/// else `"unknown"`. Same source as session logging
-/// (`auth::routes::dto::client_meta`).
+/// Best-effort client IP from Topcoat's trusted-proxy-aware resolver
+/// (`topcoat::router::request::client_ip`), else `"unknown"`. Same source
+/// as session logging (`auth::routes::dto::client_meta` covers the same
+/// requests; see `TrustedProxies` wiring in `src/app.rs`).
 pub fn client_ip(cx: &topcoat::context::Cx) -> String {
-  let headers = topcoat::router::request::headers(cx);
-  headers
-    .get("x-forwarded-for")
-    .and_then(|v| v.to_str().ok())
-    .and_then(|v| v.split(',').next())
-    .map(str::trim)
-    .filter(|s| !s.is_empty())
-    .map(str::to_owned)
-    .or_else(|| {
-      headers
-        .get("x-real-ip")
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_owned)
-    })
+  topcoat::router::request::client_ip(cx)
+    .map(|ip| ip.to_string())
     .unwrap_or_else(|| "unknown".to_string())
 }
 
@@ -351,17 +340,12 @@ pub async fn record_auth_fail(
   email: &str,
 ) -> u64 {
   let key = auth_fail_key(ip, email);
-  let ttl_secs = 60u64
-    .checked_shl(3)
-    .unwrap_or(AUTH_FAIL_WINDOW_SECS)
-    .min(AUTH_FAIL_WINDOW_SECS);
   if let Some(count) = valkey_incr(conn.clone(), &key).await {
     let shift = count.min(4) as u32;
     let ttl = 60u64.checked_shl(shift).unwrap_or(AUTH_FAIL_WINDOW_SECS);
     valkey_expire(conn, &key, ttl.min(AUTH_FAIL_WINDOW_SECS)).await;
     return count;
   }
-  let _ = ttl_secs;
   fallback_incr(&key, Duration::from_secs(AUTH_FAIL_WINDOW_SECS))
 }
 
@@ -393,6 +377,64 @@ pub async fn clear_auth_fails(
   email: &str,
 ) {
   let key = auth_fail_key(ip, email);
+  valkey_del(conn, &key).await;
+  fallback_del(&key);
+}
+
+/// Failures tracked per email alone for 15 minutes, independent of IP, so
+/// distributed guessing against one account still locks out. At
+/// [`AUTH_FAIL_EMAIL_MAX`] the email is locked out (checked alongside the
+/// per-`(ip, email)` lockout at every sign-in entry point).
+pub const AUTH_FAIL_EMAIL_MAX: u64 = 30;
+pub const AUTH_FAIL_EMAIL_WINDOW_SECS: u64 = 15 * 60;
+
+pub fn auth_fail_email_key(email: &str) -> String {
+  format!("auth:fail-email:{}", email.trim().to_ascii_lowercase())
+}
+
+/// Record a failed password attempt against the email alone. Recorded
+/// wherever [`record_auth_fail`] is called.
+pub async fn record_auth_email_fail(
+  conn: Option<MultiplexedConnection>,
+  email: &str,
+) -> u64 {
+  let key = auth_fail_email_key(email);
+  if let Some(count) = valkey_incr(conn.clone(), &key).await {
+    if count == 1 {
+      valkey_expire(conn, &key, AUTH_FAIL_EMAIL_WINDOW_SECS).await;
+    }
+    return count;
+  }
+  fallback_incr(&key, Duration::from_secs(AUTH_FAIL_EMAIL_WINDOW_SECS))
+}
+
+pub async fn auth_email_fail_count(
+  conn: Option<MultiplexedConnection>,
+  email: &str,
+) -> u64 {
+  let key = auth_fail_email_key(email);
+  if let Some(v) = valkey_get(conn, &key).await {
+    return v.parse::<u64>().unwrap_or(0);
+  }
+  fallback_get(&key)
+    .and_then(|v| v.parse::<u64>().ok())
+    .unwrap_or(0)
+}
+
+pub async fn is_auth_email_locked_out(
+  conn: Option<MultiplexedConnection>,
+  email: &str,
+) -> bool {
+  auth_email_fail_count(conn, email).await >= AUTH_FAIL_EMAIL_MAX
+}
+
+/// Clear the per-email counter. Called wherever [`clear_auth_fails`] runs
+/// (successful sign-in).
+pub async fn clear_auth_email_fails(
+  conn: Option<MultiplexedConnection>,
+  email: &str,
+) {
+  let key = auth_fail_email_key(email);
   valkey_del(conn, &key).await;
   fallback_del(&key);
 }
@@ -619,5 +661,34 @@ mod tests {
       pending_check_binding(None, token, &user_id, "1.1.1.1", "ua-a").await,
       PendingBindingOutcome::Matched
     );
+  }
+
+  #[tokio::test]
+  async fn per_email_lockout_threshold() {
+    // Unique email: the `None`-conn fallback map is process-global, so a
+    // fixed address could collide with another test running in parallel.
+    let email =
+      format!("per-email-lockout-{}@example.com", Uuid::now_v7().simple());
+    assert!(!is_auth_email_locked_out(None, &email).await);
+    for _ in 0..AUTH_FAIL_EMAIL_MAX - 1 {
+      record_auth_email_fail(None, &email).await;
+    }
+    assert!(!is_auth_email_locked_out(None, &email).await);
+    // Case-insensitive: the 30th failure under a differently-cased but
+    // equal address still trips the same counter.
+    record_auth_email_fail(None, &email.to_ascii_uppercase()).await;
+    assert_eq!(
+      auth_email_fail_count(None, &email).await,
+      AUTH_FAIL_EMAIL_MAX
+    );
+    assert!(is_auth_email_locked_out(None, &email).await);
+    // A different email is unaffected.
+    let other =
+      format!("per-email-other-{}@example.com", Uuid::now_v7().simple());
+    assert!(!is_auth_email_locked_out(None, &other).await);
+    // Success clears the counter.
+    clear_auth_email_fails(None, &email).await;
+    assert!(!is_auth_email_locked_out(None, &email).await);
+    assert_eq!(auth_email_fail_count(None, &email).await, 0);
   }
 }

@@ -59,6 +59,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
       {
         tracing::error!(error = %error, "reservation sweep failed");
       }
+      // Drop replenished governor buckets so the per-IP key maps do not
+      // grow with every distinct IP ever seen.
+      lindaflor::rate_limit::prune_limiters();
     }
   });
   topcoat::serve(listener, lindaflor::app::router(pool, valkey_conn, storage))

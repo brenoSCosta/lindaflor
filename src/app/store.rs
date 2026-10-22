@@ -6,6 +6,7 @@ pub mod hero;
 pub mod inventory;
 pub mod newsletter_form;
 pub mod order;
+pub mod pix;
 pub mod pricing;
 pub mod product_card;
 pub mod queries;

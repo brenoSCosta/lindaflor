@@ -29,9 +29,38 @@ Clippy is clean and the test suite passes; see §6.
 
 ---
 
+## Status (updated 2026-10-13)
+
+Work landed in the working tree (unstaged on top of the staged baseline). Each item was done by an OpenCode agent (Muse Spark 1.3) and then reviewed by Claude, which reran clippy (0 warnings) and the full test suite (282 passed, 0 failed) after every task.
+
+**Done**
+- [x] §1.1 Client IP via Topcoat `client_ip` + `TrustedProxies` (`TRUSTED_PROXY_HOPS`, `TRUSTED_PROXY_NETWORKS`), per-email lockout (30 fails / 15 min). Follow-up by Claude: session `client_meta` no longer reads raw `X-Forwarded-For`. Note: the per-email lockout means 30 bad guesses can lock a known account for 15 min (accepted tradeoff).
+- [x] §1.2 Set pricing: loose and set lines are separate (migration `0017_cart_set_lines.sql`), set groups move as one (`/carrinho/conjunto/quantidade`, `/carrinho/conjunto/remover`), the quote rejects uneven groups, and the cart sheet has set-level controls. Follow-up by Claude: hydrate drops a whole set when a member sells out and evens out groups capped to different quantities (covers login merge too).
+- [x] §1.3 PIX payload moved to `src/app/store/pix.rs`: phone keys as `+55…`, per-type key validation (also enforced on settings save), ASCII merchant fields, golden-vector + CRC tests.
+- [x] §1.4 Checkout refuses orders (no stock reserved) and shows an alert when PIX isn't configured.
+- [x] §2.1 Order state machine: `Reopen` / `ReopenPay` ("Recebido após expirar") for never-paid cancelled orders, `Processing` wired in, `Delivered → Refunded`, explicit "Devolver ao estoque" choice, every admin transition audited. Note: reopen re-claims the coupon even if its cap was reached in the meantime.
+- [x] §3 rows 1–2: assets (`/_topcoat/assets`) exempt from the global budget, global budget 300 → 600/min, governor maps pruned by the sweep task.
+- [x] §4 admin order page: POST/redirect/GET with toasts, unknown order → 404.
+- [x] §4 `valkey.rs` dead `ttl_secs` removed.
+
+**Todo**
+- [ ] §2.2 Shipping from the CEP's UF (not the posted `state`); CEP/state validation. *(prompt ready: `checkout-shipping`)*
+- [ ] §4 Checkout phone validation: client counts raw length, server counts digits. *(part of `checkout-shipping`)*
+- [ ] §2.3 Coupon identity (user and guest email share limits, `+tag`/gmail normalization) and `UNIQUE(upper(code))`. *(prompt ready: `coupons`)*
+- [ ] §4 `CouponRemoved` chosen by string compare → typed `CouponReject::Gone`. *(part of `coupons`)*
+- [ ] §2.5 / §2.6 Inventory lock ordering, sweep removed from checkout, warn on silent stock loss. *(prompt ready: `locks`)*
+- [ ] §2.4 Admin writes in transactions (set save, product create/update), `store_settings` singleton + upsert (also fix the checkout test helper `ensure_pix_settings` race). *(prompt ready: `admin-tx`)*
+- [ ] §3 rows 3–9: cart token v4, drop the unused OIDC nonce, stop storing Google tokens, prod CSP without CDNs, ILIKE escaping, newsletter validation/copy, wishlist nonexistent-product 500. *(prompt ready: `p2-security`)*
+- [ ] §4 remaining nits: low-stock threshold, `first_purchase_coupon_code` wiring, `timestamp` → `timestamptz` migration, README notes (`0002` DROP, `HOST`), presigned-URL caching. *(prompt ready: `nits`)*
+- [ ] §5 quality: `thiserror` error enums, shared product SQL projection, single source for scoped rate-limit prefixes, split `checkout.rs` into `store/checkout_service.rs`. *(prompt ready: `quality`)*
+- [ ] Not started anywhere: Mercado Pago, Dockerfile/CI, backups (still open in `PRODUCTION_READINESS.md`).
+- [ ] Housekeeping: `crates/test-support/Cargo.lock` gained an `android_system_properties` entry during a test build (lockfile churn, review before committing). Leftover worktrees `oc/ip-ratelimit`, `oc/set-pricing`, `oc/pix` from the first (abandoned) attempt are still registered in git; remove with `git worktree remove --force <path>` + `git branch -D oc/<name>` when convenient.
+
+---
+
 ## 1. P0 — Security / money
 
-### 1.1 Client IP comes from an untrusted `X-Forwarded-For` header — `src/valkey.rs:76-92`
+### 1.1 ✅ Client IP comes from an untrusted `X-Forwarded-For` header — `src/valkey.rs:76-92`
 ```rust
 headers.get("x-forwarded-for")...split(',').next()   // leftmost, client-controlled
   .or_else(|| headers.get("x-real-ip"))
@@ -50,7 +79,7 @@ This value feeds `RateLimitLayer` (`rate_limit.rs`), the `auth:fail:<ip>:<email>
 - Add a **per-email** failure counter (independent of IP) so distributed guessing against one account still locks out.
 - Add a test: a spoofed `X-Forwarded-For` must not reset the bucket.
 
-### 1.2 Set pricing can be exploited by changing one member's quantity — `src/app/store/cart.rs:1040-1057`
+### 1.2 ✅ Set pricing can be exploited by changing one member's quantity — `src/app/store/cart.rs:1040-1057`
 `quote_cart_for_checkout` checks that the **set** of variant IDs in a `set_id` group matches the composition. It then assigns each line `set_price / n` as its **unit** price, but it never checks that the member quantities match:
 ```rust
 let base_share = set_price / n;          // per-unit share
@@ -70,7 +99,7 @@ Related problems with the same root cause:
 - Make the `UNIQUE(cart_id, variant_id)` constraint include `set_id`, so loose units and set units are separate lines.
 - In `cart_sheet`, hide per-member `+`/`-` on set lines and only offer set-level quantity and remove.
 
-### 1.3 PIX phone keys are emitted without `+55` — `src/app/checkout.rs:1089-1091`
+### 1.3 ✅ PIX phone keys are emitted without `+55` — `src/app/checkout.rs:1089-1091`
 ```rust
 "cpf" | "cnpj" | "phone" => pix_key.chars().filter(|c| c.is_ascii_digit()).collect()
 ```
@@ -80,7 +109,7 @@ The merchant name and city are also uppercased but keep accents (`sanitize_merch
 
 **Fix:** normalize phone keys to `+55` + DDD + number, and validate that on save in `admin/configuracoes.rs`. Transliterate names to ASCII. There is **no unit test for `generate_pix_payload` at all**; add golden-vector tests (known payload + CRC) for each key type.
 
-### 1.4 Orders can be created with an empty PIX key — `src/app/checkout.rs:987-996`
+### 1.4 ✅ Orders can be created with an empty PIX key — `src/app/checkout.rs:987-996`
 `settings.pix_key.as_deref().unwrap_or("")` still produces a BR Code, reserves stock for 48h and redirects to the order page. This was listed in `PRODUCTION_READINESS.md §2` and is still open.
 
 **Fix:** in `create_order`, refuse with "Pagamento indisponível" when `pix_key` or `pix_key_type` is `None`. Hide the "Pagar" button in that state too.
@@ -89,7 +118,7 @@ The merchant name and city are also uppercased but keep accents (`sanitize_merch
 
 ## 2. P1 — Commerce correctness
 
-### 2.1 Late PIX payments have no recovery path — `src/app/store/order.rs:97-120`
+### 2.1 ✅ Late PIX payments have no recovery path — `src/app/store/order.rs:97-120`
 The BR Code is static (no PSP, no expiry inside the code), so a customer can pay after the reservation sweep has already moved the order to `cancelled`. `transition` has no `Cancelled → Paid` (or reopen) edge, so the admin can't record money that was actually received. Other gaps in the state machine:
 - `Processing` exists in the enum and the DB but nothing transitions into or out of it. `mais_vendidos` counts it (`queries.rs:376`).
 - `Delivered` can't be refunded, even though the storefront advertises "Troca fácil — até 7 dias" (`app.rs`, home features).
@@ -101,12 +130,12 @@ The BR Code is static (no PSP, no expiry inside the code), so a customer can pay
 - Drop `Processing` or wire it up.
 - Write every `apply` to `audit_events`. Today only stock adjustments are audited (`admin/estoque.rs:210`); order status changes at `admin/pedidos/id.rs:88` are not.
 
-### 2.2 Shipping trusts the client-posted `state` — `src/app/checkout.rs:702-734,1018-1047`
+### 2.2 ⬜ Shipping trusts the client-posted `state` — `src/app/checkout.rs:702-734,1018-1047`
 `validate_pay_fields` never checks `state ∈ BRAZILIAN_STATES` and never checks it against the CEP. Posting `state=SE` with any CEP gets the R$19,90 rate instead of R$39,90 or R$59,90, and the order stores whatever `state` was posted. The remote-region heuristic is also rough: `!starts_with("49")` is redundant once you check prefixes `66/68/69/78/79`, and `78`/`79` are MT/MS, not the North.
 
 **Fix:** derive the UF from the CEP range on the server (it's a static table) and ignore or cross-check the posted state. Validate that the CEP is exactly 8 digits.
 
-### 2.3 Coupon `per_user_limit` is easy to bypass — `src/app/store/coupons.rs` (identity block)
+### 2.3 ⬜ Coupon `per_user_limit` is easy to bypass — `src/app/store/coupons.rs` (identity block)
 The identity is `COALESCE(user_id::text, lower(guest_email))`:
 - A logged-in user's redemptions are keyed by `user_id`. The same person can log out and check out as a guest with the same email; the email key won't match their earlier user-keyed rows.
 - Guest emails are unverified, so `a+1@…`, `a+2@…` and so on each count as a new identity.
@@ -117,20 +146,20 @@ The identity is `COALESCE(user_id::text, lower(guest_email))`:
 - Normalize `+tag` and Gmail dots if first-purchase or one-per-person coupons matter.
 - Unrelated but in the same area: `coupons.code` is `UNIQUE` case-sensitively while lookup uses `UPPER(code)`. Admin create uppercases (`cupons.rs:167`), but a DB-inserted `abc` and `ABC` would make `fetch_optional` pick one arbitrarily. Replace it with `UNIQUE (upper(code))`.
 
-### 2.4 Admin writes are not atomic
+### 2.4 ⬜ Admin writes are not atomic
 - `admin/sets/id.rs:530-580` runs `UPDATE sets`, `DELETE set_members`, `INSERT …`, `DELETE set_slots` and then a slot/option insert loop, all on `pool`. A failure halfway through leaves a set with no slots. A concurrent checkout can also see the set mid-rewrite, and `quote_cart_for_checkout` then reports "Estoque insuficiente".
 - `admin/produtos/novo.rs:323-372` inserts the product, then variants, then inventory with manual compensating `DELETE`. An inventory insert failure (`?` at line ~372) leaves a product and variants with no inventory rows.
 - `configuracoes.rs` has a SELECT-then-INSERT race on `store_settings` (two admins → two rows; `get_store_settings` reads `ORDER BY created_at LIMIT 1`).
 
 **Fix:** wrap each of these in `pool.begin()` / `tx.commit()`, with image uploads after the commit (already the case for images). Make `store_settings` a singleton (`id boolean PRIMARY KEY DEFAULT true CHECK (id)`) and upsert.
 
-### 2.5 Lock ordering and sweep contention
+### 2.5 ⬜ Lock ordering and sweep contention
 - `reserve_for_order` locks inventory per variant in cart order, which is mostly covered by `lock_cart_inventory`'s id-ordered lock. But `apply_reservation_rows` (`inventory.rs:170`), `fallback_from_order_items` and `restock_sold_items` lock in reservation or item order. Pay, cancel, sweep and checkout running at the same time on overlapping inventory rows can deadlock. Postgres aborts one of them, which surfaces as a 500.
 - `create_order_in_tx` calls `expire_pending_reservations_in_tx` (`checkout.rs:815`). That cancels **every** expired order inside each shopper's checkout transaction, even though `main.rs` already runs a background sweeper every 60s. A slow or failed sweep then breaks unrelated checkouts.
 
 **Fix:** sort the inventory IDs before locking everywhere (or take one `SELECT … WHERE id = ANY($1) ORDER BY id FOR UPDATE` up front). Remove the sweep from checkout; the `available` computation already ignores expired holds only after the sweep runs, so if you want, also treat expired holds as available in `variant_availability`. Also, the sweeper runs in every app instance; fine with `SKIP LOCKED`, but worth knowing.
 
-### 2.6 Silent stock loss
+### 2.6 ⬜ Silent stock loss
 `restock_sold_items` `continue`s when a variant has no active-warehouse rows, so refunded units vanish without a log line. `convert` uses `GREATEST(quantity - n, 0)`, which hides oversell instead of failing. Log a `tracing::warn!` with the order and variant in both cases.
 
 ---

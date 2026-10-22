@@ -35,6 +35,7 @@ use crate::app::store::coupons::{
 };
 use crate::app::store::inventory::{ReserveLine, reserve_for_order};
 use crate::app::store::order::expire_pending_reservations_in_tx;
+use crate::app::store::pix::{PIX_UNAVAILABLE_MESSAGE, generate_pix_payload};
 use crate::app::store::pricing::pix_discount_cents;
 use crate::app::store::queries::{format_price, get_store_settings};
 
@@ -202,6 +203,7 @@ pub async fn page(
   let zip_digits: String = input_zip_digits(body.as_ref());
   let state = input_state(body.as_ref());
   let settings = get_store_settings(pool).await?;
+  let pix_available = pix_configured(&settings);
   let shipping = calculate_shipping(
     subtotal,
     &state,
@@ -331,7 +333,9 @@ pub async fn page(
     }
   });
   let pay_blocked = expr!({
-    if guest_email.get().trim().is_empty() {
+    if !pix_available {
+      true
+    } else if guest_email.get().trim().is_empty() {
       true
     } else if !guest_email.get().contains("@") {
       true
@@ -364,6 +368,12 @@ pub async fn page(
                 alert(
                     variant: AlertVariant::Destructive,
                     alert_title((message.as_str()))
+                )
+            }
+            if !pix_available {
+                alert(
+                    variant: AlertVariant::Destructive,
+                    alert_title((PIX_UNAVAILABLE_MESSAGE))
                 )
             }
 
@@ -750,6 +760,9 @@ async fn create_order(
   }
 
   let settings = crate::app::store::queries::get_store_settings(pool).await?;
+  if !pix_configured(&settings) {
+    return Err(CheckoutError::Form(PIX_UNAVAILABLE_MESSAGE.to_string()));
+  }
   let order_id = Uuid::now_v7();
   let access_token = Uuid::new_v4();
   let zip_digits: String = form_data
@@ -994,7 +1007,8 @@ async fn create_order_in_tx(
     settings.pix_merchant_city.as_deref().unwrap_or("Aracaju"),
     total,
     &order_id.to_string(),
-  );
+  )
+  .map_err(|message| CheckoutError::Form(message.to_string()))?;
 
   let payment_meta = serde_json::json!({
       "pix_copy_paste": pix_code,
@@ -1048,79 +1062,17 @@ fn calculate_shipping(
   (shipping_cents, false)
 }
 
-fn emv_field(id: &str, value: &str) -> String {
-  format!("{}{:02}{}", id, value.chars().count(), value)
-}
-
-fn crc16_ccitt_false(payload: &str) -> String {
-  let mut crc: u16 = 0xffff;
-  for b in payload.bytes() {
-    crc ^= (b as u16) << 8;
-    for _ in 0..8 {
-      if (crc & 0x8000) != 0 {
-        crc = (crc << 1) ^ 0x1021;
-      } else {
-        crc <<= 1;
-      }
-    }
-  }
-  format!("{:04X}", crc)
-}
-
-fn sanitize_merchant_field(value: &str, max_length: usize) -> String {
-  value
-    .chars()
-    .filter(|c| c.is_alphanumeric() || *c == ' ')
-    .take(max_length)
-    .collect::<String>()
-    .trim()
-    .to_uppercase()
-}
-
-fn generate_pix_payload(
-  pix_key: &str,
-  pix_key_type: &str,
-  merchant_name: &str,
-  merchant_city: &str,
-  amount_cents: i64,
-  order_id: &str,
-) -> String {
-  let key = match pix_key_type {
-    "cpf" | "cnpj" | "phone" => {
-      pix_key.chars().filter(|c| c.is_ascii_digit()).collect()
-    }
-    "email" => pix_key.trim().to_lowercase(),
-    _ => pix_key.trim().to_string(),
-  };
-  let merchant_name = sanitize_merchant_field(merchant_name, 25);
-  let merchant_city = sanitize_merchant_field(merchant_city, 15);
-  let txid = order_id
-    .replace('-', "")
-    .chars()
-    .take(25)
-    .collect::<String>();
-  let amount = format!("{:.2}", amount_cents as f64 / 100.0);
-
-  let merchant_account =
-    emv_field("00", "br.gov.bcb.pix") + &emv_field("01", key.as_str());
-  let additional_data = emv_field("05", &txid);
-
-  let payload_without_crc = emv_field("00", "01")
-    + &emv_field("26", &merchant_account)
-    + &emv_field("52", "0000")
-    + &emv_field("53", "986")
-    + &emv_field("54", &amount)
-    + &emv_field("58", "BR")
-    + &emv_field("59", &merchant_name)
-    + &emv_field("60", &merchant_city)
-    + &emv_field("62", &additional_data)
-    + "6304";
-
-  format!(
-    "{}{}",
-    payload_without_crc,
-    crc16_ccitt_false(&payload_without_crc)
-  )
+fn pix_configured(
+  settings: &crate::app::store::queries::StoreSettings,
+) -> bool {
+  settings
+    .pix_key
+    .as_deref()
+    .is_some_and(|key| !key.trim().is_empty())
+    && settings
+      .pix_key_type
+      .as_deref()
+      .is_some_and(|key_type| !key_type.trim().is_empty())
 }
 
 fn input_email(body: Option<&Form<CheckoutInput>>) -> String {
@@ -1217,6 +1169,29 @@ mod tests {
   const UNIT_PRICE_CENTS: i64 = 10_000;
   const DISCOUNT_CENTS: i64 = 1_500;
 
+  async fn ensure_pix_settings(pool: &PgPool) {
+    sqlx::query(
+      "UPDATE store_settings SET pix_key = '79999816511',
+        pix_key_type = 'phone', pix_merchant_name = 'Linda Flor',
+        pix_merchant_city = 'Aracaju'",
+    )
+    .execute(pool)
+    .await
+    .expect("update pix settings");
+    sqlx::query(
+      "INSERT INTO store_settings
+        (id, pix_key, pix_key_type, pix_merchant_name, pix_merchant_city,
+         created_at, updated_at)
+       SELECT $1, '79999816511', 'phone', 'Linda Flor', 'Aracaju',
+         now(), now()
+       WHERE NOT EXISTS (SELECT 1 FROM store_settings)",
+    )
+    .bind(Uuid::now_v7())
+    .execute(pool)
+    .await
+    .expect("insert pix settings");
+  }
+
   fn checkout_input(email: &str, code: &str) -> CheckoutInput {
     CheckoutInput {
       guest_email: email.to_string(),
@@ -1312,6 +1287,7 @@ mod tests {
   #[tokio::test]
   async fn create_order_redeems_unique_coupon_once() {
     let pool = crate::test_support::fresh_pool().await;
+    ensure_pix_settings(&pool).await;
     let (_product_id, variant_id) =
       seed_variant(&pool, UNIT_PRICE_CENTS, 5).await;
     let coupon_id = Uuid::now_v7();
@@ -1440,6 +1416,7 @@ mod tests {
   #[tokio::test]
   async fn create_order_uses_live_db_price() {
     let pool = crate::test_support::fresh_pool().await;
+    ensure_pix_settings(&pool).await;
     let (product_id, variant_id) =
       seed_variant(&pool, UNIT_PRICE_CENTS, 2).await;
     let cart_id = seed_cart(&pool, variant_id, 1).await;
@@ -1478,6 +1455,7 @@ mod tests {
   #[tokio::test]
   async fn create_order_reserves_inventory() {
     let pool = crate::test_support::fresh_pool().await;
+    ensure_pix_settings(&pool).await;
     let (_product_id, variant_id) =
       seed_variant(&pool, UNIT_PRICE_CENTS, 3).await;
     let cart_id = seed_cart(&pool, variant_id, 2).await;
@@ -1525,6 +1503,7 @@ mod tests {
   #[tokio::test]
   async fn last_unit_race_only_one_order_succeeds() {
     let pool = crate::test_support::fresh_pool().await;
+    ensure_pix_settings(&pool).await;
     let (_product_id, variant_id) =
       seed_variant(&pool, UNIT_PRICE_CENTS, 1).await;
     let cart_a = seed_cart(&pool, variant_id, 1).await;
@@ -1564,6 +1543,7 @@ mod tests {
   async fn expired_reservation_is_released() {
     // Runs the global reservation sweep: needs a database of its own.
     let pool = crate::test_support::isolated_pool().await;
+    ensure_pix_settings(&pool).await;
     let (_product_id, variant_id) =
       seed_variant(&pool, UNIT_PRICE_CENTS, 2).await;
     let cart_id = seed_cart(&pool, variant_id, 1).await;
@@ -1607,6 +1587,7 @@ mod tests {
   #[tokio::test]
   async fn pay_requires_whatsapp() {
     let pool = crate::test_support::fresh_pool().await;
+    ensure_pix_settings(&pool).await;
     let (_product_id, variant_id) =
       seed_variant(&pool, UNIT_PRICE_CENTS, 2).await;
     let cart_id = seed_cart(&pool, variant_id, 1).await;
@@ -1624,8 +1605,66 @@ mod tests {
   }
 
   #[tokio::test]
+  async fn create_order_fails_when_pix_not_configured() {
+    // Own database so clearing the settings can't affect other tests.
+    let pool = crate::test_support::isolated_pool().await;
+    let (_product_id, variant_id) =
+      seed_variant(&pool, UNIT_PRICE_CENTS, 2).await;
+
+    // No settings row at all: no order, no stock reservation.
+    let cart_id = seed_cart(&pool, variant_id, 1).await;
+    let email = format!("nopix-{}@example.com", Uuid::now_v7().simple());
+    let err = create_order(&pool, cart_id, checkout_input(&email, ""), None)
+      .await
+      .expect_err("pix not configured");
+    assert_eq!(
+      err.to_string(),
+      crate::app::store::pix::PIX_UNAVAILABLE_MESSAGE
+    );
+    let orders: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orders")
+      .fetch_one(&pool)
+      .await
+      .expect("count orders");
+    assert_eq!(orders, 0);
+    let reserved: i32 = sqlx::query_scalar(
+      "SELECT reserved FROM inventory WHERE variant_id = $1",
+    )
+    .bind(variant_id)
+    .fetch_one(&pool)
+    .await
+    .expect("reserved");
+    assert_eq!(reserved, 0);
+
+    // Key without a type is still not configured.
+    sqlx::query(
+      "INSERT INTO store_settings
+        (id, pix_key, pix_key_type, created_at, updated_at)
+       VALUES ($1, '79999816511', NULL, now(), now())",
+    )
+    .bind(Uuid::now_v7())
+    .execute(&pool)
+    .await
+    .expect("insert partial settings");
+    let cart_id = seed_cart(&pool, variant_id, 1).await;
+    let email = format!("nopix-{}@example.com", Uuid::now_v7().simple());
+    let err = create_order(&pool, cart_id, checkout_input(&email, ""), None)
+      .await
+      .expect_err("pix type missing");
+    assert_eq!(
+      err.to_string(),
+      crate::app::store::pix::PIX_UNAVAILABLE_MESSAGE
+    );
+    let orders: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM orders")
+      .fetch_one(&pool)
+      .await
+      .expect("count orders");
+    assert_eq!(orders, 0);
+  }
+
+  #[tokio::test]
   async fn stored_cart_coupon_applies_when_checkout_omits_code() {
     let pool = crate::test_support::fresh_pool().await;
+    ensure_pix_settings(&pool).await;
     let (_product_id, variant_id) =
       seed_variant(&pool, UNIT_PRICE_CENTS, 2).await;
     let coupon_id = Uuid::now_v7();
@@ -1665,6 +1704,7 @@ mod tests {
   #[tokio::test]
   async fn stale_coupon_clears_cart_instead_of_hard_fail() {
     let pool = crate::test_support::fresh_pool().await;
+    ensure_pix_settings(&pool).await;
     let (_product_id, variant_id) =
       seed_variant(&pool, UNIT_PRICE_CENTS, 2).await;
     let cart_id = seed_cart(&pool, variant_id, 1).await;
@@ -1692,6 +1732,7 @@ mod tests {
   async fn expiry_restores_unique_coupon() {
     // Runs the global reservation sweep: needs a database of its own.
     let pool = crate::test_support::isolated_pool().await;
+    ensure_pix_settings(&pool).await;
     let (_product_id, variant_id) =
       seed_variant(&pool, UNIT_PRICE_CENTS, 2).await;
     let coupon_id = Uuid::now_v7();
@@ -1803,6 +1844,7 @@ mod tests {
   #[tokio::test]
   async fn reservations_convert_and_release_by_inventory_id() {
     let pool = crate::test_support::fresh_pool().await;
+    ensure_pix_settings(&pool).await;
     let (variant_id, inventory_a, inventory_b) =
       seed_split_warehouses(&pool, UNIT_PRICE_CENTS, 1, 1).await;
     let cart_id = seed_cart(&pool, variant_id, 2).await;

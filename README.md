@@ -101,6 +101,8 @@ devenv exports the process environment. `DATABASE_URL` follows the Postgres port
 | `TOKEN_PEPPER`            | `dev-pepper-change-me`                                    | Pepper for one-time tokens |
 | `LOG_SAMPLE_RATE`         | `1`                                                       | Sample rate for logging |
 | `LOG_SLOW_THRESHOLD_MS`   | `1000`                                                    | Slow request threshold in milliseconds |
+| `TRUSTED_PROXY_HOPS`      | `0`                                                       | Number of reverse proxies in front of the app (Topcoat trusted proxies); `0` = directly exposed, proxy headers ignored |
+| `TRUSTED_PROXY_NETWORKS`  | _(unset)_                                                 | Comma-separated trusted proxy CIDRs/IPs (e.g. `10.0.0.0/8, 192.168.0.0/16`), combined with `TRUSTED_PROXY_HOPS` |
 
 Avatars are stored in RustFS (S3 API). The console is http://127.0.0.1:4204.
 

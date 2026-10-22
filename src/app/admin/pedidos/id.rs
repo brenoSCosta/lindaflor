@@ -3,28 +3,38 @@ use sqlx::PgPool;
 use topcoat::{
   Result,
   context::{Cx, app_context},
-  router::{content::Form, error::bad_request, href, page, path_param},
+  router::{
+    content::Form,
+    error::{RouterErrorExt, not_found},
+    href, page, path_param,
+    response::Response,
+    route,
+  },
   view::{View, attributes, view},
 };
 use uuid::Uuid;
 
 use crate::app::auth_helpers::require_admin;
-use crate::app::store::order::{OrderEvent, apply};
+use crate::app::store::order::{ApplyOptions, OrderEvent, apply_with_audit};
 use crate::app::store::queries::format_price;
 use crate::components::badge::{BadgeVariant, badge};
 use crate::components::button::{ButtonVariant, button};
 use crate::components::card::{card, card_content, card_header, card_title};
+use crate::components::checkbox::checkbox;
 use crate::components::container::container;
+use crate::components::label::label;
 use crate::components::separator::separator;
 use crate::components::table::{
   table, table_body, table_cell, table_head, table_header, table_row,
 };
+use crate::components::toast::{Toast, set_toast, toast_redirect};
 
-path_param!(pub(crate) id: String, error = bad_request);
+path_param!(pub(crate) id: String, error = not_found);
 
 #[derive(Deserialize)]
 pub struct StatusInput {
   status: String,
+  restock: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -37,6 +47,7 @@ struct OrderRow {
   total_cents: i64,
   shipping_address: Option<serde_json::Value>,
   payment_meta: Option<serde_json::Value>,
+  paid_at: Option<String>,
   reservation_expires_at: Option<String>,
   created_at: String,
 }
@@ -70,30 +81,74 @@ fn status_badge_variant(status: &str) -> BadgeVariant {
   }
 }
 
-#[page([GET, POST])]
-pub async fn page(
+/// Status change (POST/redirect/GET): applies the transition with an audit
+/// row in one transaction, then redirects back with a toast. Refresh-safe:
+/// the browser lands on a GET, so a refresh never re-submits the form.
+#[route(POST "/admin/pedidos/{id}")]
+async fn update_order(
   cx: &Cx,
-  body: Option<Form<StatusInput>>,
-) -> Result<impl View> {
+  Form(input): Form<StatusInput>,
+) -> Result<Response> {
+  let actor = require_admin(cx).await?;
+  let id = path_param::<Id>(cx)?;
+  let list_url = href!(super::page).resolve(cx);
+  let Ok(order_id) = Uuid::parse_str(id.trim()) else {
+    set_toast(cx, Toast::error("Pedido inválido."));
+    return toast_redirect(cx, list_url);
+  };
+  let back = href!(page, Id(order_id.to_string())).resolve(cx);
+  let fail = |message: &str| {
+    set_toast(cx, Toast::error(message));
+    toast_redirect(cx, back.clone())
+  };
+
+  let Some(event) = OrderEvent::parse(input.status.trim()) else {
+    return fail("Status inválido.");
+  };
+  // The checkbox is always the explicit restock choice: browsers omit an
+  // unchecked box, so absent = "do not restock". The forms pre-check it for
+  // Paid/Processing (the transition default) and leave it off otherwise.
+  let restock = input.restock.is_some();
+  let pool = app_context::<PgPool>(cx);
+  let mut tx = pool.begin().await?;
+  let outcome = apply_with_audit(
+    &mut tx,
+    order_id,
+    event,
+    ApplyOptions::with_restock(restock),
+    Some(actor.user.id),
+    Some(actor.user.name.as_str()),
+  )
+  .await;
+  match outcome {
+    Ok(_) => {
+      tx.commit().await?;
+      set_toast(cx, Toast::success("Pedido atualizado com sucesso."));
+      toast_redirect(cx, back)
+    }
+    Err(error) => {
+      let _ = tx.rollback().await;
+      match &error {
+        crate::app::store::order::ApplyError::Db(_) => {
+          fail("Não foi possível atualizar o pedido. Tente novamente.")
+        }
+        _ => fail(&error.to_string()),
+      }
+    }
+  }
+}
+
+#[page]
+pub async fn page(cx: &Cx) -> Result<impl View> {
   let _actor = require_admin(cx).await?;
   let pool = app_context::<PgPool>(cx);
   let id = path_param::<Id>(cx)?;
-  let order_id = Uuid::parse_str(id).map_err(|_| bad_request("invalid id"))?;
-
-  if let Some(Form(input)) = body {
-    let Some(event) = OrderEvent::parse(&input.status) else {
-      return Err(bad_request("invalid status").into());
-    };
-    let mut tx = pool.begin().await?;
-    apply(&mut tx, order_id, event)
-      .await
-      .map_err(|error| topcoat::Error::from(bad_request(error.to_string())))?;
-    tx.commit().await?;
-  }
+  let order_id = Uuid::parse_str(id).map_err(|_| not_found())?;
 
   let order = sqlx::query_as::<_, OrderRow>(
     "SELECT status::text AS status, guest_email, subtotal_cents, shipping_cents,
             discount_cents, total_cents, shipping_address, payment_meta,
+            paid_at::text AS paid_at,
             reservation_expires_at::text AS reservation_expires_at,
             created_at::text AS created_at
      FROM orders WHERE id = $1",
@@ -101,7 +156,7 @@ pub async fn page(
   .bind(order_id)
   .fetch_optional(pool)
   .await?
-  .ok_or_else(|| bad_request("order not found"))?;
+  .ok_or_not_found()?;
 
   let items = sqlx::query_as::<_, ItemRow>(
     "SELECT product_name, variant_label, quantity, unit_price_cents
@@ -113,7 +168,11 @@ pub async fn page(
 
   let pending = order.status == "pending_payment";
   let paid = order.status == "paid";
+  let processing = order.status == "processing";
   let shipped = order.status == "shipped";
+  let delivered = order.status == "delivered";
+  // Reopen is only offered for orders cancelled while still unpaid.
+  let reopenable = order.status == "cancelled" && order.paid_at.is_none();
   let email = order.guest_email.clone().unwrap_or_default();
   let pix_code = order
     .payment_meta
@@ -185,7 +244,15 @@ pub async fn page(
               </div>
           }
           if paid {
-              <div class="mt-2 flex flex-wrap gap-3">
+              <div class="mt-2 flex flex-wrap items-center gap-3">
+                  <form method="post" action=(href!(page, Id(order_id.to_string())))>
+                      <input type="hidden" name="status" value="processing">
+                      button(
+                          variant: ButtonVariant::Primary,
+                          attrs: attributes! { type="submit" },
+                          "Em separação"
+                      )
+                  </form>
                   <form method="post" action=(href!(page, Id(order_id.to_string())))>
                       <input type="hidden" name="status" value="shipped">
                       button(
@@ -194,16 +261,52 @@ pub async fn page(
                           "Marcar como enviado"
                       )
                   </form>
-                  <form method="post" action=(href!(page, Id(order_id.to_string())))>
+                  <form method="post" action=(href!(page, Id(order_id.to_string()))) class="flex items-center gap-2">
                       <input type="hidden" name="status" value="cancelled">
+                      checkbox(attrs: attributes! { id="restock-cancel" name="restock" value="1" checked=(true) })
+                      label(attrs: attributes! { for="restock-cancel" }, "Devolver ao estoque")
                       button(
                           variant: ButtonVariant::Outline,
                           attrs: attributes! { type="submit" },
                           "Cancelar"
                       )
                   </form>
-                  <form method="post" action=(href!(page, Id(order_id.to_string())))>
+                  <form method="post" action=(href!(page, Id(order_id.to_string()))) class="flex items-center gap-2">
                       <input type="hidden" name="status" value="refunded">
+                      checkbox(attrs: attributes! { id="restock-refund" name="restock" value="1" checked=(true) })
+                      label(attrs: attributes! { for="restock-refund" }, "Devolver ao estoque")
+                      button(
+                          variant: ButtonVariant::Outline,
+                          attrs: attributes! { type="submit" },
+                          "Estornar"
+                      )
+                  </form>
+              </div>
+          }
+          if processing {
+              <div class="mt-2 flex flex-wrap items-center gap-3">
+                  <form method="post" action=(href!(page, Id(order_id.to_string())))>
+                      <input type="hidden" name="status" value="shipped">
+                      button(
+                          variant: ButtonVariant::Primary,
+                          attrs: attributes! { type="submit" },
+                          "Marcar como enviado"
+                      )
+                  </form>
+                  <form method="post" action=(href!(page, Id(order_id.to_string()))) class="flex items-center gap-2">
+                      <input type="hidden" name="status" value="cancelled">
+                      checkbox(attrs: attributes! { id="restock-cancel" name="restock" value="1" checked=(true) })
+                      label(attrs: attributes! { for="restock-cancel" }, "Devolver ao estoque")
+                      button(
+                          variant: ButtonVariant::Outline,
+                          attrs: attributes! { type="submit" },
+                          "Cancelar"
+                      )
+                  </form>
+                  <form method="post" action=(href!(page, Id(order_id.to_string()))) class="flex items-center gap-2">
+                      <input type="hidden" name="status" value="refunded">
+                      checkbox(attrs: attributes! { id="restock-refund" name="restock" value="1" checked=(true) })
+                      label(attrs: attributes! { for="restock-refund" }, "Devolver ao estoque")
                       button(
                           variant: ButtonVariant::Outline,
                           attrs: attributes! { type="submit" },
@@ -213,7 +316,7 @@ pub async fn page(
               </div>
           }
           if shipped {
-              <div class="mt-2 flex flex-wrap gap-3">
+              <div class="mt-2 flex flex-wrap items-center gap-3">
                   <form method="post" action=(href!(page, Id(order_id.to_string())))>
                       <input type="hidden" name="status" value="delivered">
                       button(
@@ -222,20 +325,58 @@ pub async fn page(
                           "Marcar como entregue"
                       )
                   </form>
-                  <form method="post" action=(href!(page, Id(order_id.to_string())))>
+                  <form method="post" action=(href!(page, Id(order_id.to_string()))) class="flex items-center gap-2">
                       <input type="hidden" name="status" value="cancelled">
+                      checkbox(attrs: attributes! { id="restock-cancel" name="restock" value="1" })
+                      label(attrs: attributes! { for="restock-cancel" }, "Devolver ao estoque")
                       button(
                           variant: ButtonVariant::Outline,
                           attrs: attributes! { type="submit" },
                           "Cancelar"
                       )
                   </form>
-                  <form method="post" action=(href!(page, Id(order_id.to_string())))>
+                  <form method="post" action=(href!(page, Id(order_id.to_string()))) class="flex items-center gap-2">
                       <input type="hidden" name="status" value="refunded">
+                      checkbox(attrs: attributes! { id="restock-refund" name="restock" value="1" })
+                      label(attrs: attributes! { for="restock-refund" }, "Devolver ao estoque")
                       button(
                           variant: ButtonVariant::Outline,
                           attrs: attributes! { type="submit" },
                           "Estornar"
+                      )
+                  </form>
+              </div>
+          }
+          if delivered {
+              <div class="mt-2 flex flex-wrap items-center gap-3">
+                  <form method="post" action=(href!(page, Id(order_id.to_string()))) class="flex items-center gap-2">
+                      <input type="hidden" name="status" value="refunded">
+                      checkbox(attrs: attributes! { id="restock-refund" name="restock" value="1" })
+                      label(attrs: attributes! { for="restock-refund" }, "Devolver ao estoque")
+                      button(
+                          variant: ButtonVariant::Outline,
+                          attrs: attributes! { type="submit" },
+                          "Estornar"
+                      )
+                  </form>
+              </div>
+          }
+          if reopenable {
+              <div class="mt-2 flex flex-wrap items-center gap-3">
+                  <form method="post" action=(href!(page, Id(order_id.to_string())))>
+                      <input type="hidden" name="status" value="reopen">
+                      button(
+                          variant: ButtonVariant::Primary,
+                          attrs: attributes! { type="submit" },
+                          "Reabrir pedido"
+                      )
+                  </form>
+                  <form method="post" action=(href!(page, Id(order_id.to_string())))>
+                      <input type="hidden" name="status" value="reopen_pay">
+                      button(
+                          variant: ButtonVariant::Outline,
+                          attrs: attributes! { type="submit" },
+                          "Recebido após expirar"
                       )
                   </form>
               </div>

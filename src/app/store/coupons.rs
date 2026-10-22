@@ -240,6 +240,23 @@ pub async fn restore_redemption_for_order(
   Ok(())
 }
 
+/// Re-apply the coupon redemption after an order reopen: a cancelled order
+/// had its redemption marked `refunded_at`, and reopening consumes the
+/// coupon again.
+pub async fn reclaim_redemption_for_order(
+  tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+  order_id: Uuid,
+) -> Result<(), sqlx::Error> {
+  sqlx::query(
+    "UPDATE coupon_redemptions SET refunded_at = NULL
+     WHERE order_id = $1 AND refunded_at IS NOT NULL",
+  )
+  .bind(order_id)
+  .execute(&mut **tx)
+  .await?;
+  Ok(())
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

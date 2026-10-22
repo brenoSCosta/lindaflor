@@ -1,10 +1,10 @@
 use std::time::Duration;
 
-use http::StatusCode;
+use http::{Method, Request, StatusCode};
 use sqlx::postgres::PgPoolOptions;
 use test_support::{env, json_get};
 use topcoat::cookie::RouterBuilderCookieExt;
-use topcoat::router::{Router, RouterBuilderDiscoverExt};
+use topcoat::router::{Body, Router, RouterBuilderDiscoverExt};
 use topcoat::session::RouterBuilderSessionExt;
 
 use lindaflor::rate_limit::RateLimitLayer;
@@ -13,6 +13,19 @@ use lindaflor::rate_limit::RateLimitLayer;
 static HEALTH_SKIPS: &[&str] = &["/api/health"];
 /// Unique scope so governor buckets can't collide with other suites.
 const TEST_SCOPED: &str = "test:rate-limit";
+/// Unique scope for the spoof test below (governor buckets are
+/// process-global and never reset between tests).
+const TEST_SPOOF_SCOPE: &str = "test:xforwarded-spoof";
+
+async fn get_with_xff(router: &Router, path: &str, xff: &str) -> StatusCode {
+  let req = Request::builder()
+    .method(Method::GET)
+    .uri(path)
+    .header("x-forwarded-for", xff)
+    .body(Body::empty())
+    .expect("build request");
+  router.handle(req).await.status()
+}
 
 /// Global default applies everywhere else; a scoped layer *replaces* it
 /// on its path instead of stacking (single budget consumed per request).
@@ -68,4 +81,41 @@ async fn global_default_with_scoped_override() {
       i + 1
     );
   }
+}
+
+/// A spoofed `X-Forwarded-For` must not reset the bucket: with no trusted
+/// proxies configured (the test router default, like production with
+/// `TRUSTED_PROXY_HOPS=0`), Topcoat ignores the header and every request
+/// shares the direct-peer bucket.
+#[tokio::test]
+async fn spoofed_x_forwarded_for_shares_bucket() {
+  let test_env = env().await;
+  let _ = lindaflor::auth::CREDENTIAL_PROVIDER_ID;
+  lindaflor::auth::routes::link_for_discover();
+  let _ = lindaflor::api::health;
+
+  let pool = PgPoolOptions::new()
+    .max_connections(5)
+    .acquire_timeout(Duration::from_secs(10))
+    .connect(&test_env.database_url)
+    .await
+    .expect("connect pool");
+  let router = Router::builder()
+    .discover()
+    .cookies()
+    .sessions(lindaflor::auth::session_config())
+    .app_context(pool)
+    .layer(RateLimitLayer::scoped("/api/health", TEST_SPOOF_SCOPE, 1))
+    .build();
+
+  // Budget of 1: the first request passes whatever header it carries.
+  assert_eq!(
+    get_with_xff(&router, "/api/health", "203.0.113.9").await,
+    StatusCode::OK
+  );
+  // A different spoofed address must hit the same bucket, not a fresh one.
+  assert_eq!(
+    get_with_xff(&router, "/api/health", "198.51.100.23").await,
+    StatusCode::TOO_MANY_REQUESTS
+  );
 }

@@ -101,19 +101,10 @@ pub fn client_meta(
     .get("user-agent")
     .and_then(|v| v.to_str().ok())
     .map(str::to_owned);
-  let ip_address = headers
-    .get("x-forwarded-for")
-    .and_then(|v| v.to_str().ok())
-    .and_then(|v| v.split(',').next())
-    .map(str::trim)
-    .filter(|s| !s.is_empty())
-    .map(str::to_owned)
-    .or_else(|| {
-      headers
-        .get("x-real-ip")
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_owned)
-    });
+  // Trusted-proxy-aware (see `TrustedProxies` in `src/app.rs`); a raw
+  // `X-Forwarded-For` read would let clients forge the stored session IP.
+  let ip_address =
+    topcoat::router::request::client_ip(cx).map(|ip| ip.to_string());
   (ip_address, user_agent)
 }
 

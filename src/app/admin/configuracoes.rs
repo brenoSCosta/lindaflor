@@ -222,6 +222,20 @@ async fn save_settings(
     Err(message) => return fail(message),
   };
   let pix_key = optional_text(&form.pix_key);
+  let (pix_key, pix_key_type) = match (pix_key, pix_key_type) {
+    (None, None) => (None, None),
+    (Some(_), None) | (None, Some(_)) => {
+      return fail(
+        "Informe a chave e o tipo da chave PIX, ou deixe ambos em branco.",
+      );
+    }
+    (Some(key), Some(key_type)) => {
+      match crate::app::store::pix::normalize_pix_key(&key_type, &key) {
+        Ok(normalized) => (Some(normalized), Some(key_type)),
+        Err(message) => return fail(message),
+      }
+    }
+  };
   let pix_merchant_name = match optional_limited(
     &form.pix_merchant_name,
     25,

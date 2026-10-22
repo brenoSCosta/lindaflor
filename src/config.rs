@@ -277,6 +277,30 @@ pub fn reservation_sweep_secs() -> u64 {
   env_parse("RESERVATION_SWEEP_SECS", 60).max(1)
 }
 
+/// Number of reverse proxies in front of the app from `TRUSTED_PROXY_HOPS`
+/// (default `0` = directly exposed). Feeds
+/// `TrustedProxies::new().nearest(n)` in `src/app.rs`: only set above zero
+/// when every request must pass through that many proxies, otherwise a
+/// client can spoof its IP via `X-Forwarded-For`.
+pub fn trusted_proxy_hops() -> usize {
+  env_parse("TRUSTED_PROXY_HOPS", 0)
+}
+
+/// Trusted proxy networks from `TRUSTED_PROXY_NETWORKS` (comma-separated
+/// CIDRs or plain IPs, e.g. `"10.0.0.0/8, 192.168.0.0/16"`). Empty or unset
+/// trusts no network. Combined with [`trusted_proxy_hops`] in `src/app.rs`.
+pub fn trusted_proxy_networks() -> Vec<String> {
+  read_env_or_file("TRUSTED_PROXY_NETWORKS")
+    .map(|raw| {
+      raw
+        .split(',')
+        .map(|part| part.trim().to_owned())
+        .filter(|part| !part.is_empty())
+        .collect()
+    })
+    .unwrap_or_default()
+}
+
 /// Pool acquire timeout in seconds from `PG_ACQUIRE_TIMEOUT_SECS`.
 pub fn pg_acquire_timeout_secs() -> u64 {
   read_env_or_file("PG_ACQUIRE_TIMEOUT_SECS")
@@ -780,6 +804,27 @@ mod tests {
     );
     let _dev = set_env("APP_ENV", "development");
     assert!(reject_weak_seed_password_in_production("admin123").is_ok());
+  }
+
+  #[test]
+  fn trusted_proxy_env_defaults_and_parsing() {
+    let _lock = ENV_LOCK.lock().expect("env lock");
+    let _hops = remove_env("TRUSTED_PROXY_HOPS");
+    let _nets = remove_env("TRUSTED_PROXY_NETWORKS");
+    assert_eq!(trusted_proxy_hops(), 0);
+    assert!(trusted_proxy_networks().is_empty());
+    let _hops_set = set_env("TRUSTED_PROXY_HOPS", "2");
+    assert_eq!(trusted_proxy_hops(), 2);
+    drop(_hops_set);
+    let _hops_bad = set_env("TRUSTED_PROXY_HOPS", "abc");
+    assert_eq!(trusted_proxy_hops(), 0);
+    drop(_hops_bad);
+    let _nets_set =
+      set_env("TRUSTED_PROXY_NETWORKS", "10.0.0.0/8, 192.168.0.0/16 ,,");
+    assert_eq!(
+      trusted_proxy_networks(),
+      vec!["10.0.0.0/8".to_string(), "192.168.0.0/16".to_string()]
+    );
   }
 
   #[test]

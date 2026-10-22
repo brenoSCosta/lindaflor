@@ -337,7 +337,9 @@ pub async fn sign_in_email(
 
   let ip = crate::valkey::client_ip(cx);
   let conn = crate::valkey::conn_from(cx);
-  if crate::valkey::is_auth_locked_out(conn.clone(), &ip, &email).await {
+  if crate::valkey::is_auth_locked_out(conn.clone(), &ip, &email).await
+    || crate::valkey::is_auth_email_locked_out(conn.clone(), &email).await
+  {
     return Err(crate::rate_limit::rate_limit_error());
   }
 
@@ -366,21 +368,25 @@ pub async fn sign_in_email(
   .await?;
 
   let Some(row) = row else {
-    crate::valkey::record_auth_fail(conn, &ip, &email).await;
+    crate::valkey::record_auth_fail(conn.clone(), &ip, &email).await;
+    crate::valkey::record_auth_email_fail(conn, &email).await;
     return Err(unauthorized().into());
   };
 
   let Some(stored_hash) = row.password.as_deref() else {
-    crate::valkey::record_auth_fail(conn, &ip, &email).await;
+    crate::valkey::record_auth_fail(conn.clone(), &ip, &email).await;
+    crate::valkey::record_auth_email_fail(conn, &email).await;
     return Err(unauthorized().into());
   };
 
   if !verify_password(password, stored_hash)? {
-    crate::valkey::record_auth_fail(conn, &ip, &email).await;
+    crate::valkey::record_auth_fail(conn.clone(), &ip, &email).await;
+    crate::valkey::record_auth_email_fail(conn, &email).await;
     return Err(unauthorized().into());
   }
 
-  crate::valkey::clear_auth_fails(conn, &ip, &email).await;
+  crate::valkey::clear_auth_fails(conn.clone(), &ip, &email).await;
+  crate::valkey::clear_auth_email_fails(conn, &email).await;
 
   if is_currently_banned(row.banned, row.ban_expires) {
     return Err(unauthorized().into());

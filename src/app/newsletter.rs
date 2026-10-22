@@ -30,9 +30,7 @@ pub async fn subscribe(
   let pool = app_context::<PgPool>(cx);
 
   // Rate limit: 5 per minute per IP
-  let ip = topcoat::router::request::client_ip(cx)
-    .map(|ip| ip.to_string())
-    .unwrap_or_else(|| "unknown".to_string());
+  let ip = crate::valkey::client_ip(cx);
 
   if !check_ip_rate("newsletter", &ip, 5) {
     set_toast(

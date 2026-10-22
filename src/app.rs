@@ -35,7 +35,7 @@ use topcoat::{
   icon::{icon, iconify::iconify_icon},
   router::{
     BodyLimit, OriginPolicy, Router, RouterBuilderDiscoverExt, Slot,
-    StatusCode,
+    StatusCode, TrustedProxies,
     content::Form,
     error::{NotFoundError, SeeOther, see_other},
     href, layout, module_router, not_found, page,
@@ -86,6 +86,18 @@ pub fn router(
     .app_context(pool)
     .app_context(valkey)
     .app_context(storage);
+
+  // Trust only the configured reverse proxies when resolving the
+  // client IP (`valkey::client_ip` → Topcoat `client_ip`). Default 0 =
+  // directly exposed: proxy headers are ignored and spoofed
+  // `X-Forwarded-For` values cannot reset rate-limit or lockout buckets.
+  let mut trusted_proxies =
+    TrustedProxies::new().nearest(crate::config::trusted_proxy_hops());
+  let proxy_networks = crate::config::trusted_proxy_networks();
+  if !proxy_networks.is_empty() {
+    trusted_proxies = trusted_proxies.networks(&proxy_networks);
+  }
+  builder = builder.trusted_proxies(trusted_proxies);
 
   // Same-origin only: no CorsLayer, so no Access-Control-* headers are
   // emitted and there is no public cross-origin API. Browser mutations are

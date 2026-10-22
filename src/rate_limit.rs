@@ -57,7 +57,7 @@ pub const SCOPE_GLOBAL: &str = "global";
 
 /// Default budgets: 5/min/IP on auth endpoints, 3/min on
 /// TOTP/backup, 10/min on order-token poll, 30/min on order pages,
-/// 300/min/IP global default on everything else.
+/// 600/min/IP global default on everything else.
 pub const DEFAULT_SIGN_IN_PER_MIN: u32 = 5;
 pub const DEFAULT_SIGN_UP_PER_MIN: u32 = 5;
 pub const DEFAULT_PASSWORD_RESET_PER_MIN: u32 = 5;
@@ -67,11 +67,14 @@ pub const DEFAULT_BACKUP_CODE_PER_MIN: u32 = 3;
 pub const DEFAULT_TWO_FACTOR_PER_MIN: u32 = 10;
 pub const DEFAULT_PEDIDO_POLL_PER_MIN: u32 = 10;
 pub const DEFAULT_PEDIDO_PAGE_PER_MIN: u32 = 30;
-pub const DEFAULT_GLOBAL_PER_MIN: u32 = 300;
+pub const DEFAULT_GLOBAL_PER_MIN: u32 = 600;
 
 /// Prefixes the global governor skips so those requests do not consume the
 /// global budget. Includes scoped [`RateLimitLayer`] paths (true override,
-/// not stacking) and `/metrics` scrapes (no scoped layer). Keep in sync
+/// not stacking), `/metrics` scrapes (no scoped layer) and bundled static
+/// assets (`/_topcoat/assets/...`, served by Topcoat with immutable
+/// content-hashed URLs — exempt so CGNAT/mobile networks sharing few IPs
+/// don't burn the global budget on cacheable files). Keep in sync
 /// with the scoped layers in `src/app.rs` (and `tests/common/mod.rs`).
 pub const GLOBAL_OVERRIDE_PREFIXES: &[&str] = &[
   "/api/auth/sign-in",
@@ -85,6 +88,7 @@ pub const GLOBAL_OVERRIDE_PREFIXES: &[&str] = &[
   "/pedido/status-proc",
   "/pedido",
   "/metrics",
+  "/_topcoat/assets",
 ];
 
 /// Segment-aware prefix match (mirrors Topcoat layer matching): `path`
@@ -103,6 +107,18 @@ pub fn check_ip_rate(scope: &'static str, ip: &str, per_minute: u32) -> bool {
     .entry(scope)
     .or_insert_with(|| IpLimiter::dashmap(quota_per_minute(per_minute)));
   limiter.check_key(&format!("{scope}:{ip}")).is_ok()
+}
+
+/// Drop governor entries whose buckets have fully replenished and shrink
+/// the key maps back down. Call periodically (see the reservation sweep
+/// loop in `src/main.rs`): without this, every distinct IP ever seen keeps
+/// a `DashMap` entry for the process lifetime.
+pub fn prune_limiters() {
+  let guard = limiters().lock().unwrap_or_else(|e| e.into_inner());
+  for limiter in guard.values() {
+    limiter.retain_recent();
+    limiter.shrink_to_fit();
+  }
 }
 
 /// Generic 429 error (no oracle detail). Handlers return it with

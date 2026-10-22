@@ -19,14 +19,74 @@ use crate::components::input::input;
 use crate::components::separator::separator;
 
 use crate::app::store::cart::{
-  cart_coupon_code, cart_subtotal_cents, hydrate_cart, load_or_create_cart,
-  remove_from_cart_proc, set_cart_coupon_proc, set_cart_quantity_proc,
+  CartItem, cart_coupon_code, cart_subtotal_cents, hydrate_cart,
+  load_or_create_cart, remove_from_cart_proc, remove_set_from_cart_proc,
+  set_cart_coupon_proc, set_cart_quantity_proc, set_cart_set_quantity_proc,
 };
 use crate::app::store::coupons::{CouponReject, resolve_coupon};
 use crate::app::store::pricing::pix_price;
 use crate::app::store::queries::{format_price, get_store_settings};
 
 /// NOTE for the badge-patch `raw!` calls below: the JS must end with `;`.
+/// `raw!` output is spliced into the handler without a separator, so
+/// without it the next statement fuses into a call on the IIFE result
+/// (`})()(...))`) and throws before `version.set` runs.
+///
+/// One set group for the drawer: every member shares a single quantity, so
+/// the drawer renders one control block per group (no per-member - / + /
+/// remove) that drives the set-level procedures.
+struct SetGroup {
+  id: String,
+  name: Option<String>,
+  members: Vec<CartItem>,
+  quantity: i32,
+  max_quantity: i32,
+  total_cents: i64,
+}
+
+fn group_set_lines(items: Vec<CartItem>) -> (Vec<CartItem>, Vec<SetGroup>) {
+  let mut loose = Vec::new();
+  let mut groups: Vec<SetGroup> = Vec::new();
+  for item in items {
+    let Some(set_id) = item.set_id.clone() else {
+      loose.push(item);
+      continue;
+    };
+    if let Some(group) = groups.iter_mut().find(|group| group.id == set_id) {
+      group.members.push(item);
+    } else {
+      let name = item.set_name.clone();
+      groups.push(SetGroup {
+        id: set_id,
+        name,
+        members: vec![item],
+        quantity: 1,
+        max_quantity: 1,
+        total_cents: 0,
+      });
+    }
+  }
+  for group in &mut groups {
+    group.quantity =
+      group.members.first().map(|item| item.quantity).unwrap_or(1);
+    group.max_quantity = group
+      .members
+      .iter()
+      .map(|item| item.max_quantity)
+      .min()
+      .unwrap_or(1);
+    group.total_cents = group
+      .members
+      .iter()
+      .map(|item| {
+        item
+          .unit_price_cents
+          .saturating_mul(i64::from(item.quantity))
+      })
+      .sum();
+  }
+  (loose, groups)
+}
 /// `raw!` output is spliced into the handler without a separator, so
 /// without it the next statement fuses into a call on the IIFE result
 /// (`})()(...))`) and throws before `version.set` runs.
@@ -78,6 +138,10 @@ pub async fn cart_sheet(cx: &Cx, open: Signal<bool>) -> Result<impl View> {
     .map(|coupon| coupon.discount_cents)
     .unwrap_or(0);
   let item_count: i32 = items.iter().map(|item| item.quantity).sum();
+  // Split before render: loose lines keep per-line controls, set members
+  // render as one block per group with a single group-level control.
+  let (loose_items, set_groups) = group_set_lines(items);
+  let is_empty = loose_items.is_empty() && set_groups.is_empty();
   let settings = get_store_settings(pool).await?;
   let free_shipping_threshold = settings.free_shipping_threshold_cents;
   let missing_for_free_shipping = (free_shipping_threshold - subtotal).max(0);
@@ -151,7 +215,7 @@ pub async fn cart_sheet(cx: &Cx, open: Signal<bool>) -> Result<impl View> {
               </div>
           }
 
-          if items.is_empty() {
+          if is_empty {
               <div class="flex flex-1 flex-col justify-center py-10 text-center">
                   <p class="text-muted-foreground">"Seu carrinho está vazio."</p>
                   <div class="mt-4 flex justify-center gap-2">
@@ -172,7 +236,7 @@ pub async fn cart_sheet(cx: &Cx, open: Signal<bool>) -> Result<impl View> {
           } else {
               <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
                   #[key(item.variant_id.clone())]
-                  for item in items {
+                  for item in loose_items {
                       <div
                           class="flex items-center gap-3 rounded-lg border border-border p-3"
                       >
@@ -289,6 +353,141 @@ pub async fn cart_sheet(cx: &Cx, open: Signal<bool>) -> Result<impl View> {
                           <p class="shrink-0 text-right text-sm font-medium text-primary">
                               (format_price(item.unit_price_cents.saturating_mul(i64::from(item.quantity))))
                           </p>
+                      </div>
+                  }
+                  // One block per set group: member rows are display-only;
+                  // the footer controls the whole group's quantity.
+                  #[key(group.id.clone())]
+                  for group in set_groups {
+                      <div
+                          class="flex flex-col gap-2 rounded-lg border border-border p-3"
+                      >
+                          if let Some(set_name) = &group.name {
+                              <p class="text-sm font-medium uppercase tracking-wide">
+                                  (set_name)
+                              </p>
+                          }
+                          #[key(member.variant_id.clone())]
+                          for member in group.members {
+                              <div class="flex items-center gap-3">
+                                  <a
+                                      href=(href!(
+                                          crate::app::produtos::slug::page,
+                                          crate::app::produtos::slug::Slug(member.product_slug.clone()),
+                                      ))
+                                      class="shrink-0 overflow-hidden rounded-md"
+                                  >
+                                      if let Some(image_url) = &member.image_url {
+                                          <img
+                                              src=(image_url.clone())
+                                              alt=(member.product_name.clone())
+                                              class="h-20 w-16 object-cover"
+                                          >
+                                      }
+                                  </a>
+                                  <div class="min-w-0 flex-1 space-y-1">
+                                      <a
+                                          href=(href!(
+                                              crate::app::produtos::slug::page,
+                                              crate::app::produtos::slug::Slug(member.product_slug.clone()),
+                                          ))
+                                          class="block truncate text-sm font-medium uppercase tracking-wide transition-colors hover:text-primary"
+                                      >
+                                          (member.product_name)
+                                      </a>
+                                      <p class="text-xs text-muted-foreground">
+                                          (member.variant_label)
+                                      </p>
+                                  </div>
+                                  <p class="shrink-0 text-right text-sm font-medium text-primary">
+                                      (format_price(member.unit_price_cents.saturating_mul(i64::from(member.quantity))))
+                                  </p>
+                              </div>
+                          }
+                          <div class="flex items-center gap-2 pt-1">
+                              {
+                                  let sid = group.id.clone();
+                                  let minus_qty = (group.quantity - 1).to_string();
+                                  button(
+                                      variant: ButtonVariant::Outline,
+                                      size: ButtonSize::Sm,
+                                      attrs: attributes! {
+                                          type="button"
+                                          disabled=(group.quantity <= 1)
+                                          aria-label="Diminuir conjunto"
+                                          @click=$(async |_e: Event| {
+                                              let n = set_cart_set_quantity_proc(
+                                                  sid.to_owned(),
+                                                  minus_qty.to_owned(),
+                                              ).await;
+                                              raw!(
+                                                  "(() => { const badge = document.querySelector('[data-cart-count]'); if (!badge) return; badge.textContent = ${n}; badge.hidden = ${n} === '0'; })();",
+                                                  {
+                                                      let _ = n.clone();
+                                                  },
+                                              );
+                                              version.set(version.get() + 1u64);
+                                          })
+                                      },
+                                      "-"
+                                  )
+                              }
+                              <span class="min-w-8 text-center text-sm">
+                                  (group.quantity)
+                              </span>
+                              {
+                                  let sid = group.id.clone();
+                                  let plus_qty = (group.quantity + 1).to_string();
+                                  button(
+                                      variant: ButtonVariant::Outline,
+                                      size: ButtonSize::Sm,
+                                      attrs: attributes! {
+                                          type="button"
+                                          disabled=(group.quantity >= group.max_quantity)
+                                          aria-label="Aumentar conjunto"
+                                          @click=$(async |_e: Event| {
+                                              let n = set_cart_set_quantity_proc(
+                                                  sid.to_owned(),
+                                                  plus_qty.to_owned(),
+                                              ).await;
+                                              raw!(
+                                                  "(() => { const badge = document.querySelector('[data-cart-count]'); if (!badge) return; badge.textContent = ${n}; badge.hidden = ${n} === '0'; })();",
+                                                  {
+                                                      let _ = n.clone();
+                                                  },
+                                              );
+                                              version.set(version.get() + 1u64);
+                                          })
+                                      },
+                                      "+"
+                                  )
+                              }
+                              {
+                                  let sid = group.id.clone();
+                                  button(
+                                      variant: ButtonVariant::Ghost,
+                                      size: ButtonSize::Sm,
+                                      attrs: attributes! {
+                                          type="button"
+                                          aria-label="Remover conjunto"
+                                          @click=$(async |_e: Event| {
+                                              let n = remove_set_from_cart_proc(sid.to_owned()).await;
+                                              raw!(
+                                                  "(() => { const badge = document.querySelector('[data-cart-count]'); if (!badge) return; badge.textContent = ${n}; badge.hidden = ${n} === '0'; })();",
+                                                  {
+                                                      let _ = n.clone();
+                                                  },
+                                              );
+                                              version.set(version.get() + 1u64);
+                                          })
+                                      },
+                                      "✕"
+                                  )
+                              }
+                              <p class="ml-auto shrink-0 text-right text-sm font-medium text-primary">
+                                  (format_price(group.total_cents))
+                              </p>
+                          </div>
                       </div>
                   }
               </div>
