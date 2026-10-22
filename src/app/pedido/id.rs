@@ -13,6 +13,7 @@ use topcoat::{
 };
 use uuid::Uuid;
 
+use crate::app::store::reviews::order_review_links;
 use crate::auth::user::current_user_owned;
 
 use crate::components::button::{ButtonSize, ButtonVariant, button_variants};
@@ -658,6 +659,8 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                     )
                 )
             )
+
+            order_review_links(order_id: order.id)
 
             card(
                 card_header(

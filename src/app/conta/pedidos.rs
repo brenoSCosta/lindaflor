@@ -110,6 +110,8 @@ async fn my_orders(cx: &Cx, initial_page: i64) -> Result<impl View> {
     )
     .fetch_all(pool)
     .await?;
+  let reviewable =
+    crate::app::store::reviews::reviewable_order_ids(pool, su.user.id).await?;
 
   let is_empty = orders.is_empty();
   let show_pagination = total_pages > 1;
@@ -168,7 +170,19 @@ async fn my_orders(cx: &Cx, initial_page: i64) -> Result<impl View> {
                                       (order.id.chars().take(8).collect::<String>())
                                   </a>
                               )
-                              table_cell(badge(variant: status_variant(&order.status), (status_label(&order.status))))
+                              table_cell(
+                                  <div class="flex flex-wrap items-center gap-2">
+                                      badge(variant: status_variant(&order.status), (status_label(&order.status)))
+                                      if reviewable.contains(&order_uuid) {
+                                          <a
+                                              href=(href!(crate::app::pedido::id::page, crate::app::pedido::id::Id(order_uuid)))
+                                              class="text-xs text-primary hover:underline"
+                                          >
+                                              "Avaliar"
+                                          </a>
+                                      }
+                                  </div>
+                              )
                               table_cell(
                                   if let Some(step) = step {
                                       <div class="flex items-center gap-2" title=(STEP_LABELS[step])>

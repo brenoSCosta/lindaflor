@@ -10,6 +10,7 @@ use crate::components::badge::{BadgeVariant, badge};
 
 use super::pricing::{discount_percent, pix_price, storefront_settings};
 use super::queries::{ProductSummary, category_label, format_price};
+use super::reviews::card_rating;
 use super::wishlist::{liked_product_ids, wishlist_button};
 
 #[component]
@@ -86,6 +87,7 @@ pub async fn product_card(
               <div class="space-y-2 pt-4">
                   <p class="text-[10px] tracking-wide uppercase text-muted-foreground">(category)</p>
                   <h3 class="font-serif text-xl leading-tight text-foreground">(product.name.clone())</h3>
+                  card_rating(product_id: product.id)
 
                   if !product.colors.is_empty() {
                       <div class="flex gap-2 items-center">

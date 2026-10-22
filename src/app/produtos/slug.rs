@@ -19,6 +19,7 @@ use crate::app::store::queries::{
   category_label, format_price, get_product_by_slug, get_store_settings,
   size_label, whatsapp_link,
 };
+use crate::app::store::reviews::{product_reviews, rating_summary_line};
 use crate::app::store::wishlist::{liked_product_ids, wishlist_button};
 use crate::auth::user::current_user_owned;
 use crate::components::accordion::{
@@ -295,6 +296,7 @@ pub async fn page(
                                 <div class="space-y-2">
                                     badge(variant: BadgeVariant::Secondary, (product_category))
                                     card_title((product_name.clone()))
+                                    rating_summary_line(product_id: product.id)
                                 </div>
                                 if let Some(discount_text) = discount_badge_text.clone() {
                                     badge(
@@ -517,6 +519,8 @@ pub async fn page(
                     )
                 </div>
             </div>
+
+            product_reviews(product_id: product.id)
 
             if !looks.is_empty() {
                 <section>

@@ -1,3 +1,4 @@
+pub mod avaliacoes;
 pub mod banners;
 pub mod configuracoes;
 pub mod cupons;
