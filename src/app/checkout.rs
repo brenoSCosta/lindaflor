@@ -28,7 +28,7 @@ use crate::components::textarea::textarea;
 
 use crate::app::store::cart::{
   QuoteError, cart_coupon_code, cart_subtotal_cents, clear_items_in_tx,
-  hydrate_cart, load_or_create_cart, quote_cart_for_checkout,
+  find_cart, hydrate_cart, quote_cart_for_checkout,
 };
 use crate::app::store::coupons::{
   COUPON_GONE_MESSAGE, CouponReject, ResolvedCoupon, record_redemption,
@@ -97,17 +97,20 @@ pub async fn page(
   let pool = app_context::<PgPool>(cx);
   let session_user_id: Option<Uuid> =
     current_user_owned(cx).await?.map(|session| session.user.id);
-  let cart = load_or_create_cart(cx, pool, session_user_id).await?;
-  let mut hydrated = hydrate_cart(pool, cart.id).await?;
+  // Read-only lookup: no cart row for cookieless visitors (created on add).
+  let cart = find_cart(cx, pool, session_user_id).await?;
+  let mut items = match cart {
+    Some(cart) => hydrate_cart(pool, cart.id).await?.items,
+    None => Vec::new(),
+  };
   let store = crate::app::utils::object_store(cx);
-  for item in &mut hydrated.items {
+  for item in &mut items {
     item.image_url =
       crate::app::utils::resolve_storage_url(&store, item.image_url.as_deref())
         .await;
   }
-  let items = hydrated.items;
 
-  if items.is_empty() {
+  let Some(cart) = cart.filter(|_| !items.is_empty()) else {
     return Ok(view! {
             container(
                 variant: ContainerVariant::Narrow,
@@ -124,7 +127,7 @@ pub async fn page(
             )
         }
         .boxed());
-  }
+  };
 
   let subtotal = cart_subtotal_cents(&items).ok_or_else(|| {
     topcoat::Error::msg("Carrinho inválido. Atualize a página.")
@@ -426,6 +429,7 @@ pub async fn page(
                                     attrs: attributes! {
                                         id="email"
                                         name="guest_email"
+                                        maxlength="254"
                                         type="email"
                                         autocomplete="email"
                                         aria-describedby="email-error"
@@ -458,6 +462,7 @@ pub async fn page(
                                             attrs: attributes! {
                                                 id="name"
                                                 name="name"
+                                                maxlength="100"
                                                 type="text"
                                                 autocomplete="name"
                                                 aria-describedby="name-error"
@@ -482,6 +487,7 @@ pub async fn page(
                                             attrs: attributes! {
                                                 id="phone"
                                                 name="phone"
+                                                maxlength="20"
                                                 inputMode="tel"
                                                 autocomplete="tel"
                                                 placeholder="79999816511"
@@ -507,6 +513,7 @@ pub async fn page(
                                             attrs: attributes! {
                                                 id="street"
                                                 name="street"
+                                                maxlength="120"
                                                 aria-describedby="street-error"
                                             }
                                         )
@@ -528,6 +535,7 @@ pub async fn page(
                                         attrs: attributes! {
                                             id="number"
                                             name="number"
+                                            maxlength="20"
                                             aria-describedby="number-error"
                                         }
                                     )
@@ -541,6 +549,7 @@ pub async fn page(
                                     input(attrs: attributes! {
                                         id="complement"
                                         name="complement"
+                                        maxlength="80"
                                         value=(complement_init)
                                     })
                                 )
@@ -556,6 +565,7 @@ pub async fn page(
                                         attrs: attributes! {
                                             id="neighborhood"
                                             name="neighborhood"
+                                            maxlength="80"
                                             aria-describedby="neighborhood-error"
                                         }
                                     )
@@ -576,6 +586,7 @@ pub async fn page(
                                         attrs: attributes! {
                                             id="city"
                                             name="city"
+                                            maxlength="80"
                                             aria-describedby="city-error"
                                         }
                                     )
@@ -624,7 +635,7 @@ pub async fn page(
                         )
                         card_content(
                             textarea(
-                                attrs: attributes! { id="notes" name="notes" rows="3" },
+                                attrs: attributes! { id="notes" name="notes" rows="3" maxlength="500" },
                                 (input_notes(body.as_ref()))
                             )
                         )
@@ -730,6 +741,108 @@ pub async fn page(
     }.boxed())
 }
 
+/// Server-side caps (in characters) for the free-text checkout fields,
+/// mirrored as `maxlength` on the inputs. They bound what one order can
+/// store in `shipping_address`/`notes` (rendered on admin pages).
+const MAX_EMAIL_LEN: usize = 254;
+const MAX_NAME_LEN: usize = 100;
+const MAX_PHONE_LEN: usize = 20;
+const MAX_STREET_LEN: usize = 120;
+const MAX_NUMBER_LEN: usize = 20;
+const MAX_COMPLEMENT_LEN: usize = 80;
+const MAX_NEIGHBORHOOD_LEN: usize = 80;
+const MAX_CITY_LEN: usize = 80;
+const MAX_NOTES_LEN: usize = 500;
+
+fn check_field_lengths(form_data: &CheckoutInput) -> Result<(), String> {
+  for (value, max, label) in [
+    (&form_data.guest_email, MAX_EMAIL_LEN, "O e-mail"),
+    (&form_data.name, MAX_NAME_LEN, "O nome"),
+    (&form_data.phone, MAX_PHONE_LEN, "O WhatsApp"),
+    (&form_data.street, MAX_STREET_LEN, "A rua"),
+    (&form_data.number, MAX_NUMBER_LEN, "O número"),
+    (&form_data.complement, MAX_COMPLEMENT_LEN, "O complemento"),
+    (&form_data.neighborhood, MAX_NEIGHBORHOOD_LEN, "O bairro"),
+    (&form_data.city, MAX_CITY_LEN, "A cidade"),
+    (&form_data.notes, MAX_NOTES_LEN, "As observações"),
+  ] {
+    if value.trim().chars().count() > max {
+      let verb = if label.starts_with("As ") {
+        "devem"
+      } else {
+        "deve"
+      };
+      return Err(format!("{label} {verb} ter no máximo {max} caracteres."));
+    }
+  }
+  Ok(())
+}
+
+#[cfg(test)]
+mod field_length_tests {
+  use super::*;
+
+  fn valid_input() -> CheckoutInput {
+    CheckoutInput {
+      guest_email: "cliente@example.com".into(),
+      name: "Maria Silva".into(),
+      phone: "79999816511".into(),
+      street: "Rua das Flores".into(),
+      number: "10".into(),
+      complement: String::new(),
+      neighborhood: "Centro".into(),
+      city: "Aracaju".into(),
+      state: "SE".into(),
+      zip_code: "49000000".into(),
+      notes: String::new(),
+      coupon_code: None,
+      intent: Some("pay".into()),
+    }
+  }
+
+  #[test]
+  fn accepts_values_at_the_limit() {
+    let mut form = valid_input();
+    form.name = "a".repeat(MAX_NAME_LEN);
+    form.street = "r".repeat(MAX_STREET_LEN);
+    form.complement = "ç".repeat(MAX_COMPLEMENT_LEN);
+    form.notes = "n".repeat(MAX_NOTES_LEN);
+    assert_eq!(check_field_lengths(&form), Ok(()));
+  }
+
+  #[test]
+  fn rejects_each_oversized_field_with_pt_br_message() {
+    type Setter = fn(&mut CheckoutInput, String);
+    let cases: [(Setter, usize, &str); 9] = [
+      (|i, v| i.guest_email = v, MAX_EMAIL_LEN, "O e-mail deve"),
+      (|i, v| i.name = v, MAX_NAME_LEN, "O nome deve"),
+      (|i, v| i.phone = v, MAX_PHONE_LEN, "O WhatsApp deve"),
+      (|i, v| i.street = v, MAX_STREET_LEN, "A rua deve"),
+      (|i, v| i.number = v, MAX_NUMBER_LEN, "O número deve"),
+      (
+        |i, v| i.complement = v,
+        MAX_COMPLEMENT_LEN,
+        "O complemento deve",
+      ),
+      (
+        |i, v| i.neighborhood = v,
+        MAX_NEIGHBORHOOD_LEN,
+        "O bairro deve",
+      ),
+      (|i, v| i.city = v, MAX_CITY_LEN, "A cidade deve"),
+      (|i, v| i.notes = v, MAX_NOTES_LEN, "As observações devem"),
+    ];
+    for (set, max, prefix) in cases {
+      let mut form = valid_input();
+      set(&mut form, "x".repeat(max + 1));
+      let message = check_field_lengths(&form).expect_err("too long");
+      assert_eq!(message, format!("{prefix} ter no máximo {max} caracteres."));
+      // Enforced on the pay path, before any other validation.
+      assert_eq!(validate_pay_fields(&form), Err(message));
+    }
+  }
+}
+
 fn phone_digit_count(value: &str) -> usize {
   value.chars().filter(|c| c.is_ascii_digit()).count()
 }
@@ -738,6 +851,7 @@ fn phone_digit_count(value: &str) -> usize {
 fn validate_pay_fields(
   form_data: &CheckoutInput,
 ) -> Result<&'static str, String> {
+  check_field_lengths(form_data)?;
   if crate::auth::validation::validate_email(&form_data.guest_email).is_err() {
     return Err("Informe um e-mail válido.".to_string());
   }

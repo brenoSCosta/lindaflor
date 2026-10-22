@@ -266,6 +266,43 @@ async fn get_or_create_user_or_guest(
   insert_cart(pool, user_id).await
 }
 
+/// Read-only twin of [`load_or_create_cart`] for render paths (`GET
+/// /checkout`, the cart sheet): resolves the cookie cart (or the signed-in
+/// user's cart) but never inserts a row, so cookieless crawlers and bots
+/// don't create one `carts` row per request. `None` renders as an empty
+/// cart; the row is created lazily on the first add.
+pub async fn find_cart(
+  cx: &Cx,
+  pool: &PgPool,
+  user_id: Option<Uuid>,
+) -> Result<Option<CartRef>, sqlx::Error> {
+  if let Some(value) = read_cookie_value(cx)
+    && let Some(token) = parse_token(&value)
+    && let Some(cart) = fetch_cart_by_token(pool, token).await?
+  {
+    let belongs_to_other = cart
+      .user_id
+      .is_some_and(|owner| user_id.is_none_or(|uid| uid != owner));
+    if !belongs_to_other {
+      return Ok(Some(CartRef {
+        id: cart.id,
+        token: cart.token,
+      }));
+    }
+  }
+  let Some(user_id) = user_id else {
+    return Ok(None);
+  };
+  let Some(cart) = fetch_cart_by_user(pool, user_id).await? else {
+    return Ok(None);
+  };
+  write_cart_token(cx, cart.token);
+  Ok(Some(CartRef {
+    id: cart.id,
+    token: cart.token,
+  }))
+}
+
 /// Read the cart token cookie, creating a guest/user cart if needed.
 pub async fn load_or_create_cart(
   cx: &Cx,
@@ -780,6 +817,21 @@ pub async fn remove_set_from_cart_proc(
   Ok(n.to_string())
 }
 
+const COUPON_RATE_LIMITED_MESSAGE: &str =
+  "Muitas tentativas. Aguarde um momento e tente novamente.";
+
+/// Consume one cell of the per-cart coupon-apply budget.
+fn check_coupon_cart_rate(cart_id: Uuid) -> bool {
+  use crate::rate_limit::{
+    DEFAULT_COUPON_CART_PER_MIN, SCOPE_COUPON_CART, check_ip_rate, limit_for,
+  };
+  check_ip_rate(
+    SCOPE_COUPON_CART,
+    &cart_id.to_string(),
+    limit_for(SCOPE_COUPON_CART, DEFAULT_COUPON_CART_PER_MIN),
+  )
+}
+
 /// Sheet fast-path for the coupon form. Returns the domain outcome as data
 /// so the browser can show an inline error without re-rendering the shard:
 /// empty string applies/clears, non-empty is the message to show inline.
@@ -800,6 +852,12 @@ pub async fn set_cart_coupon_proc(
   if raw.is_empty() {
     set_cart_coupon(pool, cart.id, None).await?;
     return Ok(String::new());
+  }
+  // Per-cart budget on top of the per-IP scoped layer (`SCOPE_COUPON`,
+  // `src/rate_limit.rs`): slows code guessing spread across many IPs that
+  // reuse one cart.
+  if !check_coupon_cart_rate(cart.id) {
+    return Ok(COUPON_RATE_LIMITED_MESSAGE.to_string());
   }
   let subtotal = {
     let hydrated = hydrate_cart(pool, cart.id).await?;
@@ -2192,5 +2250,20 @@ mod tests {
       .map(|item| item.unit_price_cents * i64::from(item.quantity))
       .sum();
     assert_eq!(total, 10_000 + 12_000);
+  }
+
+  #[test]
+  fn coupon_apply_budget_is_per_cart() {
+    let cart = Uuid::now_v7();
+    let other = Uuid::now_v7();
+    let budget = crate::rate_limit::limit_for(
+      crate::rate_limit::SCOPE_COUPON_CART,
+      crate::rate_limit::DEFAULT_COUPON_CART_PER_MIN,
+    );
+    for _ in 0..budget {
+      assert!(check_coupon_cart_rate(cart));
+    }
+    assert!(!check_coupon_cart_rate(cart), "budget exhausted");
+    assert!(check_coupon_cart_rate(other), "other carts unaffected");
   }
 }

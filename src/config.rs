@@ -221,6 +221,8 @@ impl Config {
     if app_env() == "production" {
       require_app_origin()?;
       totp_encryption_key()?;
+      // `/metrics` must never be public in production.
+      metrics_token().ok_or(ConfigError::MissingMetricsToken)?;
     }
     Ok(Self {
       port,
@@ -389,8 +391,9 @@ pub fn password_min_zxcvbn_score() -> u8 {
   env_parse("PASSWORD_MIN_ZXCVBN_SCORE", 3)
 }
 
-/// Bearer token for `GET /metrics` from `METRICS_TOKEN`. Empty or unset
-/// is `None` (open metrics in local/dev).
+/// Bearer token for `GET /metrics` from `METRICS_TOKEN` (or
+/// `METRICS_TOKEN_FILE`). Empty or unset is `None`: open metrics in
+/// local/dev, closed (401) in production, where boot also requires it.
 pub fn metrics_token() -> Option<String> {
   env_non_empty("METRICS_TOKEN")
 }
@@ -562,6 +565,10 @@ pub enum ConfigError {
   InvalidMailTransport(String),
   #[error("invalid SMTP_TLS: expected starttls or tls (none is dev-only)")]
   InvalidSmtpTls,
+  #[error(
+    "missing METRICS_TOKEN: set it (or METRICS_TOKEN_FILE) so /metrics is not public in production"
+  )]
+  MissingMetricsToken,
 }
 
 #[cfg(test)]
@@ -692,6 +699,7 @@ mod tests {
       "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
     );
     let _key_file = remove_env("TOTP_ENCRYPTION_KEY_FILE");
+    let _metrics = set_env("METRICS_TOKEN", "scrape-secret");
     Config::from_env().expect("prod boot with valid APP_ORIGIN");
   }
 
@@ -742,6 +750,26 @@ mod tests {
     // A missing host fails boot instead of failing every send later.
     let _no_host = remove_env("SMTP_HOST");
     assert!(matches!(mail_from_env(), Err(ConfigError::MissingVar(_))));
+  }
+
+  #[test]
+  fn from_env_fails_in_production_without_metrics_token() {
+    let _lock = ENV_LOCK.lock().expect("env lock");
+    let _env = set_env("APP_ENV", "production");
+    let _origin = set_env("APP_ORIGIN", "https://loja.example.com");
+    let _db = set_env("DATABASE_URL", "postgres://localhost/test");
+    let _key = set_env(
+      "TOTP_ENCRYPTION_KEY",
+      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+    );
+    let _key_file = remove_env("TOTP_ENCRYPTION_KEY_FILE");
+    let _metrics = remove_env("METRICS_TOKEN");
+    let _metrics_file = remove_env("METRICS_TOKEN_FILE");
+    let err = Config::from_env().expect_err("prod boot must fail");
+    assert!(
+      matches!(err, ConfigError::MissingMetricsToken),
+      "unexpected error: {err:?}"
+    );
   }
 
   #[test]

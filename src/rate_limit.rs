@@ -53,6 +53,8 @@ pub const SCOPE_BACKUP_CODE: &str = "auth:verify-backup-code";
 pub const SCOPE_TWO_FACTOR: &str = "auth:two-factor";
 pub const SCOPE_PEDIDO_POLL: &str = "pedido:poll";
 pub const SCOPE_PEDIDO_PAGE: &str = "pedido:page";
+pub const SCOPE_COUPON: &str = "coupon:apply";
+pub const SCOPE_COUPON_CART: &str = "coupon:cart";
 pub const SCOPE_GLOBAL: &str = "global";
 
 /// Default budgets: 5/min/IP on auth endpoints, 3/min on
@@ -67,6 +69,9 @@ pub const DEFAULT_BACKUP_CODE_PER_MIN: u32 = 3;
 pub const DEFAULT_TWO_FACTOR_PER_MIN: u32 = 10;
 pub const DEFAULT_PEDIDO_POLL_PER_MIN: u32 = 10;
 pub const DEFAULT_PEDIDO_PAGE_PER_MIN: u32 = 30;
+/// Coupon apply: per IP (scoped layer) and per cart (in the procedure).
+pub const DEFAULT_COUPON_PER_MIN: u32 = 10;
+pub const DEFAULT_COUPON_CART_PER_MIN: u32 = 10;
 pub const DEFAULT_GLOBAL_PER_MIN: u32 = 600;
 
 /// Prefixes the global governor skips so those requests do not consume the
@@ -90,6 +95,72 @@ pub const GLOBAL_OVERRIDE_PREFIXES: &[&str] = &[
   "/metrics",
   "/_topcoat/assets",
 ];
+
+/// Like [`GLOBAL_OVERRIDE_PREFIXES`], but only for mutating requests
+/// (anything but `GET`/`HEAD`/`OPTIONS`): these paths are owned by
+/// [`RateLimitLayer::mutations_only`] layers (see [`apply_form_rate_limits`]),
+/// so their `GET` pages keep consuming the global budget while the form
+/// `POST`s consume exactly one (strict) scoped budget.
+pub const GLOBAL_OVERRIDE_MUTATION_PREFIXES: &[&str] = &[
+  "/forgot-password",
+  "/reset-password",
+  "/check-email/resend",
+  "/verify-email/resend",
+  "/two-factor",
+  "/login/google",
+  "/carrinho/cupom",
+];
+
+/// HTML-form twins of the `/api/auth/*` endpoints, plus coupon apply.
+/// Same scopes (and therefore shared buckets) as the API versions, so a
+/// client can't double its budget by switching between JSON and forms.
+/// `(path, scope, default per minute)`; every path must also be listed in
+/// [`GLOBAL_OVERRIDE_MUTATION_PREFIXES`].
+pub const FORM_RATE_LIMITS: &[(&str, &str, u32)] = &[
+  (
+    "/forgot-password",
+    SCOPE_PASSWORD_RESET,
+    DEFAULT_PASSWORD_RESET_PER_MIN,
+  ),
+  (
+    "/reset-password",
+    SCOPE_PASSWORD_RESET,
+    DEFAULT_PASSWORD_RESET_PER_MIN,
+  ),
+  (
+    "/check-email/resend",
+    SCOPE_VERIFY_EMAIL,
+    DEFAULT_VERIFY_EMAIL_PER_MIN,
+  ),
+  (
+    "/verify-email/resend",
+    SCOPE_VERIFY_EMAIL,
+    DEFAULT_VERIFY_EMAIL_PER_MIN,
+  ),
+  ("/two-factor", SCOPE_TOTP, DEFAULT_TOTP_PER_MIN),
+  ("/login/google", SCOPE_SIGN_IN, DEFAULT_SIGN_IN_PER_MIN),
+  ("/carrinho/cupom", SCOPE_COUPON, DEFAULT_COUPON_PER_MIN),
+];
+
+/// Register a [`RateLimitLayer::mutations_only`] layer for every entry of
+/// [`FORM_RATE_LIMITS`]. Called from `src/app.rs` (and the test routers in
+/// `crates/test-support`) so the lists can't drift apart.
+pub fn apply_form_rate_limits(
+  mut builder: topcoat::router::RouterBuilder,
+) -> topcoat::router::RouterBuilder {
+  for &(path, scope, per_minute) in FORM_RATE_LIMITS {
+    builder = builder
+      .layer(RateLimitLayer::scoped(path, scope, per_minute).mutations_only());
+  }
+  builder
+}
+
+fn is_mutation(method: &http::Method) -> bool {
+  !matches!(
+    *method,
+    http::Method::GET | http::Method::HEAD | http::Method::OPTIONS
+  )
+}
 
 /// Segment-aware prefix match (mirrors Topcoat layer matching): `path`
 /// equals `prefix` or starts with `prefix + "/"`.
@@ -144,6 +215,10 @@ pub struct RateLimitLayer {
   scope: &'static str,
   per_minute: u32,
   skip_prefixes: &'static [&'static str],
+  /// Like `skip_prefixes`, but only for mutating requests.
+  mutation_skip_prefixes: &'static [&'static str],
+  /// Enforce only on mutating requests (`GET`/`HEAD`/`OPTIONS` pass).
+  mutations_only: bool,
 }
 
 impl RateLimitLayer {
@@ -161,6 +236,8 @@ impl RateLimitLayer {
       scope,
       per_minute,
       skip_prefixes: &[],
+      mutation_skip_prefixes: &[],
+      mutations_only: false,
     }
   }
 
@@ -175,6 +252,8 @@ impl RateLimitLayer {
       scope: SCOPE_GLOBAL,
       per_minute,
       skip_prefixes: GLOBAL_OVERRIDE_PREFIXES,
+      mutation_skip_prefixes: GLOBAL_OVERRIDE_MUTATION_PREFIXES,
+      mutations_only: false,
     }
   }
 
@@ -183,6 +262,16 @@ impl RateLimitLayer {
   /// page layer skips `/pedido/status-proc` which has its own tighter scope.
   pub fn with_skips(mut self, prefixes: &'static [&'static str]) -> Self {
     self.skip_prefixes = prefixes;
+    self
+  }
+
+  /// Only enforce on mutating requests (form `POST`s, procedures), so a
+  /// strict budget on e.g. `POST /two-factor` does not also throttle
+  /// rendering `GET /two-factor`. Pair with an entry in
+  /// [`GLOBAL_OVERRIDE_MUTATION_PREFIXES`] so the global layer still
+  /// counts the `GET`s.
+  pub fn mutations_only(mut self) -> Self {
+    self.mutations_only = true;
     self
   }
 }
@@ -200,12 +289,21 @@ impl topcoat::router::Layer for RateLimitLayer {
   ) -> topcoat::router::LayerFuture<'a> {
     Box::pin(async move {
       let req_path = topcoat::router::request::uri(cx).path().to_owned();
+      let mutation = is_mutation(topcoat::router::request::method(cx));
+      if self.mutations_only && !mutation {
+        return next.run(cx, body).await;
+      }
       // True override: a scoped layer owns this path, let it enforce.
-      if self
+      let owned_elsewhere = self
         .skip_prefixes
         .iter()
         .any(|prefix| path_starts_with(&req_path, prefix))
-      {
+        || (mutation
+          && self
+            .mutation_skip_prefixes
+            .iter()
+            .any(|prefix| path_starts_with(&req_path, prefix)));
+      if owned_elsewhere {
         return next.run(cx, body).await;
       }
       let budget = limit_for(self.scope, self.per_minute);
@@ -220,6 +318,39 @@ impl topcoat::router::Layer for RateLimitLayer {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn form_limits_and_mutation_overrides_stay_in_sync() {
+    let paths: Vec<&str> =
+      FORM_RATE_LIMITS.iter().map(|(path, _, _)| *path).collect();
+    assert_eq!(paths, GLOBAL_OVERRIDE_MUTATION_PREFIXES);
+    // HTML twins share the API scopes (one bucket per abuse surface).
+    for (path, scope) in [
+      ("/forgot-password", SCOPE_PASSWORD_RESET),
+      ("/reset-password", SCOPE_PASSWORD_RESET),
+      ("/check-email/resend", SCOPE_VERIFY_EMAIL),
+      ("/verify-email/resend", SCOPE_VERIFY_EMAIL),
+      ("/two-factor", SCOPE_TOTP),
+      ("/carrinho/cupom", SCOPE_COUPON),
+    ] {
+      assert!(
+        FORM_RATE_LIMITS
+          .iter()
+          .any(|(p, s, _)| *p == path && *s == scope),
+        "{path} must be limited under {scope}"
+      );
+    }
+  }
+
+  #[test]
+  fn only_unsafe_methods_are_mutations() {
+    assert!(!is_mutation(&http::Method::GET));
+    assert!(!is_mutation(&http::Method::HEAD));
+    assert!(!is_mutation(&http::Method::OPTIONS));
+    assert!(is_mutation(&http::Method::POST));
+    assert!(is_mutation(&http::Method::PUT));
+    assert!(is_mutation(&http::Method::DELETE));
+  }
 
   #[test]
   fn path_prefix_is_segment_aware() {

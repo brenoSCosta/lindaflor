@@ -68,6 +68,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
       {
         tracing::error!(error = %error, "reservation sweep failed");
       }
+      // Stale guest carts + expired verification rows (bounded batches).
+      match lindaflor::maintenance::sweep_stale_rows(&sweep_pool).await {
+        Ok(outcome) if outcome.carts > 0 || outcome.verifications > 0 => {
+          tracing::info!(
+            carts = outcome.carts,
+            verifications = outcome.verifications,
+            "data hygiene sweep"
+          );
+        }
+        Ok(_) => {}
+        Err(error) => {
+          tracing::error!(error = %error, "data hygiene sweep failed");
+        }
+      }
       // Drop replenished governor buckets so the per-IP key maps do not
       // grow with every distinct IP ever seen.
       lindaflor::rate_limit::prune_limiters();

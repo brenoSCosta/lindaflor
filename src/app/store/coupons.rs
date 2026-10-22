@@ -96,7 +96,7 @@ pub struct ResolvedCoupon {
 }
 
 /// User-facing message for [`CouponReject::Gone`].
-pub const COUPON_GONE_MESSAGE: &str = "Cupom inválido.";
+pub const COUPON_GONE_MESSAGE: &str = INVALID_COUPON_MESSAGE;
 
 pub enum CouponReject {
   /// The code doesn't exist or the coupon was deactivated. Checkout drops it
@@ -112,12 +112,21 @@ impl From<sqlx::Error> for CouponReject {
   }
 }
 
+/// Generic reject shared by every "no usable coupon for you" outcome.
+pub const INVALID_COUPON_MESSAGE: &str = "Cupom inválido.";
+
+fn invalid_coupon() -> CouponReject {
+  CouponReject::Invalid(INVALID_COUPON_MESSAGE.to_string())
+}
+
 /// Validate a coupon code against the DB and compute its discount.
 ///
 /// Checks, in order: code lookup (case-insensitive), `active` flag and
-/// `starts_at`/`expires_at` window, `min_subtotal_cents`, assignment
-/// restriction (when the coupon has any `coupon_assignments` rows only the
-/// assigned logged-in user may use it — guests are rejected), global
+/// `starts_at`/`expires_at` window, assignment restriction (when the coupon
+/// has any `coupon_assignments` rows only the assigned logged-in user may
+/// use it — guests are rejected); all of these share the generic
+/// [`INVALID_COUPON_MESSAGE`] so codes can't be enumerated. Then
+/// `min_subtotal_cents`, global
 /// `COUNT(*) vs effective_max_uses` (`unique` counts as 1 even when
 /// `max_uses` is NULL), and per-identity `COUNT(*) vs per_user_limit`
 /// matching `user_id = $uid OR email_norm = $email`, where the email is the
@@ -154,6 +163,11 @@ pub async fn resolve_coupon(
   .fetch_optional(&mut **tx)
   .await?;
 
+  // Enumeration guard: every reject before the shopper has a legitimate
+  // match (unknown, inactive, not started, expired, assigned to someone
+  // else) is the same generic message, so brute-forcing codes can't tell
+  // "exists" from "doesn't". Specific messages (minimum subtotal, usage
+  // caps) only come after the code is known to be usable by this shopper.
   let Some(coupon) = coupon else {
     return Err(CouponReject::Gone);
   };
@@ -164,22 +178,13 @@ pub async fn resolve_coupon(
     return Err(CouponReject::Gone);
   }
   let now = time::OffsetDateTime::now_utc();
-  if coupon.starts_at.is_some_and(|starts_at| starts_at > now) {
-    return Err(CouponReject::Invalid(
-      "Este cupom ainda não está válido.".to_string(),
-    ));
-  }
-  if coupon
-    .expires_at
-    .is_some_and(|expires_at| expires_at <= now)
+  if !coupon.active
+    || coupon.starts_at.is_some_and(|starts_at| starts_at > now)
+    || coupon
+      .expires_at
+      .is_some_and(|expires_at| expires_at <= now)
   {
-    return Err(CouponReject::Invalid("Cupom expirado.".to_string()));
-  }
-  if subtotal_cents < coupon.min_subtotal_cents {
-    return Err(CouponReject::Invalid(format!(
-      "Este cupom exige uma compra mínima de {}.",
-      format_price(coupon.min_subtotal_cents)
-    )));
+    return Err(invalid_coupon());
   }
 
   let assignment_count: i64 = sqlx::query_scalar(
@@ -191,10 +196,7 @@ pub async fn resolve_coupon(
 
   if assignment_count > 0 {
     let Some(uid) = user_id else {
-      return Err(CouponReject::Invalid(
-        "Este cupom é restrito a contas específicas. Entre para usá-lo."
-          .to_string(),
-      ));
+      return Err(invalid_coupon());
     };
     let is_member: bool = sqlx::query_scalar(
       "SELECT EXISTS(SELECT 1 FROM coupon_assignments WHERE coupon_id = $1 AND user_id = $2)",
@@ -204,10 +206,15 @@ pub async fn resolve_coupon(
     .fetch_one(&mut **tx)
     .await?;
     if !is_member {
-      return Err(CouponReject::Invalid(
-        "Este cupom não está disponível para a sua conta.".to_string(),
-      ));
+      return Err(invalid_coupon());
     }
+  }
+
+  if subtotal_cents < coupon.min_subtotal_cents {
+    return Err(CouponReject::Invalid(format!(
+      "Este cupom exige uma compra mínima de {}.",
+      format_price(coupon.min_subtotal_cents)
+    )));
   }
 
   if let Some(cap) = coupon.effective_max_uses() {
@@ -626,7 +633,7 @@ mod tests {
   }
 
   #[tokio::test]
-  async fn future_start_and_past_expiry_messages() {
+  async fn future_start_and_past_expiry_are_generic_invalid() {
     let pool = crate::test_support::fresh_pool().await;
     let mut tx = pool.begin().await.expect("begin tx");
     let now = time::OffsetDateTime::now_utc();
@@ -639,7 +646,7 @@ mod tests {
       resolve_coupon(&mut tx, &future_code, 5_000, None, Some("g@x.co"), false)
         .await,
     );
-    assert_eq!(message, "Este cupom ainda não está válido.");
+    assert_eq!(message, INVALID_COUPON_MESSAGE);
 
     let expired_code = unique_code("old");
     let mut expired = new_coupon(&expired_code);
@@ -656,7 +663,7 @@ mod tests {
       )
       .await,
     );
-    assert_eq!(message, "Cupom expirado.");
+    assert_eq!(message, INVALID_COUPON_MESSAGE);
 
     tx.rollback().await.expect("rollback");
   }
@@ -776,10 +783,7 @@ mod tests {
       )
       .await,
     );
-    assert_eq!(
-      guest,
-      "Este cupom é restrito a contas específicas. Entre para usá-lo."
-    );
+    assert_eq!(guest, INVALID_COUPON_MESSAGE);
 
     let rejected = unwrap_invalid(
       resolve_coupon(
@@ -792,7 +796,37 @@ mod tests {
       )
       .await,
     );
-    assert_eq!(rejected, "Este cupom não está disponível para a sua conta.");
+    assert_eq!(rejected, INVALID_COUPON_MESSAGE);
+
+    // The minimum-subtotal message would confirm the code exists, so an
+    // outsider below the minimum still gets the generic reject.
+    sqlx::query("UPDATE coupons SET min_subtotal_cents = 50000 WHERE id = $1")
+      .bind(coupon_id)
+      .execute(&mut *tx)
+      .await
+      .expect("raise minimum");
+    let below_min = unwrap_invalid(
+      resolve_coupon(
+        &mut tx,
+        &restricted_code,
+        100,
+        Some(outsider),
+        None,
+        false,
+      )
+      .await,
+    );
+    assert_eq!(below_min, INVALID_COUPON_MESSAGE);
+    let member_below_min = unwrap_invalid(
+      resolve_coupon(&mut tx, &restricted_code, 100, Some(member), None, false)
+        .await,
+    );
+    assert!(member_below_min.contains("compra mínima"));
+    sqlx::query("UPDATE coupons SET min_subtotal_cents = 0 WHERE id = $1")
+      .bind(coupon_id)
+      .execute(&mut *tx)
+      .await
+      .expect("reset minimum");
 
     let accepted = unwrap_coupon(
       resolve_coupon(

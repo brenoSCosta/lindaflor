@@ -210,10 +210,9 @@ fn limited(raw: &str, max: usize) -> Option<String> {
 fn validate_link(raw: &str) -> Result<Option<String>, &'static str> {
   match limited(raw, MAX_TEXT) {
     None => Ok(None),
-    Some(link) if link.starts_with('/') && !link.starts_with("//") => {
-      Ok(Some(link))
-    }
-    Some(_) => Err("O link deve ser um caminho interno, começando com /."),
+    Some(link) => crate::redirect::safe_local_redirect(&link)
+      .map(Some)
+      .ok_or("O link deve ser um caminho interno, começando com /."),
   }
 }
 
@@ -339,5 +338,7 @@ mod tests {
     );
     assert!(validate_link("https://evil.example").is_err());
     assert!(validate_link("//evil.example").is_err());
+    assert!(validate_link("/\\evil.example").is_err());
+    assert!(validate_link("/\t/evil.example").is_err());
   }
 }

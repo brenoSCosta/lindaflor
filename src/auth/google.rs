@@ -171,12 +171,9 @@ pub async fn fetch_userinfo(
 
 /// Normalize a post-login callback path (relative only; blocks open redirects).
 pub fn safe_callback_path(callback: Option<&str>) -> String {
-  match callback.map(str::trim).filter(|s| !s.is_empty()) {
-    Some(path) if path.starts_with('/') && !path.starts_with("//") => {
-      path.to_string()
-    }
-    _ => "/dashboard".to_string(),
-  }
+  callback
+    .and_then(crate::redirect::safe_local_redirect)
+    .unwrap_or_else(|| "/dashboard".to_string())
 }
 
 #[cfg(test)]
@@ -229,5 +226,7 @@ mod tests {
     assert_eq!(safe_callback_path(Some("https://evil.test")), "/dashboard");
     assert_eq!(safe_callback_path(Some("//evil.test")), "/dashboard");
     assert_eq!(safe_callback_path(None), "/dashboard");
+    assert_eq!(safe_callback_path(Some("/\\evil.test")), "/dashboard");
+    assert_eq!(safe_callback_path(Some("/\t/evil.test")), "/dashboard");
   }
 }
