@@ -37,39 +37,14 @@ pub const MERCADO_PAGO_ACTOR: Actor<'static> = Actor {
 /// approval still lands through the webhook as `ReopenPay`).
 const SWEEP_GRACE_SECS: i64 = 3600;
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ServiceError {
-  Payment(PaymentError),
-  Apply(ApplyError),
-  Db(sqlx::Error),
-}
-
-impl From<PaymentError> for ServiceError {
-  fn from(error: PaymentError) -> Self {
-    Self::Payment(error)
-  }
-}
-
-impl From<ApplyError> for ServiceError {
-  fn from(error: ApplyError) -> Self {
-    Self::Apply(error)
-  }
-}
-
-impl From<sqlx::Error> for ServiceError {
-  fn from(error: sqlx::Error) -> Self {
-    Self::Db(error)
-  }
-}
-
-impl std::fmt::Display for ServiceError {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      Self::Payment(error) => write!(f, "{error}"),
-      Self::Apply(error) => write!(f, "{error}"),
-      Self::Db(error) => write!(f, "{error}"),
-    }
-  }
+  #[error(transparent)]
+  Payment(#[from] PaymentError),
+  #[error(transparent)]
+  Apply(#[from] ApplyError),
+  #[error(transparent)]
+  Db(#[from] sqlx::Error),
 }
 
 /// Result of applying a PSP payment state to its order.

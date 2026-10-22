@@ -28,27 +28,12 @@ pub(crate) const LIVE_AVAILABLE_SQL: &str =
       AND o.status = 'pending_payment'
       AND o.reservation_expires_at < now()), 0), 0), 0)";
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum InventoryError {
+  #[error("Estoque insuficiente para concluir o pedido.")]
   Insufficient,
-  Db(sqlx::Error),
-}
-
-impl From<sqlx::Error> for InventoryError {
-  fn from(error: sqlx::Error) -> Self {
-    Self::Db(error)
-  }
-}
-
-impl std::fmt::Display for InventoryError {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      Self::Insufficient => {
-        write!(f, "Estoque insuficiente para concluir o pedido.")
-      }
-      Self::Db(error) => write!(f, "{error}"),
-    }
-  }
+  #[error(transparent)]
+  Db(#[from] sqlx::Error),
 }
 
 pub struct ReserveLine {

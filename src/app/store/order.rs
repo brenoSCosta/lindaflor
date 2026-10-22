@@ -89,24 +89,24 @@ impl OrderEvent {
   }
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ApplyError {
+  #[error("Pedido não encontrado.")]
   NotFound,
+  #[error("Transição inválida: {} + {:?}.", .from.as_str(), .event)]
   Illegal {
     from: OrderStatus,
     event: OrderEvent,
   },
+  #[error("Estoque insuficiente para reabrir o pedido.")]
   InsufficientStock,
   /// `Ship` without a tracking code.
+  #[error("Informe o código de rastreio para marcar como enviado.")]
   TrackingRequired,
+  #[error("{0}")]
   InvalidTracking(&'static str),
-  Db(sqlx::Error),
-}
-
-impl From<sqlx::Error> for ApplyError {
-  fn from(error: sqlx::Error) -> Self {
-    Self::Db(error)
-  }
+  #[error(transparent)]
+  Db(#[from] sqlx::Error),
 }
 
 impl From<InventoryError> for ApplyError {
@@ -114,25 +114,6 @@ impl From<InventoryError> for ApplyError {
     match error {
       InventoryError::Insufficient => Self::InsufficientStock,
       InventoryError::Db(error) => Self::Db(error),
-    }
-  }
-}
-
-impl std::fmt::Display for ApplyError {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      Self::NotFound => write!(f, "Pedido não encontrado."),
-      Self::Illegal { from, event } => {
-        write!(f, "Transição inválida: {} + {:?}.", from.as_str(), event)
-      }
-      Self::InsufficientStock => {
-        write!(f, "Estoque insuficiente para reabrir o pedido.")
-      }
-      Self::TrackingRequired => {
-        write!(f, "Informe o código de rastreio para marcar como enviado.")
-      }
-      Self::InvalidTracking(message) => write!(f, "{message}"),
-      Self::Db(error) => write!(f, "{error}"),
     }
   }
 }

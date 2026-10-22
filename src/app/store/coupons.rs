@@ -98,18 +98,16 @@ pub struct ResolvedCoupon {
 /// User-facing message for [`CouponReject::Gone`].
 pub const COUPON_GONE_MESSAGE: &str = INVALID_COUPON_MESSAGE;
 
+#[derive(Debug, thiserror::Error)]
 pub enum CouponReject {
   /// The code doesn't exist or the coupon was deactivated. Checkout drops it
   /// from the cart instead of blocking the order.
+  #[error("{}", COUPON_GONE_MESSAGE)]
   Gone,
+  #[error("{0}")]
   Invalid(String),
-  Db(sqlx::Error),
-}
-
-impl From<sqlx::Error> for CouponReject {
-  fn from(error: sqlx::Error) -> Self {
-    Self::Db(error)
-  }
+  #[error(transparent)]
+  Db(#[from] sqlx::Error),
 }
 
 /// Generic reject shared by every "no usable coupon for you" outcome.

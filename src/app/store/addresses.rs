@@ -102,32 +102,18 @@ struct ValidAddress {
   phone: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum AddressError {
+  #[error("{0}")]
   Invalid(String),
+  #[error("Endereço não encontrado.")]
   NotFound,
+  #[error(
+    "Você pode salvar até {MAX_ADDRESSES_PER_USER} endereços. Remova um para adicionar outro."
+  )]
   LimitReached,
-  Db(sqlx::Error),
-}
-
-impl From<sqlx::Error> for AddressError {
-  fn from(error: sqlx::Error) -> Self {
-    Self::Db(error)
-  }
-}
-
-impl std::fmt::Display for AddressError {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      Self::Invalid(message) => write!(f, "{message}"),
-      Self::NotFound => write!(f, "Endereço não encontrado."),
-      Self::LimitReached => write!(
-        f,
-        "Você pode salvar até {MAX_ADDRESSES_PER_USER} endereços. Remova um para adicionar outro."
-      ),
-      Self::Db(error) => write!(f, "{error}"),
-    }
-  }
+  #[error(transparent)]
+  Db(#[from] sqlx::Error),
 }
 
 fn required(

@@ -79,52 +79,24 @@ pub struct CartRef {
   pub token: Uuid,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum CartError {
+  #[error("Variação inválida.")]
   InvalidVariant,
+  #[error("Esta peça está esgotada.")]
   OutOfStock,
-  Db(sqlx::Error),
+  #[error(transparent)]
+  Db(#[from] sqlx::Error),
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum QuoteError {
+  #[error("Seu carrinho está vazio.")]
   Empty,
+  #[error("Estoque insuficiente para concluir o pedido.")]
   Insufficient,
-  Db(sqlx::Error),
-}
-
-impl From<sqlx::Error> for QuoteError {
-  fn from(error: sqlx::Error) -> Self {
-    Self::Db(error)
-  }
-}
-
-impl std::fmt::Display for QuoteError {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      Self::Empty => write!(f, "Seu carrinho está vazio."),
-      Self::Insufficient => {
-        write!(f, "Estoque insuficiente para concluir o pedido.")
-      }
-      Self::Db(error) => write!(f, "{error}"),
-    }
-  }
-}
-
-impl From<sqlx::Error> for CartError {
-  fn from(error: sqlx::Error) -> Self {
-    Self::Db(error)
-  }
-}
-
-impl std::fmt::Display for CartError {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      Self::InvalidVariant => write!(f, "Variação inválida."),
-      Self::OutOfStock => write!(f, "Esta peça está esgotada."),
-      Self::Db(error) => write!(f, "{error}"),
-    }
-  }
+  #[error(transparent)]
+  Db(#[from] sqlx::Error),
 }
 
 fn is_development() -> bool {

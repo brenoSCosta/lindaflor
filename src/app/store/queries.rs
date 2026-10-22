@@ -363,23 +363,8 @@ pub async fn list_products_with_filters(
     limit,
     offset,
   } = query;
-  let mut sql = String::from(
-    "SELECT p.id, p.name, p.slug, p.price_in_cents, p.compare_at_price_in_cents, p.category::text AS category,
-            (SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.sort_order ASC LIMIT 1) AS image_url,
-            (SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.sort_order ASC LIMIT 1 OFFSET 1) AS secondary_image_url,
-            COALESCE((SELECT SUM(GREATEST(i.quantity - i.reserved, 0))::int
-                FROM inventory i
-                INNER JOIN warehouses w ON w.id = i.warehouse_id
-                WHERE i.variant_id IN (SELECT pv.id FROM product_variants pv WHERE pv.product_id = p.id)
-                  AND w.active = true), 0) AS available_total,
-            COALESCE(
-              (SELECT json_agg(json_build_array(pv.color, pv.color_hex) ORDER BY pv.color ASC)
-               FROM (SELECT DISTINCT ON (pv.color) pv.color, pv.color_hex
-                     FROM product_variants pv
-                     WHERE pv.product_id = p.id
-                     ORDER BY pv.color ASC, pv.color_hex ASC) pv),
-              '[]'::json
-            )::text AS colors_json
+  let mut sql = format!(
+    "SELECT {PRODUCT_SUMMARY_COLUMNS}
      FROM products p
      WHERE p.active = true"
   );
@@ -526,26 +511,11 @@ pub async fn list_products(
   limit: i64,
   offset: i64,
 ) -> Result<Vec<ProductSummary>, sqlx::Error> {
-  let mut sql = String::from(
-        "SELECT p.id, p.name, p.slug, p.price_in_cents, p.compare_at_price_in_cents, p.category::text AS category,
-            (SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.sort_order ASC LIMIT 1) AS image_url,
-            (SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.sort_order ASC LIMIT 1 OFFSET 1) AS secondary_image_url,
-            COALESCE((SELECT SUM(GREATEST(i.quantity - i.reserved, 0))::int
-                FROM inventory i
-                INNER JOIN warehouses w ON w.id = i.warehouse_id
-                WHERE i.variant_id IN (SELECT pv.id FROM product_variants pv WHERE pv.product_id = p.id)
-                  AND w.active = true), 0) AS available_total,
-            COALESCE(
-              (SELECT json_agg(json_build_array(pv.color, pv.color_hex) ORDER BY pv.color ASC)
-               FROM (SELECT DISTINCT ON (pv.color) pv.color, pv.color_hex
-                     FROM product_variants pv
-                     WHERE pv.product_id = p.id
-                     ORDER BY pv.color ASC, pv.color_hex ASC) pv),
-              '[]'::json
-            )::text AS colors_json
+  let mut sql = format!(
+    "SELECT {PRODUCT_SUMMARY_COLUMNS}
          FROM products p
          WHERE p.active = true",
-    );
+  );
 
   let mut param_index = 1;
   append_product_filters(
@@ -606,34 +576,20 @@ pub async fn list_related_products(
   product_id: Uuid,
   category: &str,
 ) -> Result<Vec<ProductSummary>, sqlx::Error> {
-  let rows = sqlx::query_as::<_, ProductSummaryRow>(
-    "SELECT p.id, p.name, p.slug, p.price_in_cents, p.compare_at_price_in_cents, p.category::text AS category,
-            (SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.sort_order ASC LIMIT 1) AS image_url,
-            (SELECT pi.url FROM product_images pi WHERE pi.product_id = p.id ORDER BY pi.sort_order ASC LIMIT 1 OFFSET 1) AS secondary_image_url,
-            COALESCE((SELECT SUM(GREATEST(i.quantity - i.reserved, 0))::int
-                FROM inventory i
-                INNER JOIN warehouses w ON w.id = i.warehouse_id
-                WHERE i.variant_id IN (SELECT pv.id FROM product_variants pv WHERE pv.product_id = p.id)
-                  AND w.active = true), 0) AS available_total,
-            COALESCE(
-              (SELECT json_agg(json_build_array(pv.color, pv.color_hex) ORDER BY pv.color ASC)
-               FROM (SELECT DISTINCT ON (pv.color) pv.color, pv.color_hex
-                     FROM product_variants pv
-                     WHERE pv.product_id = p.id
-                     ORDER BY pv.color ASC, pv.color_hex ASC) pv),
-              '[]'::json
-            )::text AS colors_json
+  let sql = format!(
+    "SELECT {PRODUCT_SUMMARY_COLUMNS}
      FROM products p
      WHERE p.active = true
        AND p.category = $1::product_category
        AND p.id != $2
      ORDER BY p.featured DESC, p.created_at DESC
-     LIMIT 4",
-  )
-  .bind(category)
-  .bind(product_id)
-  .fetch_all(pool)
-  .await?;
+     LIMIT 4"
+  );
+  let rows = sqlx::query_as::<_, ProductSummaryRow>(&sql)
+    .bind(category)
+    .bind(product_id)
+    .fetch_all(pool)
+    .await?;
   Ok(rows.into_iter().map(|r| r.into()).collect())
 }
 

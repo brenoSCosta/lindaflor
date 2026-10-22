@@ -2,6 +2,7 @@ pub mod addresses;
 pub mod cart;
 pub mod cart_sheet;
 pub mod catalog_filters;
+pub mod checkout_service;
 pub mod coupons;
 pub mod hero;
 pub mod inventory;

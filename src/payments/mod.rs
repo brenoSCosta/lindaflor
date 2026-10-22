@@ -102,17 +102,22 @@ pub struct PaymentInfo {
   pub amount_cents: Option<i64>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum PaymentError {
   /// Circuit breaker open: failed fast without calling the PSP.
+  #[error("{}", PAYMENT_UNAVAILABLE_MESSAGE)]
   Unavailable,
   /// 5xx / timeout / connection failure after the retry budget.
+  #[error("{}", PAYMENT_UNAVAILABLE_MESSAGE)]
   Transient(String),
   /// 4xx from the PSP (never retried).
+  #[error("O Mercado Pago recusou a operação (HTTP {status}).")]
   Rejected { status: u16, message: String },
   /// 2xx with a body we could not understand.
+  #[error("Resposta inválida do Mercado Pago.")]
   Decode(String),
   /// The configured provider cannot perform this operation.
+  #[error("Operação indisponível para este meio de pagamento.")]
   NotSupported,
 }
 
@@ -121,25 +126,6 @@ impl PaymentError {
     matches!(self, Self::Unavailable | Self::Transient(_))
   }
 }
-
-impl std::fmt::Display for PaymentError {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      Self::Unavailable | Self::Transient(_) => {
-        write!(f, "{PAYMENT_UNAVAILABLE_MESSAGE}")
-      }
-      Self::Rejected { status, .. } => {
-        write!(f, "O Mercado Pago recusou a operação (HTTP {status}).")
-      }
-      Self::Decode(_) => write!(f, "Resposta inválida do Mercado Pago."),
-      Self::NotSupported => {
-        write!(f, "Operação indisponível para este meio de pagamento.")
-      }
-    }
-  }
-}
-
-impl std::error::Error for PaymentError {}
 
 impl PaymentProvider {
   pub fn from_config(cfg: &PaymentConfig) -> Self {
