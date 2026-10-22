@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE users\n        SET\n            name = $2,\n            email_verified = true,\n            two_factor_enabled = false,\n            image = COALESCE($3, image),\n            updated_at = now()\n        WHERE id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3060aa1885c91436338e0ba66d6ac5309c5c01dc142696d66dad7ce9c8c1a77a"
+}

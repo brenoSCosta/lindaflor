@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE sessions\n        SET expires_at = CASE\n                WHEN impersonated_by IS NULL THEN $2\n                ELSE LEAST(expires_at, $2)\n            END,\n            updated_at = now()\n        WHERE token = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamp"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "93afc4d38ca7c6c608851ee2d3e28d553c9749f22912c62dd30ea45e2b8626cb"
+}
