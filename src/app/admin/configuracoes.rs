@@ -7,7 +7,6 @@ use topcoat::{
   router::{content::Form, href, page, response::Response, route},
   view::{View, ViewExt, attributes, view},
 };
-use uuid::Uuid;
 
 use crate::app::auth_helpers::require_admin;
 use crate::app::store::queries::{
@@ -268,67 +267,79 @@ async fn save_settings(
     Err(message) => return fail(message),
   };
 
-  let existing_id: Option<Uuid> = sqlx::query_scalar(
-    "SELECT id FROM store_settings ORDER BY created_at ASC LIMIT 1",
+  upsert_store_settings(
+    pool,
+    &SettingsWrite {
+      pix_key: pix_key.as_deref(),
+      pix_key_type: pix_key_type.as_deref(),
+      pix_merchant_name: pix_merchant_name.as_deref(),
+      pix_merchant_city: pix_merchant_city.as_deref(),
+      pix_discount_percent: pix_discount_percent as i16,
+      announcement_text: announcement_text.as_deref(),
+      first_purchase_coupon_code: first_purchase_coupon_code.as_deref(),
+      whatsapp_number: whatsapp_number.as_deref(),
+      whatsapp_message_template: whatsapp_message_template.as_deref(),
+      free_shipping_threshold_cents: threshold,
+    },
   )
-  .fetch_optional(pool)
   .await?;
-
-  if let Some(id) = existing_id {
-    sqlx::query(
-      "UPDATE store_settings SET
-            pix_key = $2,
-            pix_key_type = $3::pix_key_type,
-            pix_merchant_name = $4,
-            pix_merchant_city = $5,
-            pix_discount_percent = $6,
-            announcement_text = $7,
-            first_purchase_coupon_code = $8,
-            whatsapp_number = $9,
-            whatsapp_message_template = $10,
-            free_shipping_threshold_cents = $11,
-            updated_at = now()
-         WHERE id = $1",
-    )
-    .bind(id)
-    .bind(pix_key.as_deref())
-    .bind(pix_key_type.as_deref())
-    .bind(pix_merchant_name.as_deref())
-    .bind(pix_merchant_city.as_deref())
-    .bind(pix_discount_percent as i16)
-    .bind(announcement_text.as_deref())
-    .bind(first_purchase_coupon_code.as_deref())
-    .bind(whatsapp_number.as_deref())
-    .bind(whatsapp_message_template.as_deref())
-    .bind(threshold)
-    .execute(pool)
-    .await?;
-  } else {
-    sqlx::query(
-      "INSERT INTO store_settings (
-            id, pix_key, pix_key_type, pix_merchant_name, pix_merchant_city,
-            pix_discount_percent, announcement_text, first_purchase_coupon_code,
-            whatsapp_number, whatsapp_message_template, free_shipping_threshold_cents,
-            created_at, updated_at
-         ) VALUES ($1, $2, $3::pix_key_type, $4, $5, $6, $7, $8, $9, $10, $11, now(), now())",
-    )
-    .bind(Uuid::now_v7())
-    .bind(pix_key.as_deref())
-    .bind(pix_key_type.as_deref())
-    .bind(pix_merchant_name.as_deref())
-    .bind(pix_merchant_city.as_deref())
-    .bind(pix_discount_percent as i16)
-    .bind(announcement_text.as_deref())
-    .bind(first_purchase_coupon_code.as_deref())
-    .bind(whatsapp_number.as_deref())
-    .bind(whatsapp_message_template.as_deref())
-    .bind(threshold)
-    .execute(pool)
-    .await?;
-  }
 
   set_toast(cx, Toast::success("Configurações salvas com sucesso."));
   toast_redirect(cx, back)
+}
+
+struct SettingsWrite<'a> {
+  pix_key: Option<&'a str>,
+  pix_key_type: Option<&'a str>,
+  pix_merchant_name: Option<&'a str>,
+  pix_merchant_city: Option<&'a str>,
+  pix_discount_percent: i16,
+  announcement_text: Option<&'a str>,
+  first_purchase_coupon_code: Option<&'a str>,
+  whatsapp_number: Option<&'a str>,
+  whatsapp_message_template: Option<&'a str>,
+  free_shipping_threshold_cents: i64,
+}
+
+/// `store_settings` is a singleton (`id` is always `true`, migration 0019),
+/// so a single upsert is race-free: concurrent saves never create a second row.
+async fn upsert_store_settings(
+  pool: &PgPool,
+  settings: &SettingsWrite<'_>,
+) -> Result<(), sqlx::Error> {
+  sqlx::query(
+    "INSERT INTO store_settings (
+          id, pix_key, pix_key_type, pix_merchant_name, pix_merchant_city,
+          pix_discount_percent, announcement_text, first_purchase_coupon_code,
+          whatsapp_number, whatsapp_message_template, free_shipping_threshold_cents,
+          created_at, updated_at
+       ) VALUES (true, $1, $2::pix_key_type, $3, $4, $5, $6, $7, $8, $9, $10, now(), now())
+       ON CONFLICT (id) DO UPDATE SET
+          pix_key = EXCLUDED.pix_key,
+          pix_key_type = EXCLUDED.pix_key_type,
+          pix_merchant_name = EXCLUDED.pix_merchant_name,
+          pix_merchant_city = EXCLUDED.pix_merchant_city,
+          pix_discount_percent = EXCLUDED.pix_discount_percent,
+          announcement_text = EXCLUDED.announcement_text,
+          first_purchase_coupon_code = EXCLUDED.first_purchase_coupon_code,
+          whatsapp_number = EXCLUDED.whatsapp_number,
+          whatsapp_message_template = EXCLUDED.whatsapp_message_template,
+          free_shipping_threshold_cents = EXCLUDED.free_shipping_threshold_cents,
+          updated_at = now()",
+  )
+  .bind(settings.pix_key)
+  .bind(settings.pix_key_type)
+  .bind(settings.pix_merchant_name)
+  .bind(settings.pix_merchant_city)
+  .bind(settings.pix_discount_percent)
+  .bind(settings.announcement_text)
+  .bind(settings.first_purchase_coupon_code)
+  .bind(settings.whatsapp_number)
+  .bind(settings.whatsapp_message_template)
+  .bind(settings.free_shipping_threshold_cents)
+  .execute(pool)
+  .await?;
+  Ok(())
 }
 
 fn format_price_input(cents: i64) -> String {
@@ -398,4 +409,68 @@ fn parse_pix_discount_percent(raw: &str) -> Result<u32, &'static str> {
     return Err("Desconto PIX deve estar entre 0 e 30%.");
   }
   Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn settings(city: &str) -> SettingsWrite<'_> {
+    SettingsWrite {
+      pix_key: Some("79999816511"),
+      pix_key_type: Some("phone"),
+      pix_merchant_name: Some("Linda Flor"),
+      pix_merchant_city: Some(city),
+      pix_discount_percent: 5,
+      announcement_text: None,
+      first_purchase_coupon_code: None,
+      whatsapp_number: None,
+      whatsapp_message_template: None,
+      free_shipping_threshold_cents: DEFAULT_FREE_SHIPPING_THRESHOLD_CENTS,
+    }
+  }
+
+  #[tokio::test]
+  async fn concurrent_saves_leave_one_settings_row() {
+    // Own database: these saves overwrite the PIX settings other tests use.
+    let pool = crate::test_support::isolated_pool().await;
+    let cities = ["Aracaju", "Estância", "Lagarto", "Itabaiana"];
+    let saves = cities.map(|city| {
+      let pool = pool.clone();
+      tokio::spawn(async move {
+        upsert_store_settings(&pool, &settings(city)).await
+      })
+    });
+    for save in saves {
+      save.await.expect("join").expect("save settings");
+    }
+
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM store_settings")
+      .fetch_one(&pool)
+      .await
+      .expect("count settings");
+    assert_eq!(rows, 1);
+    let stored = get_store_settings(&pool).await.expect("read settings");
+    assert!(
+      cities.contains(&stored.pix_merchant_city.as_deref().unwrap_or("")),
+      "unexpected city: {:?}",
+      stored.pix_merchant_city
+    );
+  }
+
+  #[tokio::test]
+  async fn singleton_key_rejects_a_second_row() {
+    let pool = crate::test_support::isolated_pool().await;
+    upsert_store_settings(&pool, &settings("Aracaju"))
+      .await
+      .expect("first save");
+    let inserted =
+      sqlx::query("INSERT INTO store_settings (id) VALUES (false)")
+        .execute(&pool)
+        .await;
+    assert!(
+      inserted.is_err(),
+      "id = false must violate the singleton check"
+    );
+  }
 }

@@ -321,6 +321,9 @@ async fn create_product(cx: &Cx, multipart: Multipart) -> Result<Response> {
     Err(_) => return fail("Não foi possível salvar. Tente novamente."),
   };
 
+  // Product, variants and inventory land together or not at all (dropping
+  // `tx` on an early return rolls back). Images are uploaded after commit.
+  let mut tx = pool.begin().await?;
   let product_id = Uuid::now_v7();
   if let Err(err) = sqlx::query(
     "INSERT INTO products (id, name, slug, description, price_in_cents, compare_at_price_in_cents, category, active, featured, created_at, updated_at)
@@ -334,7 +337,7 @@ async fn create_product(cx: &Cx, multipart: Multipart) -> Result<Response> {
   .bind(compare_at_price)
   .bind(&category)
   .bind(featured)
-  .execute(pool)
+  .execute(&mut *tx)
   .await
   {
     return fail(&db_error_message(&err));
@@ -352,16 +355,12 @@ async fn create_product(cx: &Cx, multipart: Multipart) -> Result<Response> {
     .bind(&variant.size)
     .bind(&variant.color)
     .bind(&variant.color_hex)
-    .execute(pool)
+    .execute(&mut *tx)
     .await;
     if let Err(err) = inserted {
-      let _ = sqlx::query("DELETE FROM products WHERE id = $1")
-        .bind(product_id)
-        .execute(pool)
-        .await;
       return fail(&db_error_message(&err));
     }
-    sqlx::query(
+    let stocked = sqlx::query(
       "INSERT INTO inventory (id, variant_id, warehouse_id, quantity, reserved, updated_at)
        VALUES ($1, $2, $3, $4, 0, now())",
     )
@@ -369,9 +368,13 @@ async fn create_product(cx: &Cx, multipart: Multipart) -> Result<Response> {
     .bind(variant_id)
     .bind(warehouse)
     .bind(variant.quantity)
-    .execute(pool)
-    .await?;
+    .execute(&mut *tx)
+    .await;
+    if let Err(err) = stocked {
+      return fail(&db_error_message(&err));
+    }
   }
+  tx.commit().await?;
 
   let mut image_failed = false;
   for (index, (content_type, bytes)) in form.files.iter().enumerate() {

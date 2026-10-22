@@ -1170,26 +1170,19 @@ mod tests {
   const DISCOUNT_CENTS: i64 = 1_500;
 
   async fn ensure_pix_settings(pool: &PgPool) {
-    sqlx::query(
-      "UPDATE store_settings SET pix_key = '79999816511',
-        pix_key_type = 'phone', pix_merchant_name = 'Linda Flor',
-        pix_merchant_city = 'Aracaju'",
-    )
-    .execute(pool)
-    .await
-    .expect("update pix settings");
+    // Singleton upsert: parallel tests can't create a second row.
     sqlx::query(
       "INSERT INTO store_settings
-        (id, pix_key, pix_key_type, pix_merchant_name, pix_merchant_city,
-         created_at, updated_at)
-       SELECT $1, '79999816511', 'phone', 'Linda Flor', 'Aracaju',
-         now(), now()
-       WHERE NOT EXISTS (SELECT 1 FROM store_settings)",
+        (id, pix_key, pix_key_type, pix_merchant_name, pix_merchant_city)
+       VALUES (true, '79999816511', 'phone', 'Linda Flor', 'Aracaju')
+       ON CONFLICT (id) DO UPDATE SET pix_key = EXCLUDED.pix_key,
+         pix_key_type = EXCLUDED.pix_key_type,
+         pix_merchant_name = EXCLUDED.pix_merchant_name,
+         pix_merchant_city = EXCLUDED.pix_merchant_city",
     )
-    .bind(Uuid::now_v7())
     .execute(pool)
     .await
-    .expect("insert pix settings");
+    .expect("upsert pix settings");
   }
 
   fn checkout_input(email: &str, code: &str) -> CheckoutInput {
@@ -1637,11 +1630,9 @@ mod tests {
 
     // Key without a type is still not configured.
     sqlx::query(
-      "INSERT INTO store_settings
-        (id, pix_key, pix_key_type, created_at, updated_at)
-       VALUES ($1, '79999816511', NULL, now(), now())",
+      "INSERT INTO store_settings (pix_key, pix_key_type)
+       VALUES ('79999816511', NULL)",
     )
-    .bind(Uuid::now_v7())
     .execute(&pool)
     .await
     .expect("insert partial settings");

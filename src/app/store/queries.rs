@@ -879,7 +879,7 @@ pub async fn get_store_settings(
 ) -> Result<StoreSettings, sqlx::Error> {
   let row = sqlx::query!(
         "SELECT whatsapp_number, whatsapp_message_template, pix_key, pix_key_type::text AS pix_key_type, pix_merchant_name, pix_merchant_city, free_shipping_threshold_cents, pix_discount_percent, announcement_text, first_purchase_coupon_code
-         FROM store_settings ORDER BY created_at ASC LIMIT 1"
+         FROM store_settings WHERE id"
     )
     .fetch_optional(pool)
     .await?;
