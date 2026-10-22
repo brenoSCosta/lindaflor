@@ -115,7 +115,9 @@ pub async fn page(
             }.boxed())
         }
     };
-  crate::seo::structured::set_product_head(cx, &product);
+  let rating =
+    crate::app::store::reviews::aggregate_rating(pool, product.id).await?;
+  crate::seo::structured::set_product_head(cx, &product, rating.as_ref());
 
   let settings = get_store_settings(pool).await?;
   let shipping_copy = if settings.free_shipping_threshold_cents <= 0 {

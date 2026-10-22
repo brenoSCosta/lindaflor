@@ -1,6 +1,7 @@
 //! Head builders for storefront pages: product / set Open Graph cards and
 //! schema.org JSON-LD (`Product`, `Organization`, `WebSite`).
 
+use crate::app::store::reviews::AggregateRating;
 use serde_json::{Value, json};
 use topcoat::context::Cx;
 
@@ -71,7 +72,11 @@ fn availability_url(in_stock: bool) -> &'static str {
 /// Head for `/produtos/{slug}`: title, description, canonical, Open Graph
 /// product card and a JSON-LD `Product` with a BRL `Offer`. Availability
 /// comes from the variants' live availability (any variant with stock).
-pub fn product_head(origin: &str, product: &ProductDetail) -> PageHead {
+pub fn product_head(
+  origin: &str,
+  product: &ProductDetail,
+  rating: Option<&AggregateRating>,
+) -> PageHead {
   let path = product_path(&product.slug);
   let url = absolute_url(origin, &path);
   let in_stock = product.variants.iter().any(|v| v.available > 0);
@@ -122,6 +127,16 @@ pub fn product_head(origin: &str, product: &ProductDetail) -> PageHead {
   }
   if let Some(sku) = sku {
     schema["sku"] = Value::from(sku);
+  }
+  // Approved reviews only (see `store::reviews::aggregate_rating`).
+  if let Some(rating) = rating {
+    schema["aggregateRating"] = json!({
+      "@type": "AggregateRating",
+      "ratingValue": rating.rating_average,
+      "reviewCount": rating.review_count,
+      "bestRating": 5,
+      "worstRating": 1,
+    });
   }
 
   PageHead::new(&product.name)
@@ -209,8 +224,12 @@ pub fn home_head(origin: &str) -> PageHead {
 }
 
 /// Sets the product page head (see [`product_head`]).
-pub fn set_product_head(cx: &Cx, product: &ProductDetail) {
-  super::set_head(cx, product_head(&site_origin(cx), product));
+pub fn set_product_head(
+  cx: &Cx,
+  product: &ProductDetail,
+  rating: Option<&AggregateRating>,
+) {
+  super::set_head(cx, product_head(&site_origin(cx), product, rating));
 }
 
 /// Sets the set page head (see [`set_head`]).
@@ -284,7 +303,7 @@ mod tests {
 
   #[test]
   fn product_schema_has_offer_in_brl() {
-    let head = product_head(ORIGIN, &product(3));
+    let head = product_head(ORIGIN, &product(3), None);
     let schema = &head.json_ld[0];
     assert_eq!(schema["@type"], "Product");
     assert_eq!(schema["brand"]["name"], "Lindaflor");
@@ -301,7 +320,7 @@ mod tests {
     );
     assert!(schema["image"][0].as_str().unwrap().starts_with("https://"));
 
-    let sold_out = product_head(ORIGIN, &product(0));
+    let sold_out = product_head(ORIGIN, &product(0), None);
     assert_eq!(
       sold_out.json_ld[0]["offers"]["availability"],
       "https://schema.org/OutOfStock"
@@ -310,9 +329,11 @@ mod tests {
 
   #[tokio::test]
   async fn product_page_head_contains_expected_tags() {
-    let html =
-      render_head(product_head(ORIGIN, &product(2)), "/produtos/biquini-sol")
-        .await;
+    let html = render_head(
+      product_head(ORIGIN, &product(2), None),
+      "/produtos/biquini-sol",
+    )
+    .await;
     for needle in [
       "<title>Biquíni &lt;/script&gt;&lt;script&gt;alert(1)&lt;/script&gt; | Linda Flor</title>",
       r#"<meta name="description" content="Top &quot;cortininha&quot; &amp; calcinha <lacinho>.">"#,
@@ -383,5 +404,19 @@ mod tests {
     );
     assert_eq!(og_image_url(ORIGIN, "products/a.jpg"), None);
     assert_eq!(og_image_url(ORIGIN, ""), None);
+  }
+
+  #[test]
+  fn product_json_ld_includes_aggregate_rating_when_reviewed() {
+    let rating = AggregateRating {
+      rating_average: 4.5,
+      review_count: 12,
+    };
+    let head = product_head(ORIGIN, &product(3), Some(&rating));
+    let agg = &head.json_ld[0]["aggregateRating"];
+    assert_eq!(agg["ratingValue"], 4.5);
+    assert_eq!(agg["reviewCount"], 12);
+    let unrated = product_head(ORIGIN, &product(3), None);
+    assert!(unrated.json_ld[0].get("aggregateRating").is_none());
   }
 }
