@@ -58,6 +58,12 @@ jobs:
         with:
           path: ~/.theseus
           key: theseus-pg-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - run: cargo install --locked topcoat-cli --version 0.9.0
+      # HTML settings/2FA tests render `asset!` tags and load the bundle from
+      # `target/debug/assets` (see crates/test-support).
+      - run: topcoat asset bundle --bin lindaflor
+        env:
+          SQLX_OFFLINE: "true"
       - run: cargo test --locked --all-targets
 
   sqlx:
