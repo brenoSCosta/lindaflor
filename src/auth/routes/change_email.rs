@@ -11,15 +11,12 @@ use topcoat::{
 };
 use uuid::Uuid;
 
-use crate::auth::CREDENTIAL_PROVIDER_ID;
-use crate::auth::password::verify_password;
 use crate::auth::routes::dto::{normalize_email, random_token};
 use crate::auth::service::{
   verification_token_hash, verification_token_hash_prefix,
 };
 use crate::auth::session_store;
-use crate::auth::totp::verify_code;
-use crate::auth::totp_crypto::decrypt_row_secret;
+use crate::auth::step_up::{forbid_impersonated, verify_step_up};
 use crate::auth::user::current_user;
 
 const CHANGE_EMAIL_TOKEN_TTL_SECS: i64 = 30 * 60;
@@ -72,6 +69,7 @@ pub async fn change_email(
   let Some(su) = session.as_ref() else {
     return Err(unauthorized().into());
   };
+  forbid_impersonated(su)?;
 
   let new_email = crate::auth::validation::validate_email(&body.new_email)
     .map_err(|err| bad_request(err.to_string()))?;
@@ -82,82 +80,17 @@ pub async fn change_email(
   let pool = app_context::<PgPool>(cx);
 
   // The request path requires a fresh password or TOTP check on top of
-  // the session. The confirm path below stays token-only (mail flow).
-  let has_password = sqlx::query!(
-    r#"SELECT password FROM accounts WHERE user_id = $1 AND provider_id = $2"#,
+  // the session (TOTP with the per-user cap and replay guard). OAuth-only
+  // accounts without 2FA have nothing to re-check beyond the session. The
+  // confirm path below stays token-only (mail flow).
+  verify_step_up(
+    cx,
+    pool,
     su.user.id,
-    CREDENTIAL_PROVIDER_ID,
+    body.password.as_deref(),
+    body.code.as_deref(),
   )
-  .fetch_optional(pool)
-  .await?
-  .and_then(|r| r.password)
-  .is_some_and(|p| !p.is_empty());
-  let totp_verified = sqlx::query!(
-    r#"SELECT verified FROM two_factor WHERE user_id = $1"#,
-    su.user.id,
-  )
-  .fetch_optional(pool)
-  .await?
-  .is_some_and(|r| r.verified);
-
-  let password_ok = match body.password.as_deref().filter(|p| !p.is_empty()) {
-    Some(pw) if has_password => {
-      let row = sqlx::query!(
-        r#"SELECT password FROM accounts WHERE user_id = $1 AND provider_id = $2"#,
-        su.user.id,
-        CREDENTIAL_PROVIDER_ID,
-      )
-      .fetch_optional(pool)
-      .await?;
-      match row.and_then(|r| r.password) {
-        Some(stored) => verify_password(pw, &stored)
-          .map_err(|e| crate::internal_error::internal_error(&e))?,
-        None => false,
-      }
-    }
-    _ => false,
-  };
-  let totp_ok = if password_ok {
-    false
-  } else if let Some(code) = body
-    .code
-    .as_deref()
-    .map(str::trim)
-    .filter(|c| !c.is_empty())
-  {
-    if !totp_verified {
-      false
-    } else {
-      let tf = sqlx::query!(
-        r#"SELECT secret_nonce, secret_ciphertext, secret_key_version FROM two_factor WHERE user_id = $1"#,
-        su.user.id,
-      )
-      .fetch_optional(pool)
-      .await?;
-      match tf {
-        // Fail closed on any decrypt error.
-        Some(tf) => {
-          let secret = decrypt_row_secret(
-            tf.secret_nonce,
-            tf.secret_ciphertext,
-            tf.secret_key_version,
-          )
-          .map_err(|_| unauthorized())?;
-          verify_code(secret.as_str(), code)
-            .map_err(|e| crate::internal_error::internal_error(&e))?
-        }
-        None => false,
-      }
-    }
-  } else {
-    false
-  };
-
-  // OAuth-only accounts without 2FA have nothing to re-check beyond the
-  // session; everyone else must present password or TOTP.
-  if (has_password || totp_verified) && !password_ok && !totp_ok {
-    return Err(unauthorized().into());
-  }
+  .await?;
 
   let taken = sqlx::query!(
     r#"SELECT id FROM users WHERE email = $1 AND id <> $2"#,

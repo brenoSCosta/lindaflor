@@ -55,6 +55,8 @@ pub async fn change_password(
   let Some(su) = session.as_ref() else {
     return Err(unauthorized().into());
   };
+  crate::auth::step_up::forbid_impersonated(su)?;
+  crate::auth::step_up::check_step_up_rate(cx)?;
 
   if body.current_password.is_empty() {
     return Err(bad_request("currentPassword is required").into());

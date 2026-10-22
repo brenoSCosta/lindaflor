@@ -645,6 +645,7 @@ pub async fn login_google(
 ) -> Result<Response> {
   let pool = app_context::<PgPool>(cx);
   match service::start_google_oauth(
+    cx,
     pool,
     body.callback_url.as_deref(),
     None,

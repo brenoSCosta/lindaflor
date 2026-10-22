@@ -51,6 +51,45 @@ pub fn is_storage_key(value: &str) -> bool {
   !value.is_empty() && !value.contains("://")
 }
 
+/// Whether `value` is an avatar object this server issued for `user_id`
+/// (`avatars/{user_id}/<file>`). Only these keys may be presigned as the
+/// user's avatar or deleted on avatar replace/remove; anything else stored
+/// in `users.image` is treated as foreign.
+pub fn is_own_avatar_key(user_id: uuid::Uuid, value: &str) -> bool {
+  let Some(file) = value.strip_prefix(&format!("avatars/{user_id}/")) else {
+    return false;
+  };
+  !file.is_empty()
+    && !file.starts_with('.')
+    && !file.contains(['/', '\\', '?', '#'])
+}
+
+/// Browser-loadable avatar URL for `user_id`.
+///
+/// Presigns only the user's own avatar keys ([`is_own_avatar_key`]) and
+/// passes through only Google profile pictures
+/// (`https://*.googleusercontent.com/…`). Any other value falls back to the
+/// initials instead of presigning an arbitrary bucket key.
+pub async fn resolve_avatar_url(
+  store: &ObjectStore,
+  user_id: uuid::Uuid,
+  value: Option<&str>,
+) -> Option<String> {
+  let value = value.filter(|item| !item.is_empty())?;
+  if is_own_avatar_key(user_id, value) {
+    return store.presign_get(value).await.ok();
+  }
+  is_google_avatar_url(value).then(|| value.to_owned())
+}
+
+fn is_google_avatar_url(value: &str) -> bool {
+  let Some(rest) = value.strip_prefix("https://") else {
+    return false;
+  };
+  let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+  host == "googleusercontent.com" || host.ends_with(".googleusercontent.com")
+}
+
 /// Turn a stored key-or-URL into a browser-loadable URL.
 ///
 /// External URLs pass through; storage keys are presigned. `None` (and a

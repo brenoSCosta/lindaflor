@@ -20,9 +20,14 @@ fn system_time_to_primitive(st: SystemTime) -> PrimitiveDateTime {
   PrimitiveDateTime::new(odt.date(), odt.time())
 }
 
+/// Lifetime cap for an admin impersonation session. The DB row expires
+/// first even though the cookie keeps the normal sliding lifetime.
+pub const IMPERSONATION_TTL_SECS: i64 = 60 * 60;
+
 /// Insert a new session row after [`topcoat::session::start`].
 ///
-/// Pass `impersonated_by` when an admin is acting as another user.
+/// Pass `impersonated_by` when an admin is acting as another user; such
+/// rows expire after [`IMPERSONATION_TTL_SECS`] at most.
 pub async fn insert_session(
   pool: &PgPool,
   session: &Session,
@@ -33,7 +38,12 @@ pub async fn insert_session(
 ) -> Result<Uuid, sqlx::Error> {
   let id = Uuid::now_v7();
   let token = token_hash_hex(&session.token_hash);
-  let expires_at = system_time_to_primitive(session.expires_at);
+  let mut expires_at = system_time_to_primitive(session.expires_at);
+  if impersonated_by.is_some() {
+    let cap = time::OffsetDateTime::now_utc()
+      + time::Duration::seconds(IMPERSONATION_TTL_SECS);
+    expires_at = expires_at.min(PrimitiveDateTime::new(cap.date(), cap.time()));
+  }
 
   sqlx::query!(
     r#"
@@ -202,6 +212,8 @@ pub async fn delete_all_for_user_except(
 }
 
 /// Push `expires_at` forward after [`topcoat::session::refresh`].
+///
+/// Impersonation sessions never slide past their original cap.
 pub async fn update_expiry(
   pool: &PgPool,
   hash: &TokenHash,
@@ -212,7 +224,11 @@ pub async fn update_expiry(
   sqlx::query!(
     r#"
         UPDATE sessions
-        SET expires_at = $2, updated_at = now()
+        SET expires_at = CASE
+                WHEN impersonated_by IS NULL THEN $2
+                ELSE LEAST(expires_at, $2)
+            END,
+            updated_at = now()
         WHERE token = $1
         "#,
     token,

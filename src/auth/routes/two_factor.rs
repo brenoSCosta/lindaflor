@@ -15,14 +15,16 @@ use topcoat::{
 };
 use uuid::Uuid;
 
-use crate::auth::CREDENTIAL_PROVIDER_ID;
-use crate::auth::password::verify_password;
 use crate::auth::routes::dto::{SessionPayload, client_meta, random_token};
 use crate::auth::service::verification_token_hash;
 use crate::auth::session_store;
+use crate::auth::step_up::{
+  check_totp_code, ensure_totp_not_locked, forbid_impersonated,
+  record_totp_failure, verify_step_up,
+};
 use crate::auth::totp::{
   consume_backup_code, generate_backup_codes, generate_secret,
-  hash_backup_codes, verify_code,
+  hash_backup_codes,
 };
 use crate::auth::totp_crypto::{decrypt_row_secret, encrypt_secret};
 use crate::auth::user::{SessionUser, User, current_user, is_currently_banned};
@@ -162,16 +164,6 @@ pub async fn guard_pending_2fa(
   }
 }
 
-async fn reject_totp_replay(cx: &Cx, user_id: Uuid, code: &str) -> Result<()> {
-  if crate::valkey::totp_reserve(crate::valkey::conn_from(cx), &user_id, code)
-    .await
-  {
-    Ok(())
-  } else {
-    Err(unauthorized().into())
-  }
-}
-
 async fn resolve_pending_user_id(
   pool: &PgPool,
   token: &str,
@@ -225,25 +217,6 @@ async fn start_session_for_user(
   }))
 }
 
-async fn verify_account_password(
-  pool: &PgPool,
-  user_id: Uuid,
-  password: &str,
-) -> Result<bool> {
-  let row = sqlx::query!(
-    r#"SELECT password FROM accounts WHERE user_id = $1 AND provider_id = $2"#,
-    user_id,
-    CREDENTIAL_PROVIDER_ID,
-  )
-  .fetch_optional(pool)
-  .await?;
-
-  let Some(stored) = row.and_then(|r| r.password) else {
-    return Ok(false);
-  };
-  Ok(verify_password(password, &stored)?)
-}
-
 /// Argon2id hashing/verification is blocking CPU work: run it on the
 /// blocking pool with a 5s bound. `guard_pending_2fa` (attempt cap) must
 /// already have run before any verify call so expensive hashes cannot be
@@ -286,6 +259,15 @@ pub struct EnableTwoFactorResponse {
   pub totp_uri: String,
   pub secret: String,
   pub backup_codes: Vec<String>,
+}
+
+/// Re-authentication for enrolling 2FA: the current password, or (when an
+/// enrollment is being rotated on an account that already has TOTP) a code.
+#[derive(Debug, Default, Deserialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct EnableTwoFactorBody {
+  pub password: Option<String>,
+  pub code: Option<String>,
 }
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
@@ -339,13 +321,18 @@ pub struct GenerateBackupCodesBody {
     post,
     path = "/api/auth/two-factor/enable",
     tag = "auth",
+    request_body = EnableTwoFactorBody,
     responses(
         (status = 200, description = "TOTP enrollment started (unverified). The secret is shown ONCE here — it is stored encrypted and never returned again; re-POST to rotate.", body = EnableTwoFactorResponse)
     )
 )]
 #[route(POST "/api/auth/two-factor/enable")]
-pub async fn enable(cx: &Cx) -> Result<Json<EnableTwoFactorResponse>> {
+pub async fn enable(
+  cx: &Cx,
+  Json(body): Json<EnableTwoFactorBody>,
+) -> Result<Json<EnableTwoFactorResponse>> {
   let su = require_session(cx).await?;
+  forbid_impersonated(&su)?;
   if su.user.two_factor_enabled {
     return Err(
       bad_request("two-factor authentication is already enabled").into(),
@@ -353,6 +340,16 @@ pub async fn enable(cx: &Cx) -> Result<Json<EnableTwoFactorResponse>> {
   }
 
   let pool = app_context::<PgPool>(cx);
+  // A stolen session must not be able to enroll its own authenticator and
+  // lock the owner out.
+  verify_step_up(
+    cx,
+    pool,
+    su.user.id,
+    body.password.as_deref(),
+    body.code.as_deref(),
+  )
+  .await?;
   let (secret, totp_uri) =
     generate_secret(&su.user.email).map_err(bad_request)?;
   let backup_codes = generate_backup_codes();
@@ -434,10 +431,9 @@ pub async fn verify_totp(
       tf.secret_key_version,
     )
     .map_err(|_| unauthorized())?;
-    if !verify_code(secret.as_str(), &code).map_err(bad_request)? {
+    if !check_totp_code(cx, user_id, secret.as_str(), &code).await? {
       return Err(unauthorized().into());
     }
-    reject_totp_replay(cx, user_id, &code).await?;
 
     sqlx::query!("DELETE FROM verifications WHERE id = $1", verification_id)
       .execute(pool)
@@ -455,6 +451,7 @@ pub async fn verify_totp(
 
   // Path B: finish enable while already signed in.
   let su = require_session(cx).await?;
+  forbid_impersonated(&su)?;
   if su.user.two_factor_enabled {
     return Err(
       bad_request("two-factor authentication is already enabled").into(),
@@ -480,10 +477,9 @@ pub async fn verify_totp(
     tf.secret_key_version,
   )
   .map_err(|_| unauthorized())?;
-  if !verify_code(secret.as_str(), &code).map_err(bad_request)? {
+  if !check_totp_code(cx, su.user.id, secret.as_str(), &code).await? {
     return Err(unauthorized().into());
   }
-  reject_totp_replay(cx, su.user.id, &code).await?;
 
   sqlx::query!(
     r#"UPDATE two_factor SET verified = true WHERE id = $1"#,
@@ -525,47 +521,16 @@ pub async fn disable(
   Json(body): Json<DisableTwoFactorBody>,
 ) -> Result<Json<OkStatus>> {
   let su = require_session(cx).await?;
+  forbid_impersonated(&su)?;
   let pool = app_context::<PgPool>(cx);
-
-  let password_ok = match body.password.as_deref().filter(|p| !p.is_empty()) {
-    Some(pw) => verify_account_password(pool, su.user.id, pw).await?,
-    None => false,
-  };
-
-  let totp_ok = if password_ok {
-    false
-  } else if let Some(code) =
-    body.code.as_deref().filter(|c| !c.trim().is_empty())
-  {
-    let tf = sqlx::query!(
-      r#"SELECT secret_nonce, secret_ciphertext, secret_key_version, verified FROM two_factor WHERE user_id = $1"#,
-      su.user.id,
-    )
-    .fetch_optional(pool)
-    .await?;
-    match tf {
-      Some(tf) if tf.verified => {
-        let secret = decrypt_row_secret(
-          tf.secret_nonce,
-          tf.secret_ciphertext,
-          tf.secret_key_version,
-        )
-        .map_err(|_| unauthorized())?;
-        let ok = verify_code(secret.as_str(), code).map_err(bad_request)?;
-        if ok {
-          reject_totp_replay(cx, su.user.id, code).await?;
-        }
-        ok
-      }
-      _ => false,
-    }
-  } else {
-    false
-  };
-
-  if !password_ok && !totp_ok {
-    return Err(unauthorized().into());
-  }
+  verify_step_up(
+    cx,
+    pool,
+    su.user.id,
+    body.password.as_deref(),
+    body.code.as_deref(),
+  )
+  .await?;
 
   sqlx::query!(r#"DELETE FROM two_factor WHERE user_id = $1"#, su.user.id)
     .execute(pool)
@@ -617,10 +582,17 @@ pub async fn verify_backup_code(
       return Err(unauthorized().into());
     }
     guard_pending_2fa(cx, pool, token.trim(), user_id, verification_id).await?;
+    ensure_totp_not_locked(cx, user_id).await?;
 
     // Rate-limit guard above runs BEFORE the Argon2 work below.
     let stored =
-      consume_backup_code_async(tf.backup_codes, code.clone()).await?;
+      match consume_backup_code_async(tf.backup_codes, code.clone()).await {
+        Ok(stored) => stored,
+        Err(err) => {
+          record_totp_failure(cx, user_id).await;
+          return Err(err);
+        }
+      };
     sqlx::query!(
       r#"UPDATE two_factor SET backup_codes = $2 WHERE id = $1"#,
       tf.id,
@@ -645,6 +617,7 @@ pub async fn verify_backup_code(
 
   // Logged-in confirmation: consume a backup code.
   let su = require_session(cx).await?;
+  forbid_impersonated(&su)?;
   let tf = sqlx::query!(
     r#"SELECT id, backup_codes, verified FROM two_factor WHERE user_id = $1"#,
     su.user.id,
@@ -657,7 +630,15 @@ pub async fn verify_backup_code(
     return Err(bad_request("two-factor is not verified").into());
   }
 
-  let stored = consume_backup_code_async(tf.backup_codes, code.clone()).await?;
+  ensure_totp_not_locked(cx, su.user.id).await?;
+  let stored =
+    match consume_backup_code_async(tf.backup_codes, code.clone()).await {
+      Ok(stored) => stored,
+      Err(err) => {
+        record_totp_failure(cx, su.user.id).await;
+        return Err(err);
+      }
+    };
   sqlx::query!(
     r#"UPDATE two_factor SET backup_codes = $2 WHERE id = $1"#,
     tf.id,
@@ -688,47 +669,16 @@ pub async fn generate_backup_codes_route(
     return Err(bad_request("two-factor authentication is not enabled").into());
   }
 
+  forbid_impersonated(&su)?;
   let pool = app_context::<PgPool>(cx);
-
-  let password_ok = match body.password.as_deref().filter(|p| !p.is_empty()) {
-    Some(pw) => verify_account_password(pool, su.user.id, pw).await?,
-    None => false,
-  };
-
-  let totp_ok = if password_ok {
-    false
-  } else if let Some(code) =
-    body.code.as_deref().filter(|c| !c.trim().is_empty())
-  {
-    let tf = sqlx::query!(
-      r#"SELECT secret_nonce, secret_ciphertext, secret_key_version, verified FROM two_factor WHERE user_id = $1"#,
-      su.user.id,
-    )
-    .fetch_optional(pool)
-    .await?;
-    match tf {
-      Some(tf) if tf.verified => {
-        let secret = decrypt_row_secret(
-          tf.secret_nonce,
-          tf.secret_ciphertext,
-          tf.secret_key_version,
-        )
-        .map_err(|_| unauthorized())?;
-        let ok = verify_code(secret.as_str(), code).map_err(bad_request)?;
-        if ok {
-          reject_totp_replay(cx, su.user.id, code).await?;
-        }
-        ok
-      }
-      _ => false,
-    }
-  } else {
-    false
-  };
-
-  if !password_ok && !totp_ok {
-    return Err(unauthorized().into());
-  }
+  verify_step_up(
+    cx,
+    pool,
+    su.user.id,
+    body.password.as_deref(),
+    body.code.as_deref(),
+  )
+  .await?;
 
   let tf = sqlx::query!(
     r#"SELECT id FROM two_factor WHERE user_id = $1 AND verified = true"#,

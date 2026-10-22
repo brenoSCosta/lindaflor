@@ -64,6 +64,12 @@ pub async fn sign_up_email(
 
   let pool = app_context::<PgPool>(cx);
 
+  // Hash before the existence check so a taken e-mail answers in the same
+  // time as a new one. The status still differs (400 vs a new session):
+  // removing that needs "verify e-mail before the account is usable", which
+  // waits on mail delivery. Accepted risk until then; the 5/min sign-up
+  // limit bounds the probing rate.
+  let password_hash = hash_password(&password)?;
   if sqlx::query_scalar!(
     r#"SELECT id AS "id!" FROM users WHERE email = $1"#,
     email
@@ -75,7 +81,6 @@ pub async fn sign_up_email(
     return Err(bad_request("unable to complete sign-up").into());
   }
 
-  let password_hash = hash_password(&password)?;
   let user_id = Uuid::now_v7();
   let account_id = Uuid::now_v7();
 

@@ -121,6 +121,7 @@ fn install_test_rate_limit_env() {
     std::env::set_var("RATE_LIMIT_AUTH_VERIFY_EMAIL_PER_MIN", "10000");
     std::env::set_var("RATE_LIMIT_AUTH_VERIFY_TOTP_PER_MIN", "10000");
     std::env::set_var("RATE_LIMIT_AUTH_VERIFY_BACKUP_CODE_PER_MIN", "10000");
+    std::env::set_var("RATE_LIMIT_AUTH_STEP_UP_PER_MIN", "10000");
     std::env::set_var("RATE_LIMIT_PEDIDO_POLL_PER_MIN", "10000");
     std::env::set_var("RATE_LIMIT_PEDIDO_PAGE_PER_MIN", "10000");
   }

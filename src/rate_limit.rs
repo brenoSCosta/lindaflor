@@ -51,6 +51,8 @@ pub const SCOPE_VERIFY_EMAIL: &str = "auth:verify-email";
 pub const SCOPE_TOTP: &str = "auth:verify-totp";
 pub const SCOPE_BACKUP_CODE: &str = "auth:verify-backup-code";
 pub const SCOPE_TWO_FACTOR: &str = "auth:two-factor";
+/// Re-authentication checks (password/TOTP) on credential-changing actions.
+pub const SCOPE_STEP_UP: &str = "auth:step-up";
 pub const SCOPE_PEDIDO_POLL: &str = "pedido:poll";
 pub const SCOPE_PEDIDO_PAGE: &str = "pedido:page";
 pub const SCOPE_GLOBAL: &str = "global";
@@ -65,6 +67,7 @@ pub const DEFAULT_VERIFY_EMAIL_PER_MIN: u32 = 5;
 pub const DEFAULT_TOTP_PER_MIN: u32 = 3;
 pub const DEFAULT_BACKUP_CODE_PER_MIN: u32 = 3;
 pub const DEFAULT_TWO_FACTOR_PER_MIN: u32 = 10;
+pub const DEFAULT_STEP_UP_PER_MIN: u32 = 10;
 pub const DEFAULT_PEDIDO_POLL_PER_MIN: u32 = 10;
 pub const DEFAULT_PEDIDO_PAGE_PER_MIN: u32 = 30;
 pub const DEFAULT_GLOBAL_PER_MIN: u32 = 600;

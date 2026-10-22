@@ -459,6 +459,49 @@ pub async fn totp_reserve(
   }
 }
 
+/// Wrong TOTP / backup codes tolerated per user (across every pending token,
+/// login and step-up path) inside [`TOTP_FAIL_WINDOW_SECS`]. Past it every
+/// second-factor attempt for that user is refused until the window lapses,
+/// so minting fresh pending tokens with a known password cannot reset the
+/// guessing budget.
+pub const TOTP_FAIL_MAX: u64 = 10;
+pub const TOTP_FAIL_WINDOW_SECS: u64 = 15 * 60;
+
+fn totp_fail_key(user_id: &uuid::Uuid) -> String {
+  format!("2fa:fail:{user_id}")
+}
+
+/// Count one wrong second-factor code for `user_id`. The window starts at
+/// the first failure (fixed window, not sliding).
+pub async fn record_totp_fail(
+  conn: Option<MultiplexedConnection>,
+  user_id: &uuid::Uuid,
+) -> u64 {
+  let key = totp_fail_key(user_id);
+  if let Some(count) = valkey_incr(conn.clone(), &key).await {
+    if count == 1 {
+      valkey_expire(conn, &key, TOTP_FAIL_WINDOW_SECS).await;
+    }
+    return count;
+  }
+  fallback_incr(&key, Duration::from_secs(TOTP_FAIL_WINDOW_SECS))
+}
+
+/// Whether `user_id` has exhausted its second-factor budget.
+pub async fn is_totp_locked_out(
+  conn: Option<MultiplexedConnection>,
+  user_id: &uuid::Uuid,
+) -> bool {
+  let key = totp_fail_key(user_id);
+  let count = match valkey_get(conn, &key).await {
+    Some(v) => v.parse::<u64>().unwrap_or(0),
+    None => fallback_get(&key)
+      .and_then(|v| v.parse::<u64>().ok())
+      .unwrap_or(0),
+  };
+  count >= TOTP_FAIL_MAX
+}
+
 /// Failed verification attempts allowed per pending token before the token
 /// row is invalidated server-side.
 pub const PENDING_MAX_ATTEMPTS: u64 = 5;

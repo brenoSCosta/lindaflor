@@ -88,6 +88,20 @@ pub fn verify_password(
   }
 }
 
+/// Spend one Argon2 verification against a fixed hash and discard the
+/// result.
+///
+/// Sign-in calls this when the e-mail has no credential row, so an unknown
+/// account costs the same as a wrong password and response time does not
+/// reveal which addresses are registered.
+pub fn dummy_verify(password: &str) {
+  static DUMMY_HASH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+  let hash = DUMMY_HASH.get_or_init(|| {
+    hash_password("lindaflor-timing-equalizer").unwrap_or_default()
+  });
+  let _ = verify_password(password, hash);
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

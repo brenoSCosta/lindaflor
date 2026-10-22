@@ -4,6 +4,7 @@ use time::PrimitiveDateTime;
 use topcoat::{
   Result,
   context::{Cx, app_context},
+  cookie::{Cookie, Cookies, SameSite, cookies},
   router::{
     error::{bad_request, redirect, unauthorized},
     href, query_params, route,
@@ -17,11 +18,17 @@ use crate::auth::google::{
   fetch_userinfo, safe_callback_path,
 };
 use crate::auth::routes::dto::{client_meta, normalize_email};
+use crate::auth::routes::two_factor::{PENDING_2FA_PREFIX, create_pending_2fa};
 use crate::auth::session_store;
 use crate::auth::user::{current_user_owned, is_currently_banned};
 
 const OAUTH_STATE_PREFIX: &str = "oauth-google:";
-const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+
+/// Browser-binding cookie set when an OAuth flow starts (`__Host-` outside
+/// development). Its hash is stored in the state row; the callback only
+/// completes in the browser that holds it (login CSRF guard).
+pub const OAUTH_BIND_COOKIE: &str = "oauth_bind";
+pub const OAUTH_BIND_COOKIE_HOST: &str = "__Host-oauth_bind";
 
 /// OAuth CSRF state lifetime (10 minutes).
 pub const OAUTH_STATE_TTL_SECS: i64 = 10 * 60;
@@ -36,6 +43,9 @@ struct OAuthStateValue {
   /// `None` for login flows (no session to bind).
   #[serde(default, skip_serializing_if = "Option::is_none")]
   session_binding: Option<String>,
+  /// Hex SHA-256 of the `oauth_bind` cookie the starting browser received.
+  #[serde(default, skip_serializing_if = "Option::is_none")]
+  browser_binding: Option<String>,
   /// PKCE `code_verifier`; sent as `code_verifier` at token exchange.
   #[serde(default, skip_serializing_if = "Option::is_none")]
   code_verifier: Option<String>,
@@ -49,6 +59,7 @@ pub struct ConsumedOAuthState {
   pub callback_path: String,
   pub link_user_id: Option<Uuid>,
   pub session_binding: Option<String>,
+  pub browser_binding: Option<String>,
   pub code_verifier: Option<String>,
   pub nonce: Option<String>,
 }
@@ -168,6 +179,77 @@ pub fn verify_link_session(
   Ok(())
 }
 
+fn oauth_bind_cookie_secure() -> bool {
+  !matches!(crate::config::app_env().as_str(), "development" | "dev")
+}
+
+fn oauth_bind_cookie_name() -> &'static str {
+  if oauth_bind_cookie_secure() {
+    OAUTH_BIND_COOKIE_HOST
+  } else {
+    OAUTH_BIND_COOKIE
+  }
+}
+
+fn oauth_bind_hash(value: &str) -> String {
+  use sha2::{Digest, Sha256};
+  hex::encode(Sha256::digest(value.as_bytes()))
+}
+
+/// Start-of-flow half of the login-CSRF guard: set a fresh random
+/// `oauth_bind` cookie (10 min, HttpOnly, SameSite=Lax so it survives the
+/// top-level redirect back from Google) and return its hash for the state
+/// row ([`NewOAuthState::browser_binding`]).
+pub fn issue_oauth_browser_binding(cx: &Cx) -> String {
+  let value = crate::auth::routes::dto::random_token();
+  let mut builder = Cookie::build((oauth_bind_cookie_name(), value.clone()))
+    .path("/")
+    .http_only(true)
+    .same_site(SameSite::Lax)
+    .max_age(topcoat::cookie::time::Duration::seconds(
+      OAUTH_STATE_TTL_SECS,
+    ));
+  if oauth_bind_cookie_secure() {
+    builder = builder.secure(true);
+  }
+  cookies(cx).add(builder.build());
+  oauth_bind_hash(&value)
+}
+
+/// Callback half: hash of the presented `oauth_bind` cookie (if any). The
+/// cookie is cleared either way, since every flow is single-use.
+fn take_oauth_browser_binding(cx: &Cx) -> Option<String> {
+  let jar = cookies(cx);
+  let name = oauth_bind_cookie_name();
+  let value = jar
+    .get(name)
+    .map(|c| c.value().to_owned())
+    .filter(|v| !v.is_empty());
+  let mut builder = Cookie::build((name, ""))
+    .path("/")
+    .http_only(true)
+    .same_site(SameSite::Lax);
+  if oauth_bind_cookie_secure() {
+    builder = builder.secure(true);
+  }
+  jar.remove(builder.build());
+  value.map(|v| oauth_bind_hash(&v))
+}
+
+/// The callback must run in the browser that started the flow: the stored
+/// binding has to be present and equal the presented cookie hash.
+pub fn verify_browser_binding(
+  expected: Option<&str>,
+  actual: Option<&str>,
+) -> Result<(), &'static str> {
+  let expected = expected.map(str::trim).filter(|s| !s.is_empty());
+  let actual = actual.map(str::trim).filter(|s| !s.is_empty());
+  match (expected, actual) {
+    (Some(expected), Some(actual)) if expected == actual => Ok(()),
+    _ => Err("OAuth flow started in another browser; sign in again"),
+  }
+}
+
 /// Persist OAuth `state` → callback path (and optional link-user intent) in `verifications`.
 pub async fn store_oauth_state(
   pool: &PgPool,
@@ -184,6 +266,7 @@ pub async fn store_oauth_state(
       ttl_secs,
       link_user_id,
       session_binding: None,
+      browser_binding: None,
       code_verifier: None,
       nonce: None,
     },
@@ -203,6 +286,8 @@ pub struct NewOAuthState<'a> {
   pub ttl_secs: i64,
   pub link_user_id: Option<Uuid>,
   pub session_binding: Option<&'a str>,
+  /// [`issue_oauth_browser_binding`] hash; required by the callback.
+  pub browser_binding: Option<&'a str>,
   pub code_verifier: Option<&'a str>,
   pub nonce: Option<&'a str>,
 }
@@ -217,6 +302,7 @@ pub async fn store_oauth_state_full(
     ttl_secs,
     link_user_id,
     session_binding,
+    browser_binding,
     code_verifier,
     nonce,
   } = params;
@@ -227,6 +313,7 @@ pub async fn store_oauth_state_full(
     callback: callback_path.to_string(),
     link_user_id,
     session_binding: session_binding.map(str::to_owned),
+    browser_binding: browser_binding.map(str::to_owned),
     code_verifier: code_verifier.map(str::to_owned),
     nonce: nonce.map(str::to_owned),
   })
@@ -278,6 +365,7 @@ pub async fn consume_oauth_state(
     callback_path: safe_callback_path(Some(&parsed.callback)),
     link_user_id: parsed.link_user_id,
     session_binding: parsed.session_binding,
+    browser_binding: parsed.browser_binding,
     code_verifier: parsed.code_verifier,
     nonce: parsed.nonce,
   })
@@ -293,7 +381,7 @@ async fn exchange_code_with_verifier(
 ) -> Result<GoogleTokenResponse, GoogleOAuthError> {
   let redirect_uri = config.redirect_uri();
   let response = crate::http_client::shared_http_client()
-    .post(GOOGLE_TOKEN_URL)
+    .post(crate::auth::google::token_url())
     .header("Accept", "application/json")
     .form(&[
       ("code", code),
@@ -370,8 +458,18 @@ pub async fn google_callback(cx: &Cx) -> Result<()> {
   };
 
   let pool = app_context::<PgPool>(cx);
+  let presented_binding = take_oauth_browser_binding(cx);
   let oauth_state = consume_oauth_state(pool, state).await?;
   let callback_path = oauth_state.callback_path.clone();
+
+  // Login CSRF: a `code`+`state` pair minted in someone else's browser
+  // must not complete here (it would sign this browser into their account).
+  if let Err(message) = verify_browser_binding(
+    oauth_state.browser_binding.as_deref(),
+    presented_binding.as_deref(),
+  ) {
+    return Err(bad_request(message).into());
+  }
 
   // A link flow must complete in the session that started it.
   // Verify before any Google calls so a forged cross-session callback
@@ -447,6 +545,7 @@ pub async fn google_callback(cx: &Cx) -> Result<()> {
 
   let account = GoogleAccountUpsert {
     google_sub: &google_sub,
+    email: &email,
     image: image.as_deref(),
     email_verified,
     access_token: &tokens.access_token,
@@ -464,7 +563,7 @@ pub async fn google_callback(cx: &Cx) -> Result<()> {
 
   let user_row = sqlx::query!(
     r#"
-        SELECT id, banned, ban_expires
+        SELECT id, banned, ban_expires, two_factor_enabled
         FROM users
         WHERE id = $1
         "#,
@@ -475,6 +574,17 @@ pub async fn google_callback(cx: &Cx) -> Result<()> {
 
   if is_currently_banned(user_row.banned, user_row.ban_expires) {
     return Err(unauthorized().into());
+  }
+
+  // Google proves the first factor only: an account with TOTP goes through
+  // the same pending-2FA step as a password sign-in. (Link flows already
+  // run inside a fully authenticated session.)
+  if oauth_state.link_user_id.is_none() && user_row.two_factor_enabled {
+    let token = create_pending_2fa(cx, pool, user_id).await?;
+    crate::auth::service::set_pending_2fa_cookie(cx, &token);
+    return Err(
+      redirect(href!(crate::app::two_factor::page).resolve(cx)).into(),
+    );
   }
 
   let session = session::start(cx).await?;
@@ -496,6 +606,9 @@ pub async fn google_callback(cx: &Cx) -> Result<()> {
 #[derive(Debug, Clone, Copy)]
 pub struct GoogleAccountUpsert<'a> {
   pub google_sub: &'a str,
+  /// Normalized Google e-mail; only marks `users.email_verified` when it is
+  /// the account's own address.
+  pub email: &'a str,
   pub image: Option<&'a str>,
   pub email_verified: bool,
   pub access_token: &'a str,
@@ -506,7 +619,7 @@ pub struct GoogleAccountUpsert<'a> {
 }
 
 /// Link a Google account to an already-authenticated user (link-social flow).
-async fn link_google_account(
+pub async fn link_google_account(
   pool: &PgPool,
   link_user_id: Uuid,
   account: GoogleAccountUpsert<'_>,
@@ -594,11 +707,16 @@ async fn link_google_account(
   }
 
   if email_verified || image.is_some() {
+    // A verified Google address proves only that address: never mark a
+    // different local e-mail as verified.
     sqlx::query!(
       r#"
             UPDATE users
             SET
-                email_verified = CASE WHEN $2 THEN true ELSE email_verified END,
+                email_verified = CASE
+                    WHEN $2 AND email = $4 THEN true
+                    ELSE email_verified
+                END,
                 image = COALESCE(image, $3),
                 updated_at = now()
             WHERE id = $1
@@ -606,6 +724,7 @@ async fn link_google_account(
       link_user_id,
       email_verified,
       image,
+      account.email,
     )
     .execute(pool)
     .await?;
@@ -687,10 +806,12 @@ pub async fn find_or_create_google_user(
   // email. An unverified (`false`/`None`) claim aborts: it must not merge
   // into the victim row, must not flip `users.email_verified` to true, and
   // must not create a second row that later collides on the unique email.
-  let existing_user =
-    sqlx::query!(r#"SELECT id FROM users WHERE email = $1"#, email,)
-      .fetch_optional(pool)
-      .await?;
+  let existing_user = sqlx::query!(
+    r#"SELECT id, email_verified FROM users WHERE email = $1"#,
+    email,
+  )
+  .fetch_optional(pool)
+  .await?;
   let user_id = match google_email_signup_action(
     email_verified,
     existing_user.is_some(),
@@ -698,6 +819,15 @@ pub async fn find_or_create_google_user(
     Err(message) => return Err(bad_request(message).into()),
     Ok(GoogleEmailSignupAction::LinkExisting) => {
       let existing_user = existing_user.expect("existing email row");
+      if !existing_user.email_verified {
+        // Pre-hijack guard: nobody ever proved control of this address, so
+        // whoever registered it (possibly an attacker waiting for the real
+        // owner) must not keep access. Google just proved ownership: hand
+        // the row over clean in one transaction.
+        take_over_unverified_user(pool, existing_user.id, name, account)
+          .await?;
+        return Ok(existing_user.id);
+      }
       sqlx::query!(
         r#"
                 UPDATE users
@@ -759,6 +889,83 @@ pub async fn find_or_create_google_user(
   .await?;
 
   Ok(user_id)
+}
+
+/// Give an unverified e-mail row to the verified Google owner of that
+/// address: drop every existing login method (password, other OAuth links),
+/// session, second factor and pending user-scoped token, then link this
+/// Google account and mark the e-mail verified. All-or-nothing.
+async fn take_over_unverified_user(
+  pool: &PgPool,
+  user_id: Uuid,
+  name: &str,
+  account: GoogleAccountUpsert<'_>,
+) -> Result<()> {
+  let mut tx = pool.begin().await?;
+  sqlx::query!("DELETE FROM accounts WHERE user_id = $1", user_id)
+    .execute(&mut *tx)
+    .await?;
+  sqlx::query!("DELETE FROM sessions WHERE user_id = $1", user_id)
+    .execute(&mut *tx)
+    .await?;
+  sqlx::query!("DELETE FROM two_factor WHERE user_id = $1", user_id)
+    .execute(&mut *tx)
+    .await?;
+  sqlx::query!(
+    r#"
+        DELETE FROM verifications
+        WHERE identifier = $1 OR identifier = $2 OR identifier LIKE $3
+        "#,
+    format!("{PENDING_2FA_PREFIX}{user_id}"),
+    format!("delete-user:{user_id}"),
+    format!("change-email:{user_id}:%"),
+  )
+  .execute(&mut *tx)
+  .await?;
+  sqlx::query!(
+    r#"
+        UPDATE users
+        SET
+            name = $2,
+            email_verified = true,
+            two_factor_enabled = false,
+            image = COALESCE($3, image),
+            updated_at = now()
+        WHERE id = $1
+        "#,
+    user_id,
+    name,
+    account.image,
+  )
+  .execute(&mut *tx)
+  .await?;
+  sqlx::query!(
+    r#"
+        INSERT INTO accounts (
+            id, account_id, provider_id, user_id,
+            access_token, refresh_token, id_token, scope,
+            access_token_expires_at, created_at, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now(), now())
+        "#,
+    Uuid::now_v7(),
+    account.google_sub,
+    GOOGLE_PROVIDER_ID,
+    user_id,
+    account.access_token,
+    account.refresh_token,
+    account.id_token,
+    account.scope,
+    account.access_expires,
+  )
+  .execute(&mut *tx)
+  .await?;
+  tx.commit().await?;
+  tracing::warn!(
+    user_id = %user_id,
+    "unverified account taken over by its verified Google owner; prior logins and sessions revoked"
+  );
+  Ok(())
 }
 
 #[cfg(test)]

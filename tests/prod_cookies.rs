@@ -125,7 +125,7 @@ async fn prod_cookies_secure() {
     &router,
     "/api/auth/two-factor/enable",
     Some(&session_cookie),
-    serde_json::json!({}),
+    serde_json::json!({ "password": password }),
   )
   .await;
   assert_eq!(enable.status, StatusCode::OK, "{:?}", enable.json);

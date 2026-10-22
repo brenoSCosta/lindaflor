@@ -24,6 +24,7 @@ use crate::auth::routes::oauth::{
 use crate::auth::routes::sign_in::{
   SignInSocialResponse, SocialNotImplementedBody,
 };
+use crate::auth::step_up::{forbid_impersonated, verify_step_up};
 use crate::auth::user::current_user;
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
@@ -40,6 +41,10 @@ pub struct AccountJson {
 pub struct LinkSocialBody {
   pub provider: String,
   pub callback_url: Option<String>,
+  /// Step-up: current password (accounts with a password) …
+  pub password: Option<String>,
+  /// … or a current TOTP code (accounts with 2FA).
+  pub code: Option<String>,
 }
 
 #[derive(Debug, Deserialize, utoipa::ToSchema)]
@@ -47,6 +52,10 @@ pub struct LinkSocialBody {
 pub struct UnlinkAccountBody {
   pub provider_id: String,
   pub account_id: String,
+  /// Step-up: current password (accounts with a password) …
+  pub password: Option<String>,
+  /// … or a current TOTP code (accounts with 2FA).
+  pub code: Option<String>,
 }
 
 #[derive(Debug, Serialize, utoipa::ToSchema)]
@@ -122,6 +131,7 @@ pub async fn link_social(
   let Some(su) = session.as_ref() else {
     return Err(unauthorized().into());
   };
+  forbid_impersonated(su)?;
 
   let provider = body.provider.trim().to_ascii_lowercase();
   if provider != GOOGLE_PROVIDER_ID {
@@ -177,6 +187,17 @@ pub async fn link_social(
 
   let state = random_token();
   let pool = app_context::<PgPool>(cx);
+  // Adding a login method needs a fresh proof, not just the session.
+  verify_step_up(
+    cx,
+    pool,
+    su.user.id,
+    body.password.as_deref(),
+    body.code.as_deref(),
+  )
+  .await?;
+  let browser_binding =
+    crate::auth::routes::oauth::issue_oauth_browser_binding(cx);
   store_oauth_state_full(
     pool,
     NewOAuthState {
@@ -185,6 +206,7 @@ pub async fn link_social(
       ttl_secs: OAUTH_STATE_TTL_SECS,
       link_user_id: Some(su.user.id),
       session_binding: Some(&session_binding),
+      browser_binding: Some(&browser_binding),
       code_verifier: Some(&code_verifier),
       nonce: Some(&nonce),
     },
@@ -222,6 +244,8 @@ pub async fn unlink_account(
     return Err(unauthorized().into());
   };
 
+  forbid_impersonated(su)?;
+
   let provider_id = body.provider_id.trim();
   let account_id = body.account_id.trim();
   if provider_id.is_empty() || account_id.is_empty() {
@@ -229,6 +253,14 @@ pub async fn unlink_account(
   }
 
   let pool = app_context::<PgPool>(cx);
+  verify_step_up(
+    cx,
+    pool,
+    su.user.id,
+    body.password.as_deref(),
+    body.code.as_deref(),
+  )
+  .await?;
 
   let target = sqlx::query!(
     r#"

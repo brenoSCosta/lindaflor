@@ -48,7 +48,7 @@ async fn totp_secret_is_encrypted_at_rest() {
     &router,
     "/api/auth/two-factor/enable",
     cookie.as_deref(),
-    serde_json::json!({}),
+    serde_json::json!({ "password": password }),
   )
   .await;
   assert_eq!(enable.status, StatusCode::OK, "{:?}", enable.json);
@@ -219,7 +219,7 @@ async fn settings_setup_page_leaks_no_secret() {
     &router,
     "/api/auth/two-factor/enable",
     Some(&cookie),
-    serde_json::json!({}),
+    serde_json::json!({ "password": password }),
   )
   .await;
   assert_eq!(enable.status, StatusCode::OK, "{:?}", enable.json);
@@ -322,7 +322,9 @@ async fn html_enable_shows_secret_once_on_setup_page() {
       http::header::CONTENT_TYPE,
       "application/x-www-form-urlencoded",
     )
-    .body(Body::from("action=enable_2fa"))
+    .body(Body::from(
+      "action=enable_2fa&password=Harbor-Violet-Tiger-4821-Lantern%21",
+    ))
     .expect("build request");
   let response = router.handle(req).await;
   let status = response.status();
@@ -429,7 +431,7 @@ async fn enable_verify_totp_then_sign_in_requires_2fa() {
     &router,
     "/api/auth/two-factor/enable",
     cookie.as_deref(),
-    serde_json::json!({}),
+    serde_json::json!({ "password": password }),
   )
   .await;
   assert_eq!(enable.status, StatusCode::OK, "{:?}", enable.json);
@@ -516,7 +518,7 @@ async fn totp_code_cannot_be_replayed() {
     &router,
     "/api/auth/two-factor/enable",
     cookie.as_deref(),
-    serde_json::json!({}),
+    serde_json::json!({ "password": password }),
   )
   .await;
   assert_eq!(enable.status, StatusCode::OK, "{:?}", enable.json);
@@ -614,7 +616,7 @@ async fn backup_code_is_single_use() {
     &router,
     "/api/auth/two-factor/enable",
     cookie.as_deref(),
-    serde_json::json!({}),
+    serde_json::json!({ "password": password }),
   )
   .await;
   assert_eq!(enable.status, StatusCode::OK, "{:?}", enable.json);
@@ -718,7 +720,7 @@ async fn backup_codes_are_phc_only() {
     &router,
     "/api/auth/two-factor/enable",
     cookie.as_deref(),
-    serde_json::json!({}),
+    serde_json::json!({ "password": password }),
   )
   .await;
   assert_eq!(enable.status, StatusCode::OK, "{:?}", enable.json);
@@ -817,7 +819,7 @@ async fn enable_verified_2fa(
     router,
     "/api/auth/two-factor/enable",
     Some(&cookie),
-    serde_json::json!({}),
+    serde_json::json!({ "password": password }),
   )
   .await;
   assert_eq!(enable.status, StatusCode::OK, "{:?}", enable.json);
@@ -884,7 +886,7 @@ async fn generate_backup_codes_correct_password_rotates_phc() {
     &router,
     "/api/auth/two-factor/enable",
     Some(&cookie),
-    serde_json::json!({}),
+    serde_json::json!({ "password": password }),
   )
   .await;
   assert_eq!(enable.status, StatusCode::OK, "{:?}", enable.json);
@@ -1020,7 +1022,7 @@ async fn generate_backup_codes_unverified_is_error() {
     &router,
     "/api/auth/two-factor/enable",
     Some(&cookie),
-    serde_json::json!({}),
+    serde_json::json!({ "password": password }),
   )
   .await;
   assert_eq!(enable.status, StatusCode::OK, "{:?}", enable.json);
