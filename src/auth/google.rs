@@ -19,10 +19,11 @@ pub struct GoogleOAuthConfig {
 impl GoogleOAuthConfig {
   /// Load from env when Google social sign-in is configured.
   ///
-  /// Requires `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `APP_ORIGIN`
+  /// Requires `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (each also as a
+  /// Docker-secret style `*_FILE`) and `APP_ORIGIN`
   pub fn from_env() -> Option<Self> {
-    let client_id = env_nonempty("GOOGLE_CLIENT_ID")?;
-    let client_secret = env_nonempty("GOOGLE_CLIENT_SECRET")?;
+    let client_id = env_or_file_nonempty("GOOGLE_CLIENT_ID")?;
+    let client_secret = env_or_file_nonempty("GOOGLE_CLIENT_SECRET")?;
     let app_origin = app_origin()?;
     Some(Self {
       client_id,
@@ -71,6 +72,12 @@ impl GoogleOAuthConfig {
       .expect("Google auth URL is valid")
       .to_string()
   }
+}
+
+fn env_or_file_nonempty(key: &str) -> Option<String> {
+  crate::config::read_env_or_file(key)
+    .map(|v| v.trim().to_string())
+    .filter(|v| !v.is_empty())
 }
 
 fn env_nonempty(key: &str) -> Option<String> {

@@ -1,5 +1,5 @@
 use sqlx::PgPool;
-use time::PrimitiveDateTime;
+use time::OffsetDateTime;
 use topcoat::{
   Result,
   context::Cx,
@@ -22,7 +22,7 @@ pub struct RecentOrder {
   pub id: Uuid,
   pub status: String,
   pub total_cents: i64,
-  pub created_at: PrimitiveDateTime,
+  pub created_at: OffsetDateTime,
 }
 
 pub async fn load_recent_orders(
@@ -69,9 +69,25 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let pool = app_context::<PgPool>(cx);
 
   let recent_orders = load_recent_orders(pool, actor.user.id).await?;
+  let first_purchase_offer = {
+    let mut conn = pool.acquire().await?;
+    crate::app::store::coupons::first_purchase_offer(
+      &mut conn,
+      actor.user.id,
+      &actor.user.email,
+    )
+    .await?
+  };
 
   Ok(view! {
       container(
+          if let Some(code) = first_purchase_offer {
+              <div class="rounded-xl border border-primary/30 bg-primary/10 px-5 py-4 text-sm text-primary">
+                  "Primeira compra? Use o cupom "
+                  <strong>(code)</strong>
+                  " e ganhe desconto no seu primeiro pedido."
+              </div>
+          }
           <div class="grid gap-4 @sm/page:grid-cols-2">
               <a
                   href=(href!(crate::app::conta::pedidos::page))
@@ -130,7 +146,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                                   )
                                   table_cell(badge(variant: status_variant(&order.status), (order.status)))
                                   table_cell("R$ " (order.total_cents / 100))
-                                  table_cell((order.created_at.to_string()))
+                                  table_cell((crate::app::store::queries::format_datetime_br(order.created_at)))
                               )
                           }
                       )

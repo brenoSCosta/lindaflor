@@ -67,12 +67,53 @@ pub async fn subscribe(
     .await
   {
     Ok(_) => {
-      set_toast(cx, Toast::success("Inscrição realizada! Verifique seu e-mail."));
+      let first_purchase_code =
+        crate::app::store::coupons::first_purchase_code(pool)
+          .await
+          .ok()
+          .flatten();
+      set_toast(
+        cx,
+        Toast::success(subscribed_message(first_purchase_code.as_deref())),
+      );
       Ok(see_other(href!(crate::app::page).resolve(cx)))
     }
     Err(_) => {
       set_toast(cx, Toast::error("E-mail já cadastrado na newsletter"));
       Ok(see_other(href!(crate::app::page).resolve(cx)))
+    }
+  }
+}
+
+/// Success toast after subscribing; advertises the first-purchase coupon
+/// when the store has one configured.
+fn subscribed_message(first_purchase_code: Option<&str>) -> String {
+  match first_purchase_code
+    .map(str::trim)
+    .filter(|code| !code.is_empty())
+  {
+    Some(code) => {
+      format!("Inscrição realizada! Use o cupom {code} na sua primeira compra.")
+    }
+    None => "Inscrição realizada! Verifique seu e-mail.".to_string(),
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::subscribed_message;
+
+  #[test]
+  fn subscribed_message_mentions_first_purchase_coupon() {
+    assert_eq!(
+      subscribed_message(Some(" BEMVINDA10 ")),
+      "Inscrição realizada! Use o cupom BEMVINDA10 na sua primeira compra."
+    );
+    for code in [None, Some("")] {
+      assert_eq!(
+        subscribed_message(code),
+        "Inscrição realizada! Verifique seu e-mail."
+      );
     }
   }
 }

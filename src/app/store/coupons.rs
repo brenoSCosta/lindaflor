@@ -125,7 +125,9 @@ impl From<sqlx::Error> for CouponReject {
 /// passed through [`normalize_email`] (so logging out, `+tag` or Gmail-dot
 /// variants share one limit). Active redemptions only (`refunded_at IS
 /// NULL`). Missing identity on a per-user coupon is a reject (login or
-/// checkout email). Unknown or inactive codes are [`CouponReject::Gone`].
+/// checkout email). The configured first-purchase code is rejected once the
+/// identity has a paid order (see [`has_paid_order`]). Unknown or inactive
+/// codes are [`CouponReject::Gone`].
 ///
 /// Discount math is shared via [`calc_coupon_discount`]. Shipping is computed
 /// on the pre-discount subtotal by the caller. Pass `for_update = true`
@@ -244,6 +246,14 @@ pub async fn resolve_coupon(
         .to_string(),
     ));
   }
+  if is_first_purchase_code(tx, &coupon.code).await?
+    && has_paid_order(&mut **tx, user_id, account_email.as_deref(), guest_email)
+      .await?
+  {
+    return Err(CouponReject::Invalid(
+      FIRST_PURCHASE_ONLY_MESSAGE.to_string(),
+    ));
+  }
   let personal_redemptions: i64 = sqlx::query_scalar(
     "SELECT COUNT(*) FROM coupon_redemptions
      WHERE coupon_id = $1
@@ -267,6 +277,90 @@ pub async fn resolve_coupon(
     discount_cents: calc_coupon_discount(&coupon, subtotal_cents),
     email_norm,
   }))
+}
+
+/// User-facing message when the first-purchase coupon is used by someone who
+/// already bought.
+pub const FIRST_PURCHASE_ONLY_MESSAGE: &str =
+  "Este cupom é válido apenas para a primeira compra.";
+
+/// The storefront's configured first-purchase coupon code
+/// (`store_settings.first_purchase_coupon_code`), trimmed; `None` when unset
+/// or blank.
+pub async fn first_purchase_code<'e>(
+  executor: impl sqlx::PgExecutor<'e>,
+) -> Result<Option<String>, sqlx::Error> {
+  let configured: Option<String> = sqlx::query_scalar(
+    "SELECT first_purchase_coupon_code FROM store_settings WHERE id",
+  )
+  .fetch_optional(executor)
+  .await?
+  .flatten();
+  Ok(
+    configured
+      .map(|code| code.trim().to_string())
+      .filter(|code| !code.is_empty()),
+  )
+}
+
+/// Whether `code` is the configured first-purchase coupon (case-insensitive).
+async fn is_first_purchase_code(
+  tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+  code: &str,
+) -> Result<bool, sqlx::Error> {
+  Ok(
+    first_purchase_code(&mut **tx)
+      .await?
+      .is_some_and(|first| first.eq_ignore_ascii_case(code)),
+  )
+}
+
+/// The first-purchase code to advertise to a logged-in customer: `None` when
+/// none is configured or the account already has a paid order.
+pub async fn first_purchase_offer(
+  conn: &mut sqlx::PgConnection,
+  user_id: Uuid,
+  account_email: &str,
+) -> Result<Option<String>, sqlx::Error> {
+  let Some(code) = first_purchase_code(&mut *conn).await? else {
+    return Ok(None);
+  };
+  let bought =
+    has_paid_order(&mut *conn, Some(user_id), Some(account_email), None)
+      .await?;
+  Ok((!bought).then_some(code))
+}
+
+/// Whether the identity already has a paid order (`paid_at` set, even if it
+/// was later refunded or cancelled): matched by `user_id`, or by order email
+/// against the account and checkout emails (case-insensitive), so a guest
+/// checkout after logging out still counts.
+pub async fn has_paid_order<'e>(
+  executor: impl sqlx::PgExecutor<'e>,
+  user_id: Option<Uuid>,
+  account_email: Option<&str>,
+  guest_email: Option<&str>,
+) -> Result<bool, sqlx::Error> {
+  let emails: Vec<String> = [account_email, guest_email]
+    .into_iter()
+    .flatten()
+    .map(|email| email.trim().to_lowercase())
+    .filter(|email| !email.is_empty())
+    .collect();
+  sqlx::query_scalar(
+    "SELECT EXISTS(
+       SELECT 1 FROM orders o
+       LEFT JOIN users u ON u.id = o.user_id
+       WHERE o.paid_at IS NOT NULL
+         AND (o.user_id = $1
+              OR lower(btrim(o.guest_email)) = ANY($2)
+              OR lower(u.email) = ANY($2))
+     )",
+  )
+  .bind(user_id)
+  .bind(&emails)
+  .fetch_one(executor)
+  .await
 }
 
 /// Record that `order_id` consumed `coupon`. `guest_email` is the raw
@@ -1005,6 +1099,86 @@ mod tests {
       .await,
     );
     assert_eq!(other.code, code);
+
+    tx.rollback().await.expect("rollback");
+  }
+
+  #[tokio::test]
+  async fn first_purchase_code_requires_no_paid_orders() {
+    let pool = crate::test_support::fresh_pool().await;
+    let mut tx = pool.begin().await.expect("begin tx");
+
+    let code = unique_code("BEMVINDA");
+    let mut coupon = new_coupon(&code);
+    coupon.per_user_limit = 5;
+    insert_coupon(&mut tx, &coupon).await;
+    let other_code = unique_code("other");
+    let mut other = new_coupon(&other_code);
+    other.per_user_limit = 5;
+    insert_coupon(&mut tx, &other).await;
+    sqlx::query(
+      "INSERT INTO store_settings (id, first_purchase_coupon_code)
+       VALUES (true, $1)
+       ON CONFLICT (id) DO UPDATE
+         SET first_purchase_coupon_code = EXCLUDED.first_purchase_coupon_code",
+    )
+    .bind(code.to_lowercase())
+    .execute(&mut *tx)
+    .await
+    .expect("set first purchase code");
+
+    // New customer, and a pending (unpaid) order does not count.
+    let user = insert_user(&mut tx).await;
+    insert_order(&mut tx, Some(user)).await;
+    let fresh = unwrap_coupon(
+      resolve_coupon(&mut tx, &code, 5_000, Some(user), None, false).await,
+    );
+    assert_eq!(fresh.code, code);
+
+    // Once an order is paid the code is refused for that account...
+    let paid = insert_order(&mut tx, Some(user)).await;
+    sqlx::query("UPDATE orders SET paid_at = now() WHERE id = $1")
+      .bind(paid)
+      .execute(&mut *tx)
+      .await
+      .expect("mark paid");
+    let message = unwrap_invalid(
+      resolve_coupon(&mut tx, &code, 5_000, Some(user), None, false).await,
+    );
+    assert_eq!(message, FIRST_PURCHASE_ONLY_MESSAGE);
+    // ...including as a logged-out guest using the account email...
+    let account_email = format!("{user}@example.com").to_uppercase();
+    let as_guest = unwrap_invalid(
+      resolve_coupon(&mut tx, &code, 5_000, None, Some(&account_email), false)
+        .await,
+    );
+    assert_eq!(as_guest, FIRST_PURCHASE_ONLY_MESSAGE);
+    // ...while other coupons are unaffected.
+    let regular = unwrap_coupon(
+      resolve_coupon(&mut tx, &other_code, 5_000, Some(user), None, false)
+        .await,
+    );
+    assert_eq!(regular.code, other_code);
+
+    // Guests are keyed on the order email.
+    let guest_order = insert_order(&mut tx, None).await;
+    sqlx::query(
+      "UPDATE orders SET paid_at = now(), guest_email = 'Buyer@x.co' WHERE id = $1",
+    )
+    .bind(guest_order)
+    .execute(&mut *tx)
+    .await
+    .expect("mark guest paid");
+    let repeat_guest = unwrap_invalid(
+      resolve_coupon(&mut tx, &code, 5_000, None, Some("buyer@x.co"), false)
+        .await,
+    );
+    assert_eq!(repeat_guest, FIRST_PURCHASE_ONLY_MESSAGE);
+    let new_guest = unwrap_coupon(
+      resolve_coupon(&mut tx, &code, 5_000, None, Some("new@x.co"), false)
+        .await,
+    );
+    assert_eq!(new_guest.code, code);
 
     tx.rollback().await.expect("rollback");
   }

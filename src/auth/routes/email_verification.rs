@@ -96,8 +96,6 @@ pub async fn send_verification_email(
     let identifier = format!("{VERIFY_IDENTIFIER_PREFIX}{email}");
     let expires_at = time::OffsetDateTime::now_utc()
       + time::Duration::seconds(VERIFY_TOKEN_TTL_SECS);
-    let expires_at =
-      time::PrimitiveDateTime::new(expires_at.date(), expires_at.time());
 
     // Only the newest verification token stays valid.
     sqlx::query!(

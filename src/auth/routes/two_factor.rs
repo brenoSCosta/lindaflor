@@ -1,8 +1,8 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
-use time::PrimitiveDateTime;
+use time::OffsetDateTime;
 use topcoat::{
   Result,
   context::{Cx, app_context},
@@ -30,17 +30,12 @@ use crate::auth::user::{SessionUser, User, current_user, is_currently_banned};
 pub const PENDING_2FA_PREFIX: &str = "2fa-pending:";
 pub const PENDING_2FA_TTL_SECS: i64 = 10 * 60;
 
-fn system_time_to_primitive(st: SystemTime) -> PrimitiveDateTime {
-  let duration = st.duration_since(UNIX_EPOCH).unwrap_or_default();
-  let odt =
-    time::OffsetDateTime::from_unix_timestamp(duration.as_secs() as i64)
-      .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
-  PrimitiveDateTime::new(odt.date(), odt.time())
+fn system_time_to_offset(st: SystemTime) -> OffsetDateTime {
+  OffsetDateTime::from(st)
 }
 
-fn now_plus(secs: i64) -> PrimitiveDateTime {
-  let odt = time::OffsetDateTime::now_utc() + time::Duration::seconds(secs);
-  PrimitiveDateTime::new(odt.date(), odt.time())
+fn now_plus(secs: i64) -> OffsetDateTime {
+  OffsetDateTime::now_utc() + time::Duration::seconds(secs)
 }
 
 async fn require_session(cx: &Cx) -> Result<SessionUser> {
@@ -220,7 +215,7 @@ async fn start_session_for_user(
   Ok(SessionPayload::from(&SessionUser {
     user,
     session_id,
-    expires_at: system_time_to_primitive(session.expires_at),
+    expires_at: system_time_to_offset(session.expires_at),
     impersonated_by: None,
   }))
 }

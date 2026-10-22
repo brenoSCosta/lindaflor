@@ -143,7 +143,7 @@ async fn my_orders(cx: &Cx, initial_page: i64) -> Result<impl View> {
                               )
                               table_cell(badge(variant: status_variant(&order.status), (order.status)))
                               table_cell("R$ " (order.total_cents / 100))
-                              table_cell(<span class="text-muted-foreground">(order.created_at.to_string())</span>)
+                              table_cell(<span class="text-muted-foreground">(crate::app::store::queries::format_datetime_br(order.created_at))</span>)
                           )
                       }
                   )

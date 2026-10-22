@@ -1,4 +1,5 @@
 pub mod avatar;
+pub mod bootstrap;
 pub mod google;
 pub mod password;
 pub mod routes;

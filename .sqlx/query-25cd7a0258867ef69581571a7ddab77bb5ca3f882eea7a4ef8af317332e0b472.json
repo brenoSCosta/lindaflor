@@ -16,7 +16,7 @@
       {
         "ordinal": 2,
         "name": "ban_expires",
-        "type_info": "Timestamp"
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {

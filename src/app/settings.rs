@@ -1582,7 +1582,7 @@ async fn authorize_immediate_delete(
   let Some(session) = session else {
     return Err("Sessão inválida. Entre novamente.".to_string());
   };
-  let age = time::OffsetDateTime::now_utc() - session.created_at.assume_utc();
+  let age = time::OffsetDateTime::now_utc() - session.created_at;
   if age > time::Duration::seconds(DELETE_FRESH_LOGIN_SECS) {
     return Err(
       "Sessão expirada para esta ação. Entre novamente e tente outra vez."

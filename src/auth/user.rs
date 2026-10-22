@@ -1,7 +1,7 @@
 use std::time::{Duration, SystemTime};
 
 use sqlx::PgPool;
-use time::PrimitiveDateTime;
+use time::OffsetDateTime;
 use topcoat::{
   Result,
   context::{Cx, app_context, memoize},
@@ -24,7 +24,7 @@ pub struct User {
   pub role: Option<String>,
   pub banned: bool,
   pub ban_reason: Option<String>,
-  pub ban_expires: Option<PrimitiveDateTime>,
+  pub ban_expires: Option<OffsetDateTime>,
 }
 
 /// Authenticated principal for the current request (user + session metadata).
@@ -32,7 +32,7 @@ pub struct User {
 pub struct SessionUser {
   pub user: User,
   pub session_id: Uuid,
-  pub expires_at: PrimitiveDateTime,
+  pub expires_at: OffsetDateTime,
   pub impersonated_by: Option<Uuid>,
 }
 
@@ -58,9 +58,8 @@ impl From<SessionWithUser> for SessionUser {
   }
 }
 
-fn primitive_to_system_time(dt: PrimitiveDateTime) -> SystemTime {
-  let odt = dt.assume_utc();
-  let secs = odt.unix_timestamp();
+fn timestamp_to_system_time(dt: OffsetDateTime) -> SystemTime {
+  let secs = dt.unix_timestamp();
   if secs >= 0 {
     SystemTime::UNIX_EPOCH + Duration::from_secs(secs as u64)
   } else {
@@ -77,14 +76,14 @@ fn primitive_to_system_time(dt: PrimitiveDateTime) -> SystemTime {
 /// bans lift on every path instead of drifting apart.
 pub fn is_currently_banned(
   banned: bool,
-  ban_expires: Option<PrimitiveDateTime>,
+  ban_expires: Option<OffsetDateTime>,
 ) -> bool {
   if !banned {
     return false;
   }
   match ban_expires {
     None => true,
-    Some(expires) => expires.assume_utc() > time::OffsetDateTime::now_utc(),
+    Some(expires) => expires > OffsetDateTime::now_utc(),
   }
 }
 
@@ -110,7 +109,7 @@ pub async fn current_user(cx: &Cx) -> Result<Option<SessionUser>> {
     return Ok(None);
   }
 
-  let updated_at = primitive_to_system_time(row.updated_at);
+  let updated_at = timestamp_to_system_time(row.updated_at);
   let age = SystemTime::now()
     .duration_since(updated_at)
     .unwrap_or(Duration::ZERO);
@@ -152,26 +151,19 @@ pub async fn current_user_owned(cx: &Cx) -> Result<Option<SessionUser>> {
 mod tests {
   use super::*;
 
-  fn primitive_hours_from_now(hours: i64) -> PrimitiveDateTime {
-    let odt = time::OffsetDateTime::now_utc() + time::Duration::hours(hours);
-    PrimitiveDateTime::new(odt.date(), odt.time())
+  fn hours_from_now(hours: i64) -> OffsetDateTime {
+    OffsetDateTime::now_utc() + time::Duration::hours(hours)
   }
 
   #[test]
   fn ban_expiry_boundary() {
     // Never banned: no ban regardless of expiry value.
     assert!(!is_currently_banned(false, None));
-    assert!(!is_currently_banned(
-      false,
-      Some(primitive_hours_from_now(1))
-    ));
+    assert!(!is_currently_banned(false, Some(hours_from_now(1))));
     // Permanent ban (no expiry) stays banned.
     assert!(is_currently_banned(true, None));
     // Future expiry is still banned; past expiry lifts the ban.
-    assert!(is_currently_banned(true, Some(primitive_hours_from_now(1))));
-    assert!(!is_currently_banned(
-      true,
-      Some(primitive_hours_from_now(-1))
-    ));
+    assert!(is_currently_banned(true, Some(hours_from_now(1))));
+    assert!(!is_currently_banned(true, Some(hours_from_now(-1))));
   }
 }

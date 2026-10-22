@@ -2,7 +2,7 @@
 //! token and enqueue the message. The raw token only ever lives in the
 //! outbox body (scrubbed once delivered) — never in logs.
 
-use sqlx::PgExecutor;
+use sqlx::{PgExecutor, PgPool};
 
 use super::outbox::{enqueue, kind};
 use super::{absolute_url, encode_query_value, templates};
@@ -17,15 +17,22 @@ pub const RESET_PASSWORD_PATH: &str = "/reset-password";
 pub const CHANGE_EMAIL_PATH: &str = "/confirmar-email";
 pub const DELETE_ACCOUNT_PATH: &str = "/excluir-conta";
 
-pub async fn send_verify_email<'e>(
-  executor: impl PgExecutor<'e>,
+/// Also advertises the configured first-purchase coupon, if any: a
+/// verification email goes to brand-new accounts.
+pub async fn send_verify_email(
+  pool: &PgPool,
   to: &str,
   name: &str,
   token: &str,
 ) -> Result<(), sqlx::Error> {
-  let email =
-    templates::verify_email(name, &token_url(VERIFY_EMAIL_PATH, token));
-  enqueue(executor, kind::VERIFY_EMAIL, to, &email, None).await
+  let first_purchase_code =
+    crate::app::store::coupons::first_purchase_code(pool).await?;
+  let email = templates::verify_email(
+    name,
+    &token_url(VERIFY_EMAIL_PATH, token),
+    first_purchase_code.as_deref(),
+  );
+  enqueue(pool, kind::VERIFY_EMAIL, to, &email, None).await
 }
 
 pub async fn send_password_reset<'e>(

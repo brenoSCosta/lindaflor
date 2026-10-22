@@ -109,7 +109,8 @@ async fn get_order(
 ) -> Result<Option<OrderDetail>, sqlx::Error> {
   let order = sqlx::query_as::<_, OrderRow>(
     "SELECT id, status::text AS status, user_id, access_token, guest_email, subtotal_cents, shipping_cents,
-            discount_cents, pix_discount_cents, total_cents, shipping_address, payment_meta, created_at::text AS created_at
+            discount_cents, pix_discount_cents, total_cents, shipping_address, payment_meta,
+            to_char(created_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS created_at
      FROM orders WHERE id = $1",
   )
   .bind(id)

@@ -43,7 +43,8 @@ x-app-env: &app-env
   TOKEN_PEPPER_FILE: /run/secrets/token_pepper
   TOTP_ENCRYPTION_KEY_FILE: /run/secrets/totp_encryption_key
   METRICS_TOKEN_FILE: /run/secrets/metrics_token
-  # Google OAuth is read from plain env only (no *_FILE support yet).
+  # Google OAuth: plain env here; GOOGLE_CLIENT_ID_FILE /
+  # GOOGLE_CLIENT_SECRET_FILE also work if you mount them as secrets.
   GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
   GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
   RUST_LOG: ${RUST_LOG:-info}
