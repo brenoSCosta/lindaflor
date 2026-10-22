@@ -823,7 +823,7 @@ const MAX_CITY_LEN: usize = 80;
 const MAX_NOTES_LEN: usize = 500;
 
 fn check_field_lengths(form_data: &CheckoutInput) -> Result<(), String> {
-  for (value, max, label) in [
+  for (value, max, what) in [
     (&form_data.guest_email, MAX_EMAIL_LEN, "O e-mail"),
     (&form_data.name, MAX_NAME_LEN, "O nome"),
     (&form_data.phone, MAX_PHONE_LEN, "O WhatsApp"),
@@ -835,12 +835,12 @@ fn check_field_lengths(form_data: &CheckoutInput) -> Result<(), String> {
     (&form_data.notes, MAX_NOTES_LEN, "As observações"),
   ] {
     if value.trim().chars().count() > max {
-      let verb = if label.starts_with("As ") {
+      let verb = if what.starts_with("As ") {
         "devem"
       } else {
         "deve"
       };
-      return Err(format!("{label} {verb} ter no máximo {max} caracteres."));
+      return Err(format!("{what} {verb} ter no máximo {max} caracteres."));
     }
   }
   Ok(())
@@ -865,6 +865,7 @@ mod field_length_tests {
       notes: String::new(),
       coupon_code: None,
       intent: Some("pay".into()),
+      save_address: None,
     }
   }
 
