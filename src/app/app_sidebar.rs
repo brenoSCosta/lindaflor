@@ -412,6 +412,10 @@ pub async fn app_shell(
                                       icon(data: iconify_icon!("lucide:shopping-bag"))
                                       "Pedidos"
                                   </a>
+                                  <a href=(href!(crate::app::conta::enderecos::page)) class=(class!(USER_MENU_ITEM, "hover:bg-foreground/5"))>
+                                      icon(data: iconify_icon!("lucide:map-pin"))
+                                      "Endereços"
+                                  </a>
                                   dropdown_menu_separator()
                                   dropdown_menu_label("Configurações")
                                   <a href=(href!(crate::app::settings::page).query([("tab", "profile")])) class=(class!(USER_MENU_ITEM, "hover:bg-foreground/5"))>

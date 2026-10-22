@@ -60,6 +60,7 @@ pub async fn footer(cx: &Cx) -> Result<impl View> {
                 <div class="flex flex-col gap-2 text-sm text-muted-foreground">
                   <a href=(href!(crate::app::login::page)) class="transition-colors hover:text-foreground">"Entrar"</a>
                   <a href=(href!(crate::app::conta::pedidos::page)) class="transition-colors hover:text-foreground">"Meus pedidos"</a>
+                  <a href=(href!(crate::app::conta::enderecos::page)) class="transition-colors hover:text-foreground">"Meus endereços"</a>
                   <a href=(href!(crate::app::favoritos::page)) class="transition-colors hover:text-foreground">"Favoritos"</a>
                 </div>
               </div>

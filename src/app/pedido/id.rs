@@ -1,9 +1,13 @@
+use serde::Deserialize;
 use sqlx::PgPool;
 use topcoat::{
   Result,
   context::Cx,
   context::app_context,
-  router::{href, page, path_param, query_params},
+  router::{
+    content::Form, href, page, path_param, query_params, response::Response,
+    route,
+  },
   runtime::{Event, procedure, signal},
   view::{View, ViewExt, attributes, view},
 };
@@ -19,6 +23,14 @@ use crate::components::container::{ContainerVariant, container};
 use crate::components::separator::separator;
 use crate::components::table::{
   table, table_body, table_cell, table_head, table_header, table_row,
+};
+use crate::components::toast::{Toast, set_toast, toast_redirect};
+
+use crate::app::store::order::{
+  ApplyError, ApplyOptions, OrderEvent, apply_with_audit,
+};
+use crate::app::store::order_timeline::{
+  OrderProgress, PROGRESS_COLUMNS, ProgressRow, order_timeline,
 };
 
 use crate::app::store::queries::{
@@ -44,6 +56,7 @@ struct OrderDetail {
   status: String,
   user_id: Option<Uuid>,
   access_token: Uuid,
+  token_expired: bool,
   guest_email: Option<String>,
   subtotal_cents: i64,
   shipping_cents: i64,
@@ -53,16 +66,22 @@ struct OrderDetail {
   shipping_address: Option<serde_json::Value>,
   payment_meta: Option<serde_json::Value>,
   created_at: String,
+  progress: OrderProgress,
   items: Vec<OrderItem>,
 }
 
+/// Guest links (`?t=`) stop working once `access_token_expires_at` passes;
+/// an expired token gets the same "not found" as a wrong one. The signed-in
+/// owner is never affected by the expiry.
 fn token_or_owner_allows(
   stored_token: Uuid,
+  token_expired: bool,
   order_user_id: Option<Uuid>,
   query_t: Option<&str>,
   session_user_id: Option<Uuid>,
 ) -> bool {
-  if let Some(raw) = query_t
+  if !token_expired
+    && let Some(raw) = query_t
     && let Ok(parsed) = Uuid::parse_str(raw.trim())
     && parsed == stored_token
   {
@@ -77,6 +96,7 @@ struct OrderRow {
   status: String,
   user_id: Option<Uuid>,
   access_token: Uuid,
+  token_expired: bool,
   guest_email: Option<String>,
   subtotal_cents: i64,
   shipping_cents: i64,
@@ -100,6 +120,7 @@ struct ItemRow {
 struct StatusAccessRow {
   status: String,
   access_token: Uuid,
+  token_expired: bool,
   user_id: Option<Uuid>,
 }
 
@@ -108,7 +129,9 @@ async fn get_order(
   id: Uuid,
 ) -> Result<Option<OrderDetail>, sqlx::Error> {
   let order = sqlx::query_as::<_, OrderRow>(
-    "SELECT id, status::text AS status, user_id, access_token, guest_email, subtotal_cents, shipping_cents,
+    "SELECT id, status::text AS status, user_id, access_token,
+            access_token_expires_at <= now() AS token_expired,
+            guest_email, subtotal_cents, shipping_cents,
             discount_cents, pix_discount_cents, total_cents, shipping_address, payment_meta, created_at::text AS created_at
      FROM orders WHERE id = $1",
   )
@@ -127,12 +150,20 @@ async fn get_order(
   .bind(id)
   .fetch_all(pool)
   .await?;
+  let progress: OrderProgress = sqlx::query_as::<_, ProgressRow>(&format!(
+    "SELECT {PROGRESS_COLUMNS} FROM orders o WHERE o.id = $1"
+  ))
+  .bind(id)
+  .fetch_one(pool)
+  .await?
+  .into();
 
   Ok(Some(OrderDetail {
     id: order.id,
     status: order.status,
     user_id: order.user_id,
     access_token: order.access_token,
+    token_expired: order.token_expired,
     guest_email: order.guest_email,
     subtotal_cents: order.subtotal_cents,
     shipping_cents: order.shipping_cents,
@@ -142,6 +173,7 @@ async fn get_order(
     shipping_address: order.shipping_address,
     payment_meta: order.payment_meta,
     created_at: order.created_at,
+    progress,
     items: items
       .into_iter()
       .map(|i| OrderItem {
@@ -191,7 +223,8 @@ async fn refresh_order_status(
   };
   let pool = app_context::<PgPool>(cx);
   let row = sqlx::query_as::<_, StatusAccessRow>(
-    "SELECT status::text AS status, access_token, user_id
+    "SELECT status::text AS status, access_token,
+            access_token_expires_at <= now() AS token_expired, user_id
      FROM orders WHERE id = $1",
   )
   .bind(id)
@@ -205,6 +238,7 @@ async fn refresh_order_status(
   let query_t = access_token.trim();
   if !token_or_owner_allows(
     row.access_token,
+    row.token_expired,
     row.user_id,
     (!query_t.is_empty()).then_some(query_t),
     session_user_id,
@@ -212,6 +246,110 @@ async fn refresh_order_status(
     return Ok("unknown".to_string());
   }
   Ok(row.status)
+}
+
+#[derive(Deserialize)]
+pub struct CancelInput {
+  #[serde(default)]
+  t: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum CustomerCancel {
+  Cancelled,
+  /// Unknown order, or the caller is neither the owner nor holds a valid
+  /// guest token. Same answer either way.
+  NotFound,
+  /// Paid (or otherwise past `pending_payment`): only the store can cancel.
+  NotPending,
+}
+
+/// Customer-initiated cancel of an unpaid order. The access check and the
+/// status check run under the same row lock as the transition, so a
+/// payment landing concurrently can't be cancelled from here.
+async fn cancel_unpaid_order(
+  pool: &PgPool,
+  order_id: Uuid,
+  query_t: Option<&str>,
+  session_user_id: Option<Uuid>,
+) -> Result<CustomerCancel, ApplyError> {
+  let mut tx = pool.begin().await?;
+  let row = sqlx::query_as::<_, StatusAccessRow>(
+    "SELECT status::text AS status, access_token,
+            access_token_expires_at <= now() AS token_expired, user_id
+     FROM orders WHERE id = $1 FOR UPDATE",
+  )
+  .bind(order_id)
+  .fetch_optional(&mut *tx)
+  .await?;
+  let Some(row) = row else {
+    return Ok(CustomerCancel::NotFound);
+  };
+  if !token_or_owner_allows(
+    row.access_token,
+    row.token_expired,
+    row.user_id,
+    query_t,
+    session_user_id,
+  ) {
+    return Ok(CustomerCancel::NotFound);
+  }
+  if row.status != "pending_payment" {
+    return Ok(CustomerCancel::NotPending);
+  }
+  // Releases the stock hold and restores the coupon (see `order::apply`).
+  apply_with_audit(
+    &mut tx,
+    order_id,
+    OrderEvent::Cancel,
+    ApplyOptions::default(),
+    session_user_id,
+    Some("cliente"),
+  )
+  .await?;
+  tx.commit().await?;
+  Ok(CustomerCancel::Cancelled)
+}
+
+#[route(POST "/pedido/{id}/cancelar")]
+async fn cancel_order(
+  cx: &Cx,
+  Form(form): Form<CancelInput>,
+) -> Result<Response> {
+  let id = path_param::<Id>(cx)?;
+  let pool = app_context::<PgPool>(cx);
+  let session_user_id =
+    current_user_owned(cx).await?.map(|session| session.user.id);
+  let token = form.t.trim();
+  let query_t = (!token.is_empty()).then_some(token);
+  let back = match query_t {
+    Some(token) => href!(page, Id(*id)).query([("t", token)]).resolve(cx),
+    None => href!(page, Id(*id)).resolve(cx),
+  };
+  let outcome =
+    match cancel_unpaid_order(pool, *id, query_t, session_user_id).await {
+      Ok(outcome) => outcome,
+      Err(ApplyError::Db(error)) => return Err(error.into()),
+      Err(error) => {
+        set_toast(cx, Toast::error(error.to_string()));
+        return toast_redirect(cx, back);
+      }
+    };
+  match outcome {
+    CustomerCancel::Cancelled => {
+      set_toast(cx, Toast::success("Pedido cancelado."));
+    }
+    CustomerCancel::NotFound => {
+      set_toast(cx, Toast::error("Pedido não encontrado."));
+    }
+    CustomerCancel::NotPending => set_toast(
+      cx,
+      Toast::error(
+        "Este pedido já foi pago. Fale conosco no WhatsApp para cancelar.",
+      ),
+    ),
+  }
+  toast_redirect(cx, back)
 }
 
 #[page]
@@ -231,6 +369,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     Some(o)
       if token_or_owner_allows(
         o.access_token,
+        o.token_expired,
         o.user_id,
         query_t,
         session_user_id,
@@ -309,6 +448,9 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let coupon_code = coupon_code_from_meta(order.payment_meta.as_ref());
   let order_id_string = order.id.to_string();
   let refresh_token = query_t.unwrap_or("").to_string();
+  let cancel_token = refresh_token.clone();
+  let progress = order.progress.clone();
+  let off_track = matches!(order.status.as_str(), "cancelled" | "refunded");
 
   // Browser-only UI state: copy feedback + manually refreshed status.
   // No WebSocket; the buyer taps the button after paying on their bank app.
@@ -408,6 +550,33 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
 
             card(
                 card_header(
+                    card_title("Acompanhamento")
+                )
+                card_content(
+                    if off_track {
+                        <p class="text-sm text-muted-foreground">
+                            "Pedido " (status_label(&order.status).to_lowercase()) "."
+                        </p>
+                    }
+                    order_timeline(progress: progress)
+                )
+            )
+
+            if is_pending {
+                <form method="post" action=(href!(cancel_order, Id(order.id))) class="flex justify-end">
+                    <input type="hidden" name="t" value=(cancel_token)>
+                    <button
+                        type="submit"
+                        class=(button_variants(ButtonVariant::Outline, ButtonSize::Md))
+                        onclick="return confirm('Cancelar este pedido? A reserva dos itens será liberada.')"
+                    >
+                        "Cancelar pedido"
+                    </button>
+                </form>
+            }
+
+            card(
+                card_header(
                     card_title("Itens")
                 )
                 card_content(
@@ -503,6 +672,7 @@ mod tests {
     let token = Uuid::now_v7();
     assert!(token_or_owner_allows(
       token,
+      false,
       None,
       Some(&token.to_string()),
       None
@@ -512,9 +682,10 @@ mod tests {
   #[test]
   fn wrong_or_missing_token_denied_for_guest() {
     let token = Uuid::now_v7();
-    assert!(!token_or_owner_allows(token, None, None, None));
+    assert!(!token_or_owner_allows(token, false, None, None, None));
     assert!(!token_or_owner_allows(
       token,
+      false,
       None,
       Some(&Uuid::now_v7().to_string()),
       None
@@ -525,9 +696,16 @@ mod tests {
   fn owner_session_skips_token() {
     let token = Uuid::now_v7();
     let owner = Uuid::now_v7();
-    assert!(token_or_owner_allows(token, Some(owner), None, Some(owner)));
+    assert!(token_or_owner_allows(
+      token,
+      false,
+      Some(owner),
+      None,
+      Some(owner)
+    ));
     assert!(!token_or_owner_allows(
       token,
+      false,
       Some(owner),
       None,
       Some(Uuid::now_v7())
@@ -557,15 +735,171 @@ mod tests {
     assert_eq!(order.access_token, access_token);
     assert!(token_or_owner_allows(
       order.access_token,
+      order.token_expired,
       order.user_id,
       Some(&access_token.to_string()),
       None
     ));
     assert!(!token_or_owner_allows(
       order.access_token,
+      order.token_expired,
       order.user_id,
       Some(&Uuid::new_v4().to_string()),
       None
     ));
+  }
+
+  #[test]
+  fn expired_token_denied_but_owner_still_allowed() {
+    let token = Uuid::now_v7();
+    let owner = Uuid::now_v7();
+    assert!(!token_or_owner_allows(
+      token,
+      true,
+      None,
+      Some(&token.to_string()),
+      None
+    ));
+    assert!(token_or_owner_allows(
+      token,
+      true,
+      Some(owner),
+      None,
+      Some(owner)
+    ));
+  }
+
+  async fn insert_guest_order(
+    pool: &PgPool,
+    expires_sql: &str,
+  ) -> (Uuid, Uuid) {
+    let order_id = Uuid::now_v7();
+    let access_token = Uuid::new_v4();
+    sqlx::query(&format!(
+      "INSERT INTO orders (id, guest_email, status, total_cents, access_token, access_token_expires_at)
+       VALUES ($1, 'guest@example.com', 'pending_payment', 1000, $2, {expires_sql})"
+    ))
+    .bind(order_id)
+    .bind(access_token)
+    .execute(pool)
+    .await
+    .expect("insert order");
+    (order_id, access_token)
+  }
+
+  #[tokio::test]
+  async fn token_expiry_defaults_to_90_days_and_hides_order() {
+    let pool = crate::test_support::fresh_pool().await;
+    let order_id = Uuid::now_v7();
+    sqlx::query(
+      "INSERT INTO orders (id, guest_email, status, total_cents)
+       VALUES ($1, 'guest@example.com', 'pending_payment', 1000)",
+    )
+    .bind(order_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let days: f64 = sqlx::query_scalar(
+      "SELECT EXTRACT(EPOCH FROM access_token_expires_at - now())::float8 / 86400
+       FROM orders WHERE id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!((89.9..=90.1).contains(&days), "{days}");
+
+    let (expired_id, token) =
+      insert_guest_order(&pool, "now() - interval '1 minute'").await;
+    let order = get_order(&pool, expired_id).await.unwrap().unwrap();
+    assert!(order.token_expired);
+    assert!(!token_or_owner_allows(
+      order.access_token,
+      order.token_expired,
+      order.user_id,
+      Some(&token.to_string()),
+      None
+    ));
+    // Cancelling with the expired link is refused like an unknown order.
+    assert_eq!(
+      cancel_unpaid_order(&pool, expired_id, Some(&token.to_string()), None)
+        .await
+        .unwrap(),
+      CustomerCancel::NotFound
+    );
+  }
+
+  #[tokio::test]
+  async fn customer_cancels_unpaid_order() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (order_id, token) =
+      insert_guest_order(&pool, "now() + interval '1 day'").await;
+    // Wrong token: not found, order untouched.
+    assert_eq!(
+      cancel_unpaid_order(
+        &pool,
+        order_id,
+        Some(&Uuid::new_v4().to_string()),
+        None
+      )
+      .await
+      .unwrap(),
+      CustomerCancel::NotFound
+    );
+    // A signed-in stranger without the token is refused too.
+    assert_eq!(
+      cancel_unpaid_order(&pool, order_id, None, Some(Uuid::now_v7()))
+        .await
+        .unwrap(),
+      CustomerCancel::NotFound
+    );
+    assert_eq!(
+      cancel_unpaid_order(&pool, order_id, Some(&token.to_string()), None)
+        .await
+        .unwrap(),
+      CustomerCancel::Cancelled
+    );
+    let status: String =
+      sqlx::query_scalar("SELECT status::text FROM orders WHERE id = $1")
+        .bind(order_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "cancelled");
+    let audit_actor: Option<String> = sqlx::query_scalar(
+      "SELECT metadata->>'action' FROM audit_events WHERE entity_id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audit_actor.as_deref(), Some("cancel"));
+    // Second attempt: no longer pending.
+    assert_eq!(
+      cancel_unpaid_order(&pool, order_id, Some(&token.to_string()), None)
+        .await
+        .unwrap(),
+      CustomerCancel::NotPending
+    );
+  }
+
+  #[tokio::test]
+  async fn paid_order_cannot_be_cancelled_by_customer() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (order_id, token) =
+      insert_guest_order(&pool, "now() + interval '1 day'").await;
+    sqlx::query(
+      "UPDATE orders SET status = 'paid', paid_at = now() WHERE id = $1",
+    )
+    .bind(order_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+      cancel_unpaid_order(&pool, order_id, Some(&token.to_string()), None)
+        .await
+        .unwrap(),
+      CustomerCancel::NotPending
+    );
   }
 }

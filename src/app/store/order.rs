@@ -97,6 +97,9 @@ pub enum ApplyError {
     event: OrderEvent,
   },
   InsufficientStock,
+  /// `Ship` without a tracking code.
+  TrackingRequired,
+  InvalidTracking(&'static str),
   Db(sqlx::Error),
 }
 
@@ -125,6 +128,10 @@ impl std::fmt::Display for ApplyError {
       Self::InsufficientStock => {
         write!(f, "Estoque insuficiente para reabrir o pedido.")
       }
+      Self::TrackingRequired => {
+        write!(f, "Informe o código de rastreio para marcar como enviado.")
+      }
+      Self::InvalidTracking(message) => write!(f, "{message}"),
       Self::Db(error) => write!(f, "{error}"),
     }
   }
@@ -134,15 +141,34 @@ impl std::fmt::Display for ApplyError {
 /// cancelling/refunding a `Paid`/`Processing` order, keep stock sold once
 /// the goods left the warehouse from `Shipped`/`Delivered`); `Some` is an
 /// explicit admin choice from the "Devolver ao estoque" checkbox.
+///
+/// `tracking` is required by `Ship` and ignored by every other event.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct ApplyOptions {
+pub struct ApplyOptions<'a> {
   pub restock: Option<bool>,
+  pub tracking: Option<Tracking<'a>>,
 }
 
-impl ApplyOptions {
+/// Carrier + tracking code as typed by the admin; normalized by
+/// [`normalize_tracking`] inside [`apply`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Tracking<'a> {
+  pub carrier: &'a str,
+  pub code: &'a str,
+}
+
+impl<'a> ApplyOptions<'a> {
   pub fn with_restock(restock: bool) -> Self {
     Self {
       restock: Some(restock),
+      tracking: None,
+    }
+  }
+
+  pub fn with_tracking(self, tracking: Tracking<'a>) -> Self {
+    Self {
+      tracking: Some(tracking),
+      ..self
     }
   }
 
@@ -154,6 +180,66 @@ impl ApplyOptions {
       }
     }
   }
+}
+
+pub const DEFAULT_CARRIER: &str = "Correios";
+const CARRIER_MAX_CHARS: usize = 40;
+const TRACKING_MAX_CHARS: usize = 40;
+
+fn is_correios(carrier: &str) -> bool {
+  carrier.eq_ignore_ascii_case(DEFAULT_CARRIER)
+}
+
+/// Validates a tracking code and returns `(carrier, code)` normalized.
+/// Correios codes are checked loosely against the `AA123456789BR` shape
+/// (2 letters, 9 digits, 2 letters; spaces/dashes ignored); other carriers
+/// accept any short alphanumeric code.
+pub fn normalize_tracking(
+  carrier: &str,
+  code: &str,
+) -> Result<(String, String), ApplyError> {
+  let carrier = carrier.trim();
+  let carrier = if carrier.is_empty() || is_correios(carrier) {
+    DEFAULT_CARRIER.to_string()
+  } else if carrier.chars().count() > CARRIER_MAX_CHARS {
+    return Err(ApplyError::InvalidTracking("Transportadora inválida."));
+  } else {
+    carrier.to_string()
+  };
+  let code: String = code
+    .chars()
+    .filter(|c| !c.is_whitespace() && *c != '-' && *c != '.')
+    .collect::<String>()
+    .to_ascii_uppercase();
+  if code.is_empty() {
+    return Err(ApplyError::TrackingRequired);
+  }
+  if is_correios(&carrier) {
+    let bytes = code.as_bytes();
+    let shaped = bytes.len() == 13
+      && bytes[..2].iter().all(u8::is_ascii_uppercase)
+      && bytes[2..11].iter().all(u8::is_ascii_digit)
+      && bytes[11..].iter().all(u8::is_ascii_uppercase);
+    if !shaped {
+      return Err(ApplyError::InvalidTracking(
+        "Código de rastreio dos Correios inválido (ex.: AA123456789BR).",
+      ));
+    }
+  } else if code.chars().count() > TRACKING_MAX_CHARS
+    || !code.chars().all(|c| c.is_ascii_alphanumeric())
+  {
+    return Err(ApplyError::InvalidTracking(
+      "Código de rastreio inválido (use apenas letras e números).",
+    ));
+  }
+  Ok((carrier, code))
+}
+
+/// Public tracking page for the carrier, when we know one.
+pub fn tracking_url(carrier: &str, code: &str) -> Option<String> {
+  is_correios(carrier).then(|| {
+    format!("https://rastreamento.correios.com.br/app/index.php?objetos={code}")
+  })
 }
 
 fn transition(
@@ -192,6 +278,7 @@ struct ApplyOutcome {
   from: OrderStatus,
   next: OrderStatus,
   restocked: bool,
+  tracking: Option<(String, String)>,
 }
 
 async fn order_lines(
@@ -221,7 +308,7 @@ pub async fn apply(
   tx: &mut Transaction<'_, Postgres>,
   order_id: Uuid,
   event: OrderEvent,
-  opts: ApplyOptions,
+  opts: ApplyOptions<'_>,
 ) -> Result<OrderStatus, ApplyError> {
   Ok(apply_inner(tx, order_id, event, opts).await?.next)
 }
@@ -230,7 +317,7 @@ async fn apply_inner(
   tx: &mut Transaction<'_, Postgres>,
   order_id: Uuid,
   event: OrderEvent,
-  opts: ApplyOptions,
+  opts: ApplyOptions<'_>,
 ) -> Result<ApplyOutcome, ApplyError> {
   let row: Option<(String, Option<String>)> = sqlx::query_as(
     "SELECT status::text, paid_at::text FROM orders WHERE id = $1 FOR UPDATE",
@@ -252,6 +339,7 @@ async fn apply_inner(
   }
   let next = transition(from, event)?;
   let mut restocked = false;
+  let mut tracking = None;
 
   match (from, event) {
     (OrderStatus::PendingPayment, OrderEvent::Pay) => {
@@ -316,6 +404,38 @@ async fn apply_inner(
       .execute(&mut **tx)
       .await?;
     }
+    (_, OrderEvent::Ship) => {
+      let given = opts.tracking.ok_or(ApplyError::TrackingRequired)?;
+      let (carrier, code) = normalize_tracking(given.carrier, given.code)?;
+      // The guest link keeps working for 90 days after shipping, so the
+      // buyer can follow the parcel even on a long-pending order.
+      sqlx::query(
+        "UPDATE orders SET status = $2::order_status, carrier = $3, tracking_code = $4,
+                shipped_at = now(),
+                access_token_expires_at = GREATEST(access_token_expires_at, now() + interval '90 days'),
+                updated_at = now()
+         WHERE id = $1",
+      )
+      .bind(order_id)
+      .bind(next.as_str())
+      .bind(&carrier)
+      .bind(&code)
+      .execute(&mut **tx)
+      .await?;
+      tracking = Some((carrier, code));
+    }
+    (_, OrderEvent::Deliver) => {
+      sqlx::query(
+        "UPDATE orders SET status = $2::order_status, delivered_at = now(),
+                access_token_expires_at = GREATEST(access_token_expires_at, now() + interval '90 days'),
+                updated_at = now()
+         WHERE id = $1",
+      )
+      .bind(order_id)
+      .bind(next.as_str())
+      .execute(&mut **tx)
+      .await?;
+    }
     _ => {
       sqlx::query(
         "UPDATE orders SET status = $2::order_status, updated_at = now() WHERE id = $1",
@@ -331,6 +451,7 @@ async fn apply_inner(
     from,
     next,
     restocked,
+    tracking,
   })
 }
 
@@ -341,12 +462,22 @@ pub async fn apply_with_audit(
   tx: &mut Transaction<'_, Postgres>,
   order_id: Uuid,
   event: OrderEvent,
-  opts: ApplyOptions,
+  opts: ApplyOptions<'_>,
   actor_id: Option<Uuid>,
   actor_name: Option<&str>,
 ) -> Result<OrderStatus, ApplyError> {
   let outcome = apply_inner(tx, order_id, event, opts).await?;
   let aggregate_id = order_id.to_string();
+  let mut metadata = serde_json::json!({
+    "action": event.action_name(),
+    "from": outcome.from.as_str(),
+    "to": outcome.next.as_str(),
+    "restock": outcome.restocked,
+  });
+  if let Some((carrier, code)) = &outcome.tracking {
+    metadata["carrier"] = serde_json::json!(carrier);
+    metadata["tracking_code"] = serde_json::json!(code);
+  }
   crate::audit::record_audit_event(
     &mut **tx,
     crate::audit::AuditEvent {
@@ -356,12 +487,7 @@ pub async fn apply_with_audit(
       entity_id: order_id,
       actor_id,
       actor_name,
-      metadata: serde_json::json!({
-        "action": event.action_name(),
-        "from": outcome.from.as_str(),
-        "to": outcome.next.as_str(),
-        "restock": outcome.restocked,
-      }),
+      metadata,
     },
   )
   .await?;
@@ -441,6 +567,13 @@ mod tests {
   use super::*;
   use crate::app::store::inventory::ReserveLine;
   use crate::app::store::inventory::reserve_for_order;
+
+  fn ship_opts() -> ApplyOptions<'static> {
+    ApplyOptions::default().with_tracking(Tracking {
+      carrier: "Correios",
+      code: "AA123456789BR",
+    })
+  }
 
   async fn seed_order_with_stock(pool: &PgPool, qty: i32) -> (Uuid, Uuid, i32) {
     let product_id = Uuid::now_v7();
@@ -555,7 +688,7 @@ mod tests {
       OrderStatus::Paid
     );
     assert_eq!(
-      apply(&mut tx, order_id, OrderEvent::Ship, ApplyOptions::default())
+      apply(&mut tx, order_id, OrderEvent::Ship, ship_opts())
         .await
         .unwrap(),
       OrderStatus::Shipped
@@ -590,7 +723,7 @@ mod tests {
       OrderStatus::Processing
     );
     assert_eq!(
-      apply(&mut tx, order_id, OrderEvent::Ship, opts)
+      apply(&mut tx, order_id, OrderEvent::Ship, ship_opts())
         .await
         .unwrap(),
       OrderStatus::Shipped
@@ -686,7 +819,7 @@ mod tests {
     apply(&mut tx, order_id, OrderEvent::Pay, opts)
       .await
       .unwrap();
-    apply(&mut tx, order_id, OrderEvent::Ship, opts)
+    apply(&mut tx, order_id, OrderEvent::Ship, ship_opts())
       .await
       .unwrap();
     apply(&mut tx, order_id, OrderEvent::Refund, opts)
@@ -703,7 +836,7 @@ mod tests {
     apply(&mut tx, order_id, OrderEvent::Pay, opts)
       .await
       .unwrap();
-    apply(&mut tx, order_id, OrderEvent::Ship, opts)
+    apply(&mut tx, order_id, OrderEvent::Ship, ship_opts())
       .await
       .unwrap();
     apply(
@@ -749,7 +882,7 @@ mod tests {
     apply(&mut tx, order_id, OrderEvent::Pay, opts)
       .await
       .unwrap();
-    apply(&mut tx, order_id, OrderEvent::Ship, opts)
+    apply(&mut tx, order_id, OrderEvent::Ship, ship_opts())
       .await
       .unwrap();
     apply(&mut tx, order_id, OrderEvent::Deliver, opts)
@@ -826,7 +959,7 @@ mod tests {
     assert!(paid_at.is_some());
     // The paid order continues down the normal pipeline.
     assert_eq!(
-      apply(&mut tx, order_id, OrderEvent::Ship, opts)
+      apply(&mut tx, order_id, OrderEvent::Ship, ship_opts())
         .await
         .unwrap(),
       OrderStatus::Shipped
@@ -1030,5 +1163,145 @@ mod tests {
     .await
     .unwrap();
     assert_eq!(revenue, 1_700);
+  }
+
+  #[test]
+  fn tracking_normalization() {
+    assert_eq!(
+      normalize_tracking("", " aa 123.456.789-br ").unwrap(),
+      ("Correios".to_string(), "AA123456789BR".to_string())
+    );
+    assert_eq!(
+      normalize_tracking("correios", "QB987654321US").unwrap().1,
+      "QB987654321US"
+    );
+    assert!(matches!(
+      normalize_tracking("Correios", "  "),
+      Err(ApplyError::TrackingRequired)
+    ));
+    assert!(matches!(
+      normalize_tracking("Correios", "123456789"),
+      Err(ApplyError::InvalidTracking(_))
+    ));
+    // Other carriers are free-form (alphanumeric).
+    assert_eq!(
+      normalize_tracking(" Jadlog ", "1234-5678 90").unwrap(),
+      ("Jadlog".to_string(), "1234567890".to_string())
+    );
+    assert!(matches!(
+      normalize_tracking("Jadlog", "<script>"),
+      Err(ApplyError::InvalidTracking(_))
+    ));
+    assert!(tracking_url("Correios", "AA123456789BR").is_some());
+    assert!(tracking_url("Jadlog", "123").is_none());
+  }
+
+  #[tokio::test]
+  async fn ship_requires_tracking_and_stores_it() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (order_id, _, _) = seed_order_with_stock(&pool, 2).await;
+    let mut tx = pool.begin().await.unwrap();
+    apply(&mut tx, order_id, OrderEvent::Pay, ApplyOptions::default())
+      .await
+      .unwrap();
+    assert!(matches!(
+      apply(&mut tx, order_id, OrderEvent::Ship, ApplyOptions::default()).await,
+      Err(ApplyError::TrackingRequired)
+    ));
+    let bad = ApplyOptions::default().with_tracking(Tracking {
+      carrier: "Correios",
+      code: "nope",
+    });
+    assert!(matches!(
+      apply(&mut tx, order_id, OrderEvent::Ship, bad).await,
+      Err(ApplyError::InvalidTracking(_))
+    ));
+    assert_eq!(order_status_of(&mut tx, order_id).await, "paid");
+
+    // Shipping pushes the guest-link expiry out.
+    sqlx::query(
+      "UPDATE orders SET access_token_expires_at = now() + interval '1 day'
+       WHERE id = $1",
+    )
+    .bind(order_id)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    let good = ApplyOptions::default().with_tracking(Tracking {
+      carrier: "",
+      code: "aa123456789br",
+    });
+    apply(&mut tx, order_id, OrderEvent::Ship, good)
+      .await
+      .unwrap();
+    let row: (String, Option<String>, bool, bool) = sqlx::query_as(
+      "SELECT carrier, tracking_code, shipped_at IS NOT NULL,
+              access_token_expires_at > now() + interval '80 days'
+       FROM orders WHERE id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(
+      row,
+      (
+        "Correios".to_string(),
+        Some("AA123456789BR".to_string()),
+        true,
+        true
+      )
+    );
+
+    apply(
+      &mut tx,
+      order_id,
+      OrderEvent::Deliver,
+      ApplyOptions::default(),
+    )
+    .await
+    .unwrap();
+    let delivered: bool = sqlx::query_scalar(
+      "SELECT delivered_at IS NOT NULL FROM orders WHERE id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    assert!(delivered);
+    tx.rollback().await.unwrap();
+  }
+
+  #[tokio::test]
+  async fn ship_audit_records_tracking() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (order_id, _, _) = seed_order_with_stock(&pool, 2).await;
+    let mut tx = pool.begin().await.unwrap();
+    apply(&mut tx, order_id, OrderEvent::Pay, ApplyOptions::default())
+      .await
+      .unwrap();
+    apply_with_audit(
+      &mut tx,
+      order_id,
+      OrderEvent::Ship,
+      ship_opts(),
+      None,
+      Some("Admin"),
+    )
+    .await
+    .unwrap();
+    let metadata: serde_json::Value = sqlx::query_scalar(
+      "SELECT metadata FROM audit_events WHERE entity_id = $1",
+    )
+    .bind(order_id)
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(
+      metadata["tracking_code"],
+      serde_json::json!("AA123456789BR")
+    );
+    assert_eq!(metadata["carrier"], serde_json::json!("Correios"));
+    tx.rollback().await.unwrap();
   }
 }
