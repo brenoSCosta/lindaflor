@@ -49,3 +49,12 @@ test-support = { path = "crates/test-support" }
 # Faster incremental links for `topcoat dev` (see Topcoat getting started).
 [profile.dev]
 debug = "line-tables-only"
+
+# Argon2id at opt-level 0 is ~10-20x slower: 10 backup-code hashes then
+# overrun the 5s `spawn_blocking` bound in `hash_backup_codes_async` under
+# parallel tests (flaky 500s on 2FA enable). Optimize just the KDF crates.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
