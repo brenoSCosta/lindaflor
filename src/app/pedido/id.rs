@@ -1,3 +1,5 @@
+pub mod troca;
+
 use serde::Deserialize;
 use sqlx::PgPool;
 use topcoat::{
@@ -73,7 +75,7 @@ struct OrderDetail {
 /// Guest links (`?t=`) stop working once `access_token_expires_at` passes;
 /// an expired token gets the same "not found" as a wrong one. The signed-in
 /// owner is never affected by the expiry.
-fn token_or_owner_allows(
+pub(crate) fn token_or_owner_allows(
   stored_token: Uuid,
   token_expired: bool,
   order_user_id: Option<Uuid>,
@@ -484,6 +486,9 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let refresh_token = query_t.unwrap_or("").to_string();
   let cancel_token = refresh_token.clone();
   let progress = order.progress.clone();
+  let returns =
+    crate::app::store::returns::order_returns(pool, order.id).await?;
+  let returns_token = query_t.map(str::to_string);
   let off_track = matches!(order.status.as_str(), "cancelled" | "refunded");
 
   // Browser-only UI state: copy feedback + manually refreshed status.
@@ -617,6 +622,8 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                     order_timeline(progress: progress)
                 )
             )
+
+            troca::return_section(order_id: order.id, token: returns_token, info: returns)
 
             if is_pending {
                 <form method="post" action=(href!(cancel_order, Id(order.id))) class="flex justify-end">

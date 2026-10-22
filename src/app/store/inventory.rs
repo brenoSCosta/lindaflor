@@ -465,6 +465,29 @@ pub async fn restock_sold_items(
   order_id: Uuid,
 ) -> Result<(), sqlx::Error> {
   let items = order_item_quantities(tx, order_id).await?;
+  restock_variant_quantities(tx, order_id, items).await
+}
+
+/// Restock only `lines` of an order (a partial return, see
+/// `store::returns`), with the same warehouse rule as
+/// [`restock_sold_items`].
+pub async fn restock_lines(
+  tx: &mut Transaction<'_, Postgres>,
+  order_id: Uuid,
+  lines: &[ReserveLine],
+) -> Result<(), sqlx::Error> {
+  let items = lines
+    .iter()
+    .map(|line| (line.variant_id, line.quantity))
+    .collect();
+  restock_variant_quantities(tx, order_id, items).await
+}
+
+async fn restock_variant_quantities(
+  tx: &mut Transaction<'_, Postgres>,
+  order_id: Uuid,
+  items: Vec<(Uuid, i32)>,
+) -> Result<(), sqlx::Error> {
   let variant_ids: Vec<Uuid> = items
     .iter()
     .filter(|(_, quantity)| *quantity > 0)

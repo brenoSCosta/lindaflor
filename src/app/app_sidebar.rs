@@ -165,6 +165,8 @@ pub async fn app_shell(
   let stock_active = path_prefix(&pathname, "/admin/estoque");
   let settings_active = path_prefix(&pathname, "/admin/configuracoes");
   let coupons_active = path_prefix(&pathname, "/admin/cupons");
+  let returns_active = path_prefix(&pathname, "/admin/trocas");
+  let reports_active = path_prefix(&pathname, "/admin/relatorios");
   let name = user.user.name.clone();
   let email = user.user.email.clone();
   let user_initials = initials(&name);
@@ -190,6 +192,8 @@ pub async fn app_shell(
   let store_settings_href =
     href!(crate::app::admin::configuracoes::page).resolve(cx);
   let coupons_href = href!(crate::app::admin::cupons::page).resolve(cx);
+  let returns_href = href!(crate::app::admin::trocas::page).resolve(cx);
+  let reports_href = href!(crate::app::admin::relatorios::page).resolve(cx);
 
   Ok(view! {
       sidebar_provider(
@@ -324,6 +328,24 @@ pub async fn app_shell(
                                           tooltip: Some("Pedidos"),
                                           icon(data: iconify_icon!("lucide:shopping-bag"))
                                           <span>"Pedidos"</span>
+                                      )
+                                  )
+                                  sidebar_menu_item(
+                                      sidebar_menu_button(
+                                          href: Some(returns_href.as_str()),
+                                          active: returns_active,
+                                          tooltip: Some("Trocas"),
+                                          icon(data: iconify_icon!("lucide:repeat"))
+                                          <span>"Trocas"</span>
+                                      )
+                                  )
+                                  sidebar_menu_item(
+                                      sidebar_menu_button(
+                                          href: Some(reports_href.as_str()),
+                                          active: reports_active,
+                                          tooltip: Some("Relatórios"),
+                                          icon(data: iconify_icon!("lucide:trending-up"))
+                                          <span>"Relatórios"</span>
                                       )
                                   )
                                   sidebar_menu_item(
