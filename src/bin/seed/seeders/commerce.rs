@@ -168,18 +168,12 @@ async fn seed_warehouse(pool: &PgPool) -> Result<Uuid, SeedError> {
 const FIRST_PURCHASE_COUPON: &str = "BEMVINDA10";
 
 async fn seed_settings(pool: &PgPool) -> Result<(), SeedError> {
-  let existing = sqlx::query!("SELECT id FROM store_settings LIMIT 1")
-    .fetch_optional(pool)
-    .await?;
-
-  if existing.is_some() {
-    tracing::info!("Store settings already present, leaving unchanged");
-  } else {
-    sqlx::query(
+  // Singleton row (migration 0019): an existing row is left unchanged.
+  let inserted = sqlx::query(
         "INSERT INTO store_settings (id, pix_key, pix_key_type, pix_merchant_name, pix_merchant_city, pix_discount_percent, announcement_text, first_purchase_coupon_code, whatsapp_number, whatsapp_message_template, created_at, updated_at)
-         VALUES ($1, $2, 'phone', 'Linda Flor Moda Praia', 'Aracaju', 5, NULL, $5, $3, $4, now(), now())",
+         VALUES (true, $1, 'phone', 'Linda Flor Moda Praia', 'Aracaju', 5, NULL, $4, $2, $3, now(), now())
+         ON CONFLICT (id) DO NOTHING",
     )
-    .bind(Uuid::now_v7())
     .bind(env_str("SEED_PIX_KEY", "79998165115"))
     .bind(env_str("SEED_WHATSAPP_NUMBER", "5579998165115"))
     .bind(env_str(
@@ -190,6 +184,9 @@ async fn seed_settings(pool: &PgPool) -> Result<(), SeedError> {
     .execute(pool)
     .await?;
 
+  if inserted.rows_affected() == 0 {
+    tracing::info!("Store settings already present, leaving unchanged");
+  } else {
     tracing::info!("Store settings created");
   }
 

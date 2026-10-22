@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use topcoat::{
   Result,
   context::{Cx, app_context},
@@ -508,6 +508,13 @@ async fn update_product(cx: &Cx, multipart: Multipart) -> Result<Response> {
     return fail("Este slug já está em uso por outro produto.");
   }
 
+  let Ok(warehouse) = ensure_default_warehouse(pool).await else {
+    return fail("Não foi possível salvar as variantes.");
+  };
+
+  // Product fields, variants and looks are written together (dropping `tx`
+  // on an early return rolls back). Images are handled after the commit.
+  let mut tx = pool.begin().await?;
   if let Err(err) = sqlx::query(
     "UPDATE products SET name = $2, slug = $3, description = $4, price_in_cents = $5, compare_at_price_in_cents = $6,
      category = $7::product_category, featured = $8, active = $9, updated_at = now() WHERE id = $1",
@@ -521,13 +528,15 @@ async fn update_product(cx: &Cx, multipart: Multipart) -> Result<Response> {
   .bind(&category)
   .bind(featured)
   .bind(active)
-  .execute(pool)
+  .execute(&mut *tx)
   .await
   {
     return fail(&db_error_message(&err));
   }
 
-  if let Err(message) = sync_variants(pool, product_id, &variants).await {
+  if let Err(message) =
+    sync_variants(&mut tx, product_id, warehouse, &variants).await
+  {
     return fail(&message);
   }
 
@@ -544,7 +553,7 @@ async fn update_product(cx: &Cx, multipart: Multipart) -> Result<Response> {
   // Delete existing looks for this product
   sqlx::query("DELETE FROM product_looks WHERE product_id = $1")
     .bind(product_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
 
   // Keep the submitted order; ids that aren't other existing products
@@ -559,8 +568,9 @@ async fn update_product(cx: &Cx, multipart: Multipart) -> Result<Response> {
   )
   .bind(product_id)
   .bind(&look_product_ids)
-  .execute(pool)
+  .execute(&mut *tx)
   .await?;
+  tx.commit().await?;
 
   for image_id in delete_ids {
     let owner: Option<Uuid> =
@@ -606,17 +616,19 @@ async fn update_product(cx: &Cx, multipart: Multipart) -> Result<Response> {
 
 /// Reconcile submitted variants (keyed by SKU) with stored rows.
 /// New SKUs gain an inventory row in the default warehouse; removed SKUs are
-/// deleted (blocked by `order_items` FK when they have orders).
+/// deleted (blocked by `order_items` FK when they have orders). Runs on the
+/// caller's transaction.
 async fn sync_variants(
-  pool: &PgPool,
+  conn: &mut PgConnection,
   product_id: Uuid,
+  warehouse: Uuid,
   variants: &[VariantRow],
 ) -> Result<(), String> {
   let existing: Vec<(Uuid, String)> = sqlx::query_as(
     "SELECT id, sku FROM product_variants WHERE product_id = $1",
   )
   .bind(product_id)
-  .fetch_all(pool)
+  .fetch_all(&mut *conn)
   .await
   .map_err(|_| "Não foi possível salvar as variantes.".to_string())?;
   let by_sku: HashMap<&str, Uuid> = existing
@@ -625,10 +637,6 @@ async fn sync_variants(
     .collect();
   let submitted: HashSet<&str> =
     variants.iter().map(|v| v.sku.as_str()).collect();
-
-  let warehouse = ensure_default_warehouse(pool)
-    .await
-    .map_err(|_| "Não foi possível salvar as variantes.".to_string())?;
 
   for variant in variants {
     if let Some(id) = by_sku.get(variant.sku.as_str()) {
@@ -641,7 +649,7 @@ async fn sync_variants(
       .bind(&variant.color)
       .bind(&variant.color_hex)
       .bind(variant.low_stock_threshold)
-      .execute(pool)
+      .execute(&mut *conn)
       .await
       .map_err(|err| db_error_message(&err))?;
     } else {
@@ -657,7 +665,7 @@ async fn sync_variants(
       .bind(&variant.color)
       .bind(&variant.color_hex)
       .bind(variant.low_stock_threshold)
-      .execute(pool)
+      .execute(&mut *conn)
       .await
       .map_err(|err| db_error_message(&err))?;
       sqlx::query(
@@ -668,7 +676,7 @@ async fn sync_variants(
       .bind(Uuid::now_v7())
       .bind(id)
       .bind(warehouse)
-      .execute(pool)
+      .execute(&mut *conn)
       .await
       .map_err(|err| db_error_message(&err))?;
     }
@@ -678,7 +686,7 @@ async fn sync_variants(
     if !submitted.contains(sku.as_str()) {
       sqlx::query("DELETE FROM product_variants WHERE id = $1")
         .bind(id)
-        .execute(pool)
+        .execute(&mut *conn)
         .await
         .map_err(|err| db_error_message(&err))?;
     }

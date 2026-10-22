@@ -386,6 +386,85 @@ struct SlotInput {
   variant_id: Uuid,
 }
 
+struct SetWrite<'a> {
+  name: &'a str,
+  slug: &'a str,
+  description: Option<&'a str>,
+  price: Option<i64>,
+  compare: Option<i64>,
+  active: bool,
+  member_ids: &'a [Uuid],
+  slots: &'a [SlotInput],
+}
+
+/// Rewrite a set's fields, members and slots in one transaction, so a
+/// failure halfway through keeps the previous set and a concurrent checkout
+/// never sees a set without slots.
+async fn write_set(
+  pool: &PgPool,
+  set_id: Uuid,
+  set: &SetWrite<'_>,
+) -> Result<()> {
+  let mut tx = pool.begin().await?;
+
+  sqlx::query(
+    "UPDATE sets SET name = $2, slug = $3, description = $4, price_in_cents = $5,
+      compare_at_price_in_cents = $6, active = $7, updated_at = now() WHERE id = $1",
+  )
+  .bind(set_id)
+  .bind(set.name)
+  .bind(set.slug)
+  .bind(set.description)
+  .bind(set.price)
+  .bind(set.compare)
+  .bind(set.active)
+  .execute(&mut *tx)
+  .await?;
+
+  sqlx::query("DELETE FROM set_members WHERE set_id = $1")
+    .bind(set_id)
+    .execute(&mut *tx)
+    .await?;
+  sqlx::query(
+    "INSERT INTO set_members (set_id, product_id, sort_order)
+     SELECT $1, p.id, (ids.ord - 1)::int
+     FROM unnest($2::uuid[]) WITH ORDINALITY AS ids(id, ord)
+     INNER JOIN products p ON p.id = ids.id
+     ON CONFLICT DO NOTHING",
+  )
+  .bind(set_id)
+  .bind(set.member_ids)
+  .execute(&mut *tx)
+  .await?;
+
+  sqlx::query("DELETE FROM set_slots WHERE set_id = $1")
+    .bind(set_id)
+    .execute(&mut *tx)
+    .await?;
+  for (index, slot) in set.slots.iter().enumerate() {
+    let slot_id = Uuid::now_v7();
+    sqlx::query(
+      "INSERT INTO set_slots (id, set_id, label, sort_order) VALUES ($1, $2, $3, $4)",
+    )
+    .bind(slot_id)
+    .bind(set_id)
+    .bind(&slot.label)
+    .bind(index as i32)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+      "INSERT INTO set_slot_options (slot_id, variant_id) VALUES ($1, $2)",
+    )
+    .bind(slot_id)
+    .bind(slot.variant_id)
+    .execute(&mut *tx)
+    .await?;
+  }
+
+  tx.commit().await?;
+  Ok(())
+}
+
 #[route(POST "/admin/sets/{id}/update")]
 async fn update_set(cx: &Cx, multipart: Multipart) -> Result<Response> {
   let _actor = require_admin(cx).await?;
@@ -526,59 +605,23 @@ async fn update_set(cx: &Cx, multipart: Multipart) -> Result<Response> {
     return fail("Este slug já está em uso por outro conjunto.");
   }
 
-  sqlx::query(
-    "UPDATE sets SET name = $2, slug = $3, description = $4, price_in_cents = $5,
-      compare_at_price_in_cents = $6, active = $7, updated_at = now() WHERE id = $1",
+  // Images are handled after the commit: they touch the object store and
+  // report their own errors.
+  write_set(
+    pool,
+    set_id,
+    &SetWrite {
+      name: &name,
+      slug: &slug,
+      description: description.as_deref(),
+      price,
+      compare,
+      active,
+      member_ids: &member_ids,
+      slots: &slots,
+    },
   )
-  .bind(set_id)
-  .bind(&name)
-  .bind(&slug)
-  .bind(&description)
-  .bind(price)
-  .bind(compare)
-  .bind(active)
-  .execute(pool)
   .await?;
-
-  sqlx::query("DELETE FROM set_members WHERE set_id = $1")
-    .bind(set_id)
-    .execute(pool)
-    .await?;
-  sqlx::query(
-    "INSERT INTO set_members (set_id, product_id, sort_order)
-     SELECT $1, p.id, (ids.ord - 1)::int
-     FROM unnest($2::uuid[]) WITH ORDINALITY AS ids(id, ord)
-     INNER JOIN products p ON p.id = ids.id
-     ON CONFLICT DO NOTHING",
-  )
-  .bind(set_id)
-  .bind(&member_ids)
-  .execute(pool)
-  .await?;
-
-  sqlx::query("DELETE FROM set_slots WHERE set_id = $1")
-    .bind(set_id)
-    .execute(pool)
-    .await?;
-  for (index, slot) in slots.iter().enumerate() {
-    let slot_id = Uuid::now_v7();
-    sqlx::query(
-      "INSERT INTO set_slots (id, set_id, label, sort_order) VALUES ($1, $2, $3, $4)",
-    )
-    .bind(slot_id)
-    .bind(set_id)
-    .bind(&slot.label)
-    .bind(index as i32)
-    .execute(pool)
-    .await?;
-    sqlx::query(
-      "INSERT INTO set_slot_options (slot_id, variant_id) VALUES ($1, $2)",
-    )
-    .bind(slot_id)
-    .bind(slot.variant_id)
-    .execute(pool)
-    .await?;
-  }
 
   for image_id in delete_ids {
     let owner: Option<Uuid> =
@@ -620,4 +663,133 @@ async fn update_set(cx: &Cx, multipart: Multipart) -> Result<Response> {
 
   set_toast(cx, Toast::success("Alterações salvas com sucesso."));
   toast_redirect(cx, back_url)
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  async fn seed_variant(pool: &PgPool) -> (Uuid, Uuid) {
+    let product_id = Uuid::now_v7();
+    let variant_id = Uuid::now_v7();
+    sqlx::query(
+      "INSERT INTO products (id, name, slug, price_in_cents)
+       VALUES ($1, 'Peça teste', $2, 10000)",
+    )
+    .bind(product_id)
+    .bind(format!("peca-{product_id}"))
+    .execute(pool)
+    .await
+    .expect("insert product");
+    sqlx::query(
+      "INSERT INTO product_variants (id, product_id, sku, size, color)
+       VALUES ($1, $2, $3, 'm', 'azul')",
+    )
+    .bind(variant_id)
+    .bind(product_id)
+    .bind(format!("sku-{variant_id}"))
+    .execute(pool)
+    .await
+    .expect("insert variant");
+    (product_id, variant_id)
+  }
+
+  #[tokio::test]
+  async fn failed_set_save_keeps_previous_set() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (product_id, variant_id) = seed_variant(&pool).await;
+    let set_id = Uuid::now_v7();
+    let slug = format!("conjunto-{}", set_id.simple());
+    sqlx::query(
+      "INSERT INTO sets (id, name, slug, price_in_cents) VALUES ($1, 'Antes', $2, 15000)",
+    )
+    .bind(set_id)
+    .bind(&slug)
+    .execute(&pool)
+    .await
+    .expect("insert set");
+
+    let members = [product_id];
+    let good_slots = [SlotInput {
+      label: Some("Top".to_string()),
+      variant_id,
+    }];
+    write_set(
+      &pool,
+      set_id,
+      &SetWrite {
+        name: "Antes",
+        slug: &slug,
+        description: None,
+        price: Some(15_000),
+        compare: None,
+        active: true,
+        member_ids: &members,
+        slots: &good_slots,
+      },
+    )
+    .await
+    .expect("initial save");
+
+    // The second slot option references a variant that does not exist
+    // (e.g. deleted after validation), so the FK fails midway.
+    let bad_slots = [
+      SlotInput {
+        label: Some("Top novo".to_string()),
+        variant_id,
+      },
+      SlotInput {
+        label: Some("Calcinha".to_string()),
+        variant_id: Uuid::now_v7(),
+      },
+    ];
+    let result = write_set(
+      &pool,
+      set_id,
+      &SetWrite {
+        name: "Depois",
+        slug: &slug,
+        description: Some("nova"),
+        price: Some(20_000),
+        compare: None,
+        active: false,
+        member_ids: &[],
+        slots: &bad_slots,
+      },
+    )
+    .await;
+    assert!(result.is_err(), "save with a missing variant must fail");
+
+    let (name, price, active): (String, Option<i64>, bool) = sqlx::query_as(
+      "SELECT name, price_in_cents, active FROM sets WHERE id = $1",
+    )
+    .bind(set_id)
+    .fetch_one(&pool)
+    .await
+    .expect("set row");
+    assert_eq!(
+      (name.as_str(), price, active),
+      ("Antes", Some(15_000), true)
+    );
+
+    let members: Vec<Uuid> = sqlx::query_scalar(
+      "SELECT product_id FROM set_members WHERE set_id = $1",
+    )
+    .bind(set_id)
+    .fetch_all(&pool)
+    .await
+    .expect("members");
+    assert_eq!(members, vec![product_id]);
+
+    let slots: Vec<(Option<String>, Uuid)> = sqlx::query_as(
+      "SELECT s.label, o.variant_id FROM set_slots s
+       JOIN set_slot_options o ON o.slot_id = s.id
+       WHERE s.set_id = $1 ORDER BY s.sort_order",
+    )
+    .bind(set_id)
+    .fetch_all(&pool)
+    .await
+    .expect("slots");
+    assert_eq!(slots, vec![(Some("Top".to_string()), variant_id)]);
+  }
 }
