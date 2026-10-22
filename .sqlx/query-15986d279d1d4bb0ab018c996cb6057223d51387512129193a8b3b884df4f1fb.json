@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT i.id, i.variant_id, i.warehouse_id, i.quantity, i.reserved,\n                p.name as product_name, pv.sku, pv.size::text as size, pv.color,\n                w.name as warehouse_name, w.code as warehouse_code\n         FROM inventory i\n         JOIN product_variants pv ON pv.id = i.variant_id\n         JOIN products p ON p.id = pv.product_id\n         JOIN warehouses w ON w.id = i.warehouse_id\n         WHERE ($1 = '' OR p.name ILIKE '%' || $1 || '%' OR pv.sku ILIKE '%' || $1 || '%')\n         ORDER BY p.name, pv.sku",
+  "query": "SELECT i.id, i.variant_id, i.warehouse_id, i.quantity, i.reserved,\n                p.name as product_name, pv.sku, pv.size::text as size, pv.color,\n                w.name as warehouse_name, w.code as warehouse_code\n         FROM inventory i\n         JOIN product_variants pv ON pv.id = i.variant_id\n         JOIN products p ON p.id = pv.product_id\n         JOIN warehouses w ON w.id = i.warehouse_id\n         WHERE ($1 = '' OR p.name ILIKE '%' || $1 || '%' ESCAPE '\\' OR pv.sku ILIKE '%' || $1 || '%' ESCAPE '\\')\n         ORDER BY p.name, pv.sku",
   "describe": {
     "columns": [
       {
@@ -78,5 +78,5 @@
       false
     ]
   },
-  "hash": "dcb988f4e19f696d7ecbc7efa1d9ceef1a3a68aa829d700e90ed1001c546bc18"
+  "hash": "15986d279d1d4bb0ab018c996cb6057223d51387512129193a8b3b884df4f1fb"
 }

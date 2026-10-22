@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT COUNT(*) FROM users\n        WHERE ($1 = '' OR name ILIKE $1 OR email ILIKE $1)\n        ",
+  "query": "\n        SELECT COUNT(*) FROM users\n        WHERE ($1 = '' OR name ILIKE $1 ESCAPE '\\' OR email ILIKE $1 ESCAPE '\\')\n        ",
   "describe": {
     "columns": [
       {
@@ -18,5 +18,5 @@
       null
     ]
   },
-  "hash": "a47e489a8d3e32d8574100d81cc33e2b4ac02d8b0d96aa4dfbd77da98e2c348d"
+  "hash": "4d5a897515ba05ae0d667bd5a7323c76cba7d5c52f4c49fb795da55b100bb656"
 }
