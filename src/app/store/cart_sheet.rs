@@ -23,7 +23,9 @@ use crate::app::store::cart::{
   load_or_create_cart, remove_from_cart_proc, remove_set_from_cart_proc,
   set_cart_coupon_proc, set_cart_quantity_proc, set_cart_set_quantity_proc,
 };
-use crate::app::store::coupons::{CouponReject, resolve_coupon};
+use crate::app::store::coupons::{
+  COUPON_GONE_MESSAGE, CouponReject, resolve_coupon,
+};
 use crate::app::store::pricing::pix_price;
 use crate::app::store::queries::{format_price, get_store_settings};
 
@@ -131,6 +133,7 @@ pub async fn cart_sheet(cx: &Cx, open: Signal<bool>) -> Result<impl View> {
   let (resolved_coupon, preview_error) = match coupon_outcome {
     Ok(coupon) => (coupon, None),
     Err(CouponReject::Db(error)) => return Err(error.into()),
+    Err(CouponReject::Gone) => (None, Some(COUPON_GONE_MESSAGE.to_string())),
     Err(CouponReject::Invalid(message)) => (None, Some(message)),
   };
   let discount = resolved_coupon

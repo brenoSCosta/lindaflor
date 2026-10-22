@@ -31,7 +31,8 @@ use crate::app::store::cart::{
   hydrate_cart, load_or_create_cart, quote_cart_for_checkout,
 };
 use crate::app::store::coupons::{
-  CouponReject, ResolvedCoupon, resolve_coupon,
+  COUPON_GONE_MESSAGE, CouponReject, ResolvedCoupon, record_redemption,
+  resolve_coupon,
 };
 use crate::app::store::inventory::{ReserveLine, reserve_for_order};
 use crate::app::store::pix::{PIX_UNAVAILABLE_MESSAGE, generate_pix_payload};
@@ -159,6 +160,7 @@ pub async fn page(
   ) = match coupon_outcome {
     Ok(coupon) => (coupon, None),
     Err(CouponReject::Db(error)) => return Err(error.into()),
+    Err(CouponReject::Gone) => (None, Some(COUPON_GONE_MESSAGE.to_string())),
     Err(CouponReject::Invalid(message)) => (None, Some(message)),
   };
 
@@ -868,10 +870,8 @@ async fn create_order_in_tx(
   {
     Ok(resolved) => resolved,
     Err(CouponReject::Db(error)) => return Err(CheckoutError::Db(error)),
+    Err(CouponReject::Gone) => return Err(CheckoutError::CouponRemoved),
     Err(CouponReject::Invalid(message)) => {
-      if message == "Cupom inválido." {
-        return Err(CheckoutError::CouponRemoved);
-      }
       return Err(CheckoutError::Form(message));
     }
   };
@@ -977,17 +977,7 @@ async fn create_order_in_tx(
   if let Some(coupon) = resolved.as_ref() {
     let guest_email =
       user_id.is_none().then_some(form_data.guest_email.as_str());
-    sqlx::query(
-      "INSERT INTO coupon_redemptions (id, coupon_id, user_id, order_id, guest_email)
-             VALUES ($1, $2, $3, $4, $5)",
-    )
-    .bind(Uuid::now_v7())
-    .bind(coupon.id)
-    .bind(user_id)
-    .bind(order_id)
-    .bind(guest_email)
-    .execute(&mut **tx)
-    .await?;
+    record_redemption(tx, coupon, user_id, order_id, guest_email).await?;
   }
 
   let pix_code = generate_pix_payload(

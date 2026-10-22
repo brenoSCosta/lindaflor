@@ -930,7 +930,7 @@ async fn create_coupon(
      usage_type, max_uses, per_user_limit) \
      VALUES ($1, $2, $3, $4, $5, $6, true, \
      NULLIF($7, '')::timestamptz, NULLIF($8, '')::timestamptz, $9, $10, $11) \
-     ON CONFLICT (code) DO NOTHING",
+     ON CONFLICT ((upper(code))) DO NOTHING",
   )
   .bind(Uuid::now_v7())
   .bind(&coupon.code)
