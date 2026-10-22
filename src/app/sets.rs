@@ -22,6 +22,12 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let pool = app_context::<PgPool>(cx);
   let store = object_store(cx);
   let sets = list_sets(pool).await?;
+  crate::seo::set_head(
+    cx,
+    crate::seo::PageHead::new("Conjuntos de Biquíni")
+      .description("Conjuntos Linda Flor: top e calcinha combinando, com preço especial. Moda praia feita em Aracaju.")
+      .canonical("/sets"),
+  );
 
   let mut covers = Vec::with_capacity(sets.len());
   for set in &sets {

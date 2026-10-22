@@ -15,6 +15,7 @@ pub mod payments;
 pub mod rate_limit;
 pub mod redirect;
 pub mod security_headers;
+pub mod seo;
 pub mod storage;
 pub mod valkey;
 

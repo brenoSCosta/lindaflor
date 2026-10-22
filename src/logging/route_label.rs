@@ -53,12 +53,14 @@ const KNOWN_TEMPLATES: &[&str] = &[
   "/produtos",
   "/produtos/{slug}",
   "/reset-password",
+  "/robots.txt",
   "/sets",
   "/sets/{slug}",
   "/settings",
   "/settings/avatar",
   "/settings/two-factor",
   "/signup",
+  "/sitemap.xml",
   "/stop-impersonating",
   "/termos",
   "/trocas-devolucoes",
@@ -73,6 +75,10 @@ pub fn normalize_route_label(pathname: &str) -> String {
   }
   if pathname == "/api/auth" || pathname.starts_with("/api/auth/") {
     return AUTH_ROUTE_LABEL.to_string();
+  }
+  // Crawler files look like assets but are real routes.
+  if matches!(pathname, "/robots.txt" | "/sitemap.xml") {
+    return pathname.to_string();
   }
   if looks_like_asset(pathname) {
     return UNKNOWN_ROUTE_LABEL.to_string();
@@ -199,5 +205,11 @@ mod tests {
     assert_eq!(normalize_route_label("/api/health"), "/api/health");
     assert_eq!(normalize_route_label("/login"), "/login");
     assert_eq!(normalize_route_label("/checkout"), "/checkout");
+  }
+
+  #[test]
+  fn keeps_crawler_files() {
+    assert_eq!(normalize_route_label("/robots.txt"), "/robots.txt");
+    assert_eq!(normalize_route_label("/sitemap.xml"), "/sitemap.xml");
   }
 }

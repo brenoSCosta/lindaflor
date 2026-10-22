@@ -107,7 +107,8 @@ pub const CHECKOUT_ORDER_WINDOW: std::time::Duration =
 /// not stacking), `/metrics` scrapes (no scoped layer) and bundled static
 /// assets (`/_topcoat/assets/...`, served by Topcoat with immutable
 /// content-hashed URLs — exempt so CGNAT/mobile networks sharing few IPs
-/// don't burn the global budget on cacheable files). Keep in sync
+/// don't burn the global budget on cacheable files), plus the static
+/// `/robots.txt` (crawlers re-fetch it constantly). Keep in sync
 /// with the scoped layers in `src/app.rs` (and `tests/common/mod.rs`).
 pub const GLOBAL_OVERRIDE_PREFIXES: &[&str] = &[
   "/api/auth/sign-in",
@@ -123,6 +124,7 @@ pub const GLOBAL_OVERRIDE_PREFIXES: &[&str] = &[
   "/api/webhooks/mercadopago",
   "/metrics",
   "/_topcoat/assets",
+  crate::seo::sitemap::ROBOTS_PATH,
 ];
 
 /// Like [`GLOBAL_OVERRIDE_PREFIXES`], but only for mutating requests

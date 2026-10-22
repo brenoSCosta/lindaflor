@@ -7,12 +7,19 @@ use crate::components::container::{ContainerVariant, container};
 use crate::components::separator::separator;
 use topcoat::{
   Result,
+  context::Cx,
   router::{href, page},
   view::{View, attributes, view},
 };
 
 #[page]
-pub async fn page() -> Result<impl View> {
+pub async fn page(cx: &Cx) -> Result<impl View> {
+  crate::seo::set_head(
+    cx,
+    crate::seo::PageHead::new("Termos de Uso")
+      .description("Termos de uso da loja Linda Flor Moda Praia: compras, preços, pagamentos, entregas e responsabilidades.")
+      .canonical("/termos"),
+  );
   Ok(view! {
       container(
           variant: ContainerVariant::Narrow,

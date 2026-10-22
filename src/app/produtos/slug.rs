@@ -89,6 +89,12 @@ pub async fn page(
     }
   }
 
+  // Not-found renders below with a 200: keep it out of the index unless the
+  // product loads (set_product_head then replaces this head).
+  crate::seo::set_head(
+    cx,
+    crate::seo::PageHead::new("Produto não encontrado").noindex(),
+  );
   let product = match get_product_by_slug(pool, slug).await? {
         Some(mut p) => {
             resolve_detail(&store, &mut p).await;
@@ -109,6 +115,7 @@ pub async fn page(
             }.boxed())
         }
     };
+  crate::seo::structured::set_product_head(cx, &product);
 
   let settings = get_store_settings(pool).await?;
   let shipping_copy = if settings.free_shipping_threshold_cents <= 0 {

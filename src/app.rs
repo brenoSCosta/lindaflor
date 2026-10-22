@@ -231,6 +231,9 @@ async fn root(cx: &Cx, slot: Slot<'_>) -> Result<impl View> {
 
   // Catch-all `not_found!("/")` and handler `ok_or_not_found` both surface as
   // NotFoundError; render a branded page instead of a blank 404 response.
+  // Per-page <head>: the tracked slot tells `page_head` when the page is
+  // done, so pages without `seo::set_head` still get the default head.
+  let slot = crate::seo::track_slot(cx, slot);
   let guarded = view! {
       error_boundary(
           fallback: |error| {
@@ -276,7 +279,7 @@ async fn root(cx: &Cx, slot: Slot<'_>) -> Result<impl View> {
           <head>
               <meta charset="UTF-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>"Linda Flor — Moda Praia"</title>
+              crate::seo::page_head()
               <link rel="stylesheet" href=(tailwind::stylesheet!())>
               topcoat::runtime::script()
               topcoat::dev::script()
@@ -412,6 +415,11 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   .await?;
   let liquida =
     crate::app::admin::produtos::resolve_summary_images(&store, liquida).await;
+
+  crate::seo::set_head(
+    cx,
+    crate::seo::structured::home_head(&crate::seo::site_origin(cx)),
+  );
 
   let whatsapp_url = settings
     .whatsapp_number

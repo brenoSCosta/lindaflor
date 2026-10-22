@@ -54,6 +54,12 @@ pub async fn page(
   let slug = path_param::<Slug>(cx);
   let store = object_store(cx);
 
+  // Not-found renders below with a 200: keep it out of the index unless the
+  // set loads (set_set_head then replaces this head).
+  crate::seo::set_head(
+    cx,
+    crate::seo::PageHead::new("Conjunto não encontrado").noindex(),
+  );
   let set = match get_set_by_slug(pool, slug).await? {
         Some(s) => s,
         None => {
@@ -85,6 +91,12 @@ pub async fn page(
   let member_count = count_set_members(pool, &set.id).await?;
   let available = set_available_quantity(pool, set.id).await?;
   let settings = storefront_settings(cx).await;
+  crate::seo::structured::set_set_head(
+    cx,
+    &set,
+    gallery.first().map(|(_, url, _)| url.as_str()),
+    available > 0,
+  );
 
   let query = query_params::<SetQuery>(cx)
     .map_err(|err| bad_request(format!("consulta inválida: {err}")))?;
