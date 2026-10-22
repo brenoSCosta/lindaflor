@@ -38,6 +38,10 @@ use crate::app::store::order::expire_pending_reservations_in_tx;
 use crate::app::store::pix::{PIX_UNAVAILABLE_MESSAGE, generate_pix_payload};
 use crate::app::store::pricing::pix_discount_cents;
 use crate::app::store::queries::{format_price, get_store_settings};
+use crate::app::store::shipping::{
+  BRAZILIAN_STATES, calculate_shipping, cep_digits, is_brazilian_state,
+  resolve_shipping_uf, uf_from_cep,
+};
 
 #[derive(Debug)]
 enum CheckoutError {
@@ -84,12 +88,6 @@ pub struct CheckoutInput {
   #[serde(default)]
   intent: Option<String>,
 }
-
-const BRAZILIAN_STATES: [&str; 27] = [
-  "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG",
-  "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE",
-  "TO",
-];
 
 #[page([GET, POST])]
 pub async fn page(
@@ -204,10 +202,18 @@ pub async fn page(
   let state = input_state(body.as_ref());
   let settings = get_store_settings(pool).await?;
   let pix_available = pix_configured(&settings);
+  // Preview only: until the CEP resolves, estimate from the selected state.
+  // The charged rate is always derived from the CEP in `create_order`.
+  let preview_uf = uf_from_cep(&zip_digits).unwrap_or_else(|| {
+    if is_brazilian_state(&state) {
+      state.as_str()
+    } else {
+      "SE"
+    }
+  });
   let shipping = calculate_shipping(
     subtotal,
-    &state,
-    &zip_digits,
+    preview_uf,
     settings.free_shipping_threshold_cents,
   );
   let coupon_discount = resolved_coupon
@@ -307,11 +313,20 @@ pub async fn page(
 
   let zip_code = signal(cx, || zip_init);
   let zip_code_touched = signal(cx, || false);
+  let zip_digit_count = expr!({
+    let z = zip_code.get();
+    raw!(
+      r#"cx.hydrate(String(${z}).replace(/\D/g, "").length)"#,
+      cep_digits(&z).len() as f64
+    )
+  });
   let zip_code_error = expr!({
     if !zip_code_touched.get() {
       "".to_owned()
     } else if zip_code.get().trim().is_empty() {
       "Informe o CEP.".to_owned()
+    } else if zip_digit_count != 8.0 {
+      "Informe um CEP válido com 8 dígitos.".to_owned()
     } else {
       "".to_owned()
     }
@@ -321,12 +336,21 @@ pub async fn page(
   let phone_touched = signal(cx, || false);
   let min_whatsapp_len = 10.0;
   let max_whatsapp_len = 11.0;
+  // Count digits like the server's `phone_digit_count`, so "(79) 99981-6511"
+  // passes.
+  let phone_digits = expr!({
+    let p = phone.get();
+    raw!(
+      r#"cx.hydrate(String(${p}).replace(/\D/g, "").length)"#,
+      phone_digit_count(&p) as f64
+    )
+  });
   let phone_error = expr!({
     if !phone_touched.get() {
       "".to_owned()
-    } else if phone.get().len() < min_whatsapp_len {
+    } else if phone_digits < min_whatsapp_len {
       "Informe um WhatsApp válido (DDD + número).".to_owned()
-    } else if phone.get().len() > max_whatsapp_len {
+    } else if phone_digits > max_whatsapp_len {
       "Informe um WhatsApp válido (DDD + número).".to_owned()
     } else {
       "".to_owned()
@@ -349,11 +373,11 @@ pub async fn page(
       true
     } else if city.get().trim().is_empty() {
       true
-    } else if zip_code.get().trim().is_empty() {
+    } else if zip_digit_count != 8.0 {
       true
-    } else if phone.get().len() < min_whatsapp_len {
+    } else if phone_digits < min_whatsapp_len {
       true
-    } else if phone.get().len() > max_whatsapp_len {
+    } else if phone_digits > max_whatsapp_len {
       true
     } else {
       false
@@ -709,7 +733,10 @@ fn phone_digit_count(value: &str) -> usize {
   value.chars().filter(|c| c.is_ascii_digit()).count()
 }
 
-fn validate_pay_fields(form_data: &CheckoutInput) -> Result<(), String> {
+/// Returns the shipping UF derived from the CEP.
+fn validate_pay_fields(
+  form_data: &CheckoutInput,
+) -> Result<&'static str, String> {
   if crate::auth::validation::validate_email(&form_data.guest_email).is_err() {
     return Err("Informe um e-mail válido.".to_string());
   }
@@ -732,15 +759,7 @@ fn validate_pay_fields(form_data: &CheckoutInput) -> Result<(), String> {
   if form_data.city.trim().is_empty() {
     return Err("Informe a cidade.".to_string());
   }
-  let zip_digits: String = form_data
-    .zip_code
-    .chars()
-    .filter(|c| c.is_ascii_digit())
-    .collect();
-  if zip_digits.is_empty() {
-    return Err("Informe o CEP.".to_string());
-  }
-  Ok(())
+  resolve_shipping_uf(&form_data.zip_code, &form_data.state)
 }
 
 #[derive(Debug)]
@@ -755,9 +774,8 @@ async fn create_order(
   form_data: CheckoutInput,
   user_id: Option<Uuid>,
 ) -> Result<CreatedOrder, CheckoutError> {
-  if let Err(message) = validate_pay_fields(&form_data) {
-    return Err(CheckoutError::Form(message));
-  }
+  let shipping_uf =
+    validate_pay_fields(&form_data).map_err(CheckoutError::Form)?;
 
   let settings = crate::app::store::queries::get_store_settings(pool).await?;
   if !pix_configured(&settings) {
@@ -782,6 +800,7 @@ async fn create_order(
       form_data,
       user_id,
       zip_digits: &zip_digits,
+      shipping_uf,
     },
   )
   .await;
@@ -810,6 +829,8 @@ struct CreateOrderParams<'a> {
   form_data: CheckoutInput,
   user_id: Option<Uuid>,
   zip_digits: &'a str,
+  /// Derived from the CEP; the posted `state` is never trusted for pricing.
+  shipping_uf: &'static str,
 }
 
 async fn create_order_in_tx(
@@ -824,6 +845,7 @@ async fn create_order_in_tx(
     form_data,
     user_id,
     zip_digits,
+    shipping_uf,
   } = params;
   expire_pending_reservations_in_tx(tx)
     .await
@@ -849,8 +871,7 @@ async fn create_order_in_tx(
   })?;
   let shipping = calculate_shipping(
     subtotal,
-    &form_data.state,
-    zip_digits,
+    shipping_uf,
     settings.free_shipping_threshold_cents,
   );
 
@@ -905,7 +926,7 @@ async fn create_order_in_tx(
       "complement": form_data.complement,
       "neighborhood": form_data.neighborhood,
       "city": form_data.city,
-      "state": form_data.state,
+      "state": shipping_uf,
       "zip_code": zip_digits,
       "phone": form_data.phone,
   });
@@ -1029,39 +1050,6 @@ async fn create_order_in_tx(
   Ok(())
 }
 
-fn calculate_shipping(
-  subtotal_cents: i64,
-  state: &str,
-  zip_digits: &str,
-  free_shipping_threshold_cents: i64,
-) -> (i64, bool) {
-  const SHIPPING_SE_CENTS: i64 = 1_990;
-  const SHIPPING_DEFAULT_CENTS: i64 = 3_990;
-  const SHIPPING_REMOTE_CENTS: i64 = 5_990;
-
-  if subtotal_cents >= free_shipping_threshold_cents {
-    return (0, true);
-  }
-
-  let is_remote = zip_digits.len() >= 5
-    && !zip_digits.starts_with("49")
-    && (zip_digits.starts_with("69")
-      || zip_digits.starts_with("68")
-      || zip_digits.starts_with("66")
-      || zip_digits.starts_with("78")
-      || zip_digits.starts_with("79"));
-
-  let shipping_cents = if state == "SE" {
-    SHIPPING_SE_CENTS
-  } else if is_remote {
-    SHIPPING_REMOTE_CENTS
-  } else {
-    SHIPPING_DEFAULT_CENTS
-  };
-
-  (shipping_cents, false)
-}
-
 fn pix_configured(
   settings: &crate::app::store::queries::StoreSettings,
 ) -> bool {
@@ -1144,22 +1132,6 @@ fn input_coupon(
 mod tests {
   use super::*;
 
-  #[test]
-  fn calculate_shipping_honors_threshold() {
-    assert_eq!(
-      calculate_shipping(10_000, "SE", "49000000", 29_900),
-      (1_990, false)
-    );
-    assert_eq!(
-      calculate_shipping(29_900, "SE", "49000000", 29_900),
-      (0, true)
-    );
-    assert_eq!(calculate_shipping(1, "SE", "49000000", 0), (0, true));
-    assert_eq!(
-      calculate_shipping(5_000, "SP", "01000000", 4_999),
-      (0, true)
-    );
-  }
   use crate::app::store::cart::set_cart_coupon;
   use crate::app::store::inventory::{
     convert_reservation, release_reservation,
@@ -1307,11 +1279,9 @@ mod tests {
 
     let cart_id = seed_cart(&pool, variant_id, 1).await;
     let subtotal = UNIT_PRICE_CENTS;
-    let zip_digits = "49000000";
     let (shipping_cents, _) = calculate_shipping(
       subtotal,
       "SE",
-      zip_digits,
       crate::app::store::queries::DEFAULT_FREE_SHIPPING_THRESHOLD_CENTS,
     );
     // Default store settings apply a 5% PIX discount after the coupon.
@@ -1602,6 +1572,38 @@ mod tests {
       err.to_string().contains("WhatsApp"),
       "unexpected error: {err}"
     );
+  }
+
+  #[tokio::test]
+  async fn shipping_uses_cep_uf_not_posted_state() {
+    let pool = crate::test_support::fresh_pool().await;
+    ensure_pix_settings(&pool).await;
+    let (_product_id, variant_id) =
+      seed_variant(&pool, UNIT_PRICE_CENTS, 2).await;
+    let cart_id = seed_cart(&pool, variant_id, 1).await;
+    let email = format!("uf-{}@example.com", Uuid::now_v7().simple());
+
+    // Belém (PA) CEP posted as SE to get the local rate: rejected.
+    let mut posted = checkout_input(&email, "");
+    posted.zip_code = "66010-000".to_string();
+    let err = create_order(&pool, cart_id, posted.clone(), None)
+      .await
+      .expect_err("state mismatch");
+    assert!(err.to_string().contains("PA"), "unexpected error: {err}");
+
+    posted.state = "PA".to_string();
+    let created = create_order(&pool, cart_id, posted, None)
+      .await
+      .expect("order");
+    let (shipping_cents, state): (i64, String) = sqlx::query_as(
+      "SELECT shipping_cents, shipping_address->>'state' FROM orders WHERE id = $1",
+    )
+    .bind(created.id)
+    .fetch_one(&pool)
+    .await
+    .expect("order row");
+    assert_eq!(shipping_cents, 5_990);
+    assert_eq!(state, "PA");
   }
 
   #[tokio::test]

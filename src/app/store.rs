@@ -11,4 +11,5 @@ pub mod pricing;
 pub mod product_card;
 pub mod queries;
 pub mod shell;
+pub mod shipping;
 pub mod wishlist;
