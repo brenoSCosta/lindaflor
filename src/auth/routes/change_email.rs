@@ -212,14 +212,14 @@ pub async fn change_email(
   session_store::delete_all_for_user_except(pool, su.user.id, su.session_id)
     .await?;
 
+  crate::mail::auth::send_change_email(pool, &new_email, &su.user.name, &token)
+    .await?;
+
   tracing::info!(
       user_id = %su.user.id,
-      current_email = %su.user.email,
-      new_email = %new_email,
       callback_url = ?body.callback_url,
       token_hash_prefix = %token_hash_prefix,
-      confirm_path = "/api/auth/change-email/confirm",
-      "change-email confirmation token created (mail not wired yet)"
+      "change-email confirmation token created; mail queued"
   );
 
   Ok(Json(OkStatus { status: true }))
@@ -239,14 +239,22 @@ pub async fn confirm_change_email(
   cx: &Cx,
   Json(body): Json<ConfirmChangeEmailBody>,
 ) -> Result<Json<OkStatus>> {
-  if body.token.trim().is_empty() {
+  complete_change_email(cx, &body.token).await
+}
+
+/// Token-only confirm, shared with the `/confirmar-email` mail landing page.
+pub(crate) async fn complete_change_email(
+  cx: &Cx,
+  token: &str,
+) -> Result<Json<OkStatus>> {
+  if token.trim().is_empty() {
     return Err(bad_request("token is required").into());
   }
 
   let pool = app_context::<PgPool>(cx);
 
   // Confirm stays token-only (no session) so mail links work logged-out.
-  let token_hash = verification_token_hash(body.token.trim());
+  let token_hash = verification_token_hash(token.trim());
   let verification = sqlx::query!(
     r#"
         SELECT id, identifier

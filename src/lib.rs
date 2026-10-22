@@ -8,6 +8,7 @@ pub mod db;
 pub mod http_client;
 pub mod internal_error;
 pub mod logging;
+pub mod mail;
 pub mod openapi;
 pub mod rate_limit;
 pub mod security_headers;

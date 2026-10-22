@@ -1656,15 +1656,26 @@ version = "0.11.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2c646bd5cc763b1087b15493e29a64be6147ba8f19342004fa52048ee596eae"
 dependencies = [
+ "async-trait",
+ "base64 0.23.1",
  "email-encoding",
  "email_address",
  "fastrand",
+ "futures-io",
+ "futures-util",
  "hostname",
  "httpdate",
  "idna",
  "mime",
  "nom",
+ "percent-encoding",
  "quoted_printable",
+ "rustls",
+ "socket2 0.6.5",
+ "tokio",
+ "tokio-rustls",
+ "url",
+ "webpki-roots",
 ]
 
 [[package]]
@@ -1715,6 +1726,7 @@ dependencies = [
  "hmac 0.12.1",
  "http",
  "http-body-util",
+ "lettre",
  "password-hash",
  "postgresql_embedded",
  "qrcode",

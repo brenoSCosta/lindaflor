@@ -232,13 +232,17 @@ async fn apply_inner(
   event: OrderEvent,
   opts: ApplyOptions,
 ) -> Result<ApplyOutcome, ApplyError> {
-  let row: Option<(String, Option<String>)> = sqlx::query_as(
-    "SELECT status::text, paid_at::text FROM orders WHERE id = $1 FOR UPDATE",
+  // `expired` is read before side effects: releasing the reservation
+  // clears `reservation_expires_at`.
+  let row: Option<(String, Option<String>, bool)> = sqlx::query_as(
+    "SELECT status::text, paid_at::text,
+            COALESCE(reservation_expires_at < now(), false)
+     FROM orders WHERE id = $1 FOR UPDATE",
   )
   .bind(order_id)
   .fetch_optional(&mut **tx)
   .await?;
-  let Some((raw, paid_at)) = row else {
+  let Some((raw, paid_at, expired)) = row else {
     return Err(ApplyError::NotFound);
   };
   let from = OrderStatus::parse(&raw).ok_or(ApplyError::NotFound)?;
@@ -326,6 +330,12 @@ async fn apply_inner(
       .await?;
     }
   }
+
+  // Customer mail rides the same transaction (outbox).
+  crate::mail::orders::enqueue_order_transition(
+    tx, order_id, from, next, expired,
+  )
+  .await?;
 
   Ok(ApplyOutcome {
     from,
@@ -993,6 +1003,92 @@ mod tests {
     assert_eq!(rows[1].2["to"], serde_json::json!("refunded"));
     assert_eq!(rows[1].2["restock"], serde_json::json!(true));
     tx.commit().await.unwrap();
+  }
+
+  async fn outbox_kinds_for(
+    executor: impl sqlx::PgExecutor<'_>,
+    order_id: Uuid,
+  ) -> Vec<String> {
+    sqlx::query_scalar(
+      "SELECT kind FROM email_outbox WHERE text_body LIKE $1 ORDER BY id",
+    )
+    .bind(format!("%/pedido/{order_id}?t=%"))
+    .fetch_all(executor)
+    .await
+    .unwrap()
+  }
+
+  #[tokio::test]
+  async fn transitions_enqueue_customer_mail_in_tx() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (order_id, _, _) = seed_order_with_stock(&pool, 2).await;
+    let mut tx = pool.begin().await.unwrap();
+    for event in [OrderEvent::Pay, OrderEvent::Process, OrderEvent::Ship] {
+      apply(&mut tx, order_id, event, ApplyOptions::default())
+        .await
+        .unwrap();
+    }
+    // Processing has no customer mail; pay and ship do.
+    assert_eq!(
+      outbox_kinds_for(&mut *tx, order_id).await,
+      vec!["payment_confirmed", "order_shipped"]
+    );
+    let to: String = sqlx::query_scalar(
+      "SELECT to_address FROM email_outbox WHERE text_body LIKE $1 LIMIT 1",
+    )
+    .bind(format!("%/pedido/{order_id}?t=%"))
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(to, "a@b.co");
+    // Rolled back with the transition: nothing leaks out of the tx.
+    tx.rollback().await.unwrap();
+    assert!(outbox_kinds_for(&pool, order_id).await.is_empty());
+  }
+
+  #[tokio::test]
+  async fn expiry_and_refund_enqueue_distinct_mail() {
+    let pool = crate::test_support::fresh_pool().await;
+    let (expired_id, _, _) = seed_order_with_stock(&pool, 2).await;
+    sqlx::query(
+      "UPDATE orders SET reservation_expires_at = now() - interval '1 hour' WHERE id = $1",
+    )
+    .bind(expired_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let (refund_id, _, _) = seed_order_with_stock(&pool, 2).await;
+
+    let mut tx = pool.begin().await.unwrap();
+    apply(
+      &mut tx,
+      expired_id,
+      OrderEvent::Cancel,
+      ApplyOptions::default(),
+    )
+    .await
+    .unwrap();
+    apply(&mut tx, refund_id, OrderEvent::Pay, ApplyOptions::default())
+      .await
+      .unwrap();
+    apply(
+      &mut tx,
+      refund_id,
+      OrderEvent::Refund,
+      ApplyOptions::default(),
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+
+    assert_eq!(
+      outbox_kinds_for(&pool, expired_id).await,
+      vec!["order_expired"]
+    );
+    assert_eq!(
+      outbox_kinds_for(&pool, refund_id).await,
+      vec!["payment_confirmed", "order_refunded"]
+    );
   }
 
   #[tokio::test]

@@ -38,6 +38,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     None => lindaflor::storage::ObjectStore::unavailable(),
   };
 
+  // Separate from `Config::from_env` so the seed binary never needs SMTP
+  // settings; production refuses to boot without a real transport.
+  let mail_cfg = lindaflor::config::mail_from_env()?;
+  let mailer = lindaflor::mail::Mailer::from_config(&mail_cfg)?;
+  tokio::spawn(lindaflor::mail::outbox::run_worker(
+    pool.clone(),
+    mailer.clone(),
+  ));
+
   let host = std::env::var("HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
   let listener = TcpListener::bind((host.as_str(), cfg.port)).await?;
   tracing::info!("listening on http://{}", listener.local_addr()?);
@@ -64,8 +73,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
       lindaflor::rate_limit::prune_limiters();
     }
   });
-  topcoat::serve(listener, lindaflor::app::router(pool, valkey_conn, storage))
-    .await?;
+  topcoat::serve(
+    listener,
+    lindaflor::app::router(pool, valkey_conn, storage, mailer),
+  )
+  .await?;
   pool_for_shutdown.close().await;
 
   Ok(())

@@ -120,12 +120,14 @@ pub async fn send_verification_email(
             .execute(pool)
             .await?;
 
+    crate::mail::auth::send_verify_email(pool, &email, &user.name, &token)
+      .await?;
+
     tracing::info!(
         user_id = %user.id,
-        email = %email,
         callback_url = ?body.callback_url,
         token_hash_prefix = %token_hash_prefix,
-        "email verification token created (mail not wired yet)"
+        "email verification token created; mail queued"
     );
   }
 

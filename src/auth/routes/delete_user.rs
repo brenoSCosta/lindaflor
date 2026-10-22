@@ -201,19 +201,29 @@ pub async fn delete_user(
     .execute(pool)
     .await?;
 
+  crate::mail::auth::send_delete_account(
+    pool,
+    &su.user.email,
+    &su.user.name,
+    &token,
+  )
+  .await?;
+
   tracing::info!(
       user_id = %su.user.id,
-      email = %su.user.email,
       callback_url = ?body.callback_url,
       token_hash_prefix = %token_hash_prefix,
-      confirm_path = "/api/auth/delete-user",
-      "delete-user verification token created (mail not wired yet)"
+      "delete-user verification token created; mail queued"
   );
 
   Ok(Json(OkStatus { status: true }))
 }
 
-async fn complete_delete(cx: &Cx, token: &str) -> Result<Json<OkStatus>> {
+/// Token-only confirm, shared with the `/excluir-conta` mail landing page.
+pub(crate) async fn complete_delete(
+  cx: &Cx,
+  token: &str,
+) -> Result<Json<OkStatus>> {
   let pool = app_context::<PgPool>(cx);
 
   // Confirm stays token-only (no session) so mail links work logged-out.
