@@ -103,8 +103,18 @@ devenv exports the process environment. `DATABASE_URL` follows the Postgres port
 | `LOG_SLOW_THRESHOLD_MS`   | `1000`                                                    | Slow request threshold in milliseconds |
 | `TRUSTED_PROXY_HOPS`      | `0`                                                       | Number of reverse proxies in front of the app (Topcoat trusted proxies); `0` = directly exposed, proxy headers ignored |
 | `TRUSTED_PROXY_NETWORKS`  | _(unset)_                                                 | Comma-separated trusted proxy CIDRs/IPs (e.g. `10.0.0.0/8, 192.168.0.0/16`), combined with `TRUSTED_PROXY_HOPS` |
+| `MAIL_TRANSPORT`          | _(unset → `log`)_                                         | `log` (summary to the log, body at `debug` outside production) or `smtp`. Production refuses `log` unless `MAIL_ALLOW_LOG_IN_PRODUCTION=1` |
+| `MAIL_FROM`               | _(unset)_                                                 | `From:` header, e.g. `Lindaflor <contato@lindaflor.com.br>`. Required in production |
+| `SMTP_HOST`               | _(unset)_                                                 | SMTP relay host (required when `MAIL_TRANSPORT=smtp`) |
+| `SMTP_PORT`               | _(unset)_                                                 | Defaults by `SMTP_TLS`: `587` starttls, `465` tls, `1025` none |
+| `SMTP_TLS`                | _(unset → `starttls`)_                                    | `starttls`, `tls` (implicit) or `none` (dev only, e.g. mailpit) |
+| `SMTP_USERNAME` / `SMTP_PASSWORD` | _(unset)_                                         | SMTP credentials; both also accept `*_FILE` (Docker secrets). Never logged |
+| `MAIL_POLL_SECS`          | _(unset → `5`)_                                           | Outbox worker poll interval |
+| `MAIL_MAX_ATTEMPTS`       | _(unset → `8`)_                                           | Delivery attempts (exponential backoff 30s → 1h) before a row is marked `failed` |
 
 Avatars are stored in RustFS (S3 API). The console is http://127.0.0.1:4204.
+
+Transactional email (account links and order updates, pt-BR) is queued in the `email_outbox` table inside the same transaction as the change that triggers it, and a background worker delivers it with retries; request handlers never wait on SMTP. Bodies are blanked once a row is `sent`/`failed`. To see real messages locally, run [mailpit](https://mailpit.axllent.org/) (`docker run --rm -p 1025:1025 -p 8025:8025 axllent/mailpit`) and set `MAIL_TRANSPORT=smtp SMTP_HOST=127.0.0.1 SMTP_TLS=none`; the inbox is at http://127.0.0.1:8025.
 
 The app is same-origin only: there is no CORS layer and no `Access-Control-*` headers. Cross-origin browser POSTs (and other mutations) are rejected with 403 by Topcoat `OriginPolicy`. There is no public cross-origin API.
 

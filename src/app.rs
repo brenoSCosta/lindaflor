@@ -3,8 +3,10 @@ pub mod app_sidebar;
 pub mod auth_helpers;
 pub mod check_email;
 pub mod checkout;
+pub mod confirmar_email;
 pub mod conta;
 pub mod dashboard;
+pub mod excluir_conta;
 pub mod favoritos;
 pub mod forgot_password;
 pub mod guia_de_medidas;
@@ -78,6 +80,7 @@ pub fn router(
   pool: PgPool,
   valkey: MultiplexedConnection,
   storage: crate::storage::ObjectStore,
+  mailer: crate::mail::Mailer,
 ) -> Router {
   let mut builder = module_router!()
     .discover()
@@ -85,7 +88,8 @@ pub fn router(
     .sessions(session_config())
     .app_context(pool)
     .app_context(valkey)
-    .app_context(storage);
+    .app_context(storage)
+    .app_context(mailer);
 
   // Trust only the configured reverse proxies when resolving the
   // client IP (`valkey::client_ip` → Topcoat `client_ip`). Default 0 =

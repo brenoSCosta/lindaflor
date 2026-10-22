@@ -512,12 +512,14 @@ pub async fn request_password_reset(
         .execute(pool)
         .await?;
 
+    crate::mail::auth::send_password_reset(pool, &email, &user.name, &token)
+      .await?;
+
     tracing::info!(
         user_id = %user.id,
-        email = %email,
         redirect_to = ?redirect_to,
         token_hash_prefix = %token_hash_prefix,
-        "password reset token created (mail not wired yet)"
+        "password reset token created; mail queued"
     );
   }
 
@@ -656,12 +658,14 @@ pub async fn send_verification_email(
             .execute(pool)
             .await?;
 
+    crate::mail::auth::send_verify_email(pool, &email, &user.name, &token)
+      .await?;
+
     tracing::info!(
         user_id = %user.id,
-        email = %email,
         callback_url = ?callback_url,
         token_hash_prefix = %token_hash_prefix,
-        "email verification token created (mail not wired yet)"
+        "email verification token created; mail queued"
     );
   }
 
@@ -1014,14 +1018,13 @@ pub async fn request_change_email(
     .execute(pool)
     .await?;
 
+  crate::mail::auth::send_change_email(pool, &new_email, "", &token).await?;
+
   tracing::info!(
       user_id = %user_id,
-      current_email = %current_email,
-      new_email = %new_email,
       callback_url = ?callback_url,
       token_hash_prefix = %token_hash_prefix,
-      confirm_path = "/api/auth/change-email/confirm",
-      "change-email confirmation token created (mail not wired yet)"
+      "change-email confirmation token created; mail queued"
   );
 
   Ok(())
@@ -1300,13 +1303,14 @@ pub async fn request_delete_user(
     .execute(pool)
     .await?;
 
+  crate::mail::auth::send_delete_account(pool, &user.email, &user.name, &token)
+    .await?;
+
   tracing::info!(
       user_id = %user.id,
-      email = %user.email,
       callback_url = ?callback_url,
       token_hash_prefix = %token_hash_prefix,
-      confirm_path = "/api/auth/delete-user",
-      "delete-user verification token created (mail not wired yet)"
+      "delete-user verification token created; mail queued"
   );
 
   Ok(())

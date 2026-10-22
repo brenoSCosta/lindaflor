@@ -51,6 +51,141 @@ pub struct Config {
   pub s3: Option<S3Config>,
 }
 
+/// How outgoing email leaves the process (see `src/mail.rs`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum MailTransport {
+  /// Log a one-line summary (body only at `debug` outside production).
+  Log,
+  Smtp(SmtpConfig),
+}
+
+/// TLS mode for the SMTP relay from `SMTP_TLS`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SmtpTls {
+  /// Plain connection upgraded with `STARTTLS` (required). Port 587.
+  StartTls,
+  /// Implicit TLS from the first byte. Port 465.
+  Tls,
+  /// No TLS at all — dev-only, for a local catcher such as mailpit.
+  None,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct SmtpConfig {
+  pub host: String,
+  pub port: u16,
+  pub tls: SmtpTls,
+  pub username: Option<String>,
+  pub password: Option<String>,
+}
+
+// Manual `Debug` so the SMTP password never reaches a log or panic.
+impl std::fmt::Debug for SmtpConfig {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.debug_struct("SmtpConfig")
+      .field("host", &self.host)
+      .field("port", &self.port)
+      .field("tls", &self.tls)
+      .field("username", &self.username)
+      .field("password", &self.password.as_ref().map(|_| "***"))
+      .finish()
+  }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MailConfig {
+  pub transport: MailTransport,
+  /// `From:` header, e.g. `Lindaflor <contato@lindaflor.com.br>`.
+  pub from: String,
+}
+
+const DEFAULT_MAIL_FROM: &str = "Lindaflor <nao-responda@lindaflor.local>";
+
+fn env_flag(key: &str) -> bool {
+  read_env_or_file(key).is_some_and(|v| {
+    matches!(
+      v.trim().to_ascii_lowercase().as_str(),
+      "1" | "true" | "yes" | "on"
+    )
+  })
+}
+
+/// Mail settings from `MAIL_TRANSPORT` (`log` | `smtp`, default `log`),
+/// `SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS` (`starttls` | `tls` | `none`),
+/// `SMTP_USERNAME`, `SMTP_PASSWORD` (each also as `*_FILE`) and `MAIL_FROM`.
+///
+/// Production refuses the `log` transport (mail would silently go nowhere)
+/// unless `MAIL_ALLOW_LOG_IN_PRODUCTION=1` opts in explicitly, refuses
+/// `SMTP_TLS=none`, and requires `MAIL_FROM`.
+pub fn mail_from_env() -> Result<MailConfig, ConfigError> {
+  let production = app_env() == "production";
+  let raw_transport = read_env_or_file("MAIL_TRANSPORT")
+    .unwrap_or_else(|| "log".to_string())
+    .trim()
+    .to_ascii_lowercase();
+  let transport = match raw_transport.as_str() {
+    "log" => {
+      if production && !env_flag("MAIL_ALLOW_LOG_IN_PRODUCTION") {
+        return Err(ConfigError::MailLogTransportInProduction);
+      }
+      MailTransport::Log
+    }
+    "smtp" => {
+      let host = env_non_empty("SMTP_HOST")
+        .ok_or_else(|| ConfigError::MissingVar("SMTP_HOST".to_string()))?;
+      let tls = match read_env_or_file("SMTP_TLS")
+        .unwrap_or_else(|| "starttls".to_string())
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+      {
+        "starttls" => SmtpTls::StartTls,
+        "tls" | "implicit" => SmtpTls::Tls,
+        "none" | "off" if !production => SmtpTls::None,
+        _ => return Err(ConfigError::InvalidSmtpTls),
+      };
+      let default_port = match tls {
+        SmtpTls::StartTls => 587,
+        SmtpTls::Tls => 465,
+        SmtpTls::None => 1025,
+      };
+      let port = match read_env_or_file("SMTP_PORT") {
+        Some(raw) => {
+          raw.trim().parse().map_err(|_| ConfigError::InvalidPort)?
+        }
+        None => default_port,
+      };
+      MailTransport::Smtp(SmtpConfig {
+        host,
+        port,
+        tls,
+        username: env_non_empty("SMTP_USERNAME"),
+        password: env_non_empty("SMTP_PASSWORD"),
+      })
+    }
+    _ => return Err(ConfigError::InvalidMailTransport(raw_transport)),
+  };
+  let from = match env_non_empty("MAIL_FROM") {
+    Some(from) => from,
+    None if production => {
+      return Err(ConfigError::MissingVar("MAIL_FROM".to_string()));
+    }
+    None => DEFAULT_MAIL_FROM.to_string(),
+  };
+  Ok(MailConfig { transport, from })
+}
+
+/// Outbox poll interval from `MAIL_POLL_SECS` (default 5).
+pub fn mail_poll_secs() -> u64 {
+  env_parse("MAIL_POLL_SECS", 5).max(1)
+}
+
+/// Delivery attempts before an outbox row is marked `failed`, from
+/// `MAIL_MAX_ATTEMPTS` (default 8).
+pub fn mail_max_attempts() -> i32 {
+  env_parse("MAIL_MAX_ATTEMPTS", 8).max(1)
+}
+
 // Manual `Debug` so connection strings (which embed passwords) are
 // never emitted by `{:?}` logs/panics.
 impl std::fmt::Debug for Config {
@@ -419,6 +554,14 @@ pub enum ConfigError {
     "invalid TOTP_ENCRYPTION_KEY: expected base64-encoded 32 bytes or 64 hex chars"
   )]
   InvalidTotpEncryptionKey,
+  #[error(
+    "MAIL_TRANSPORT=log in production would drop every email: set MAIL_TRANSPORT=smtp, or MAIL_ALLOW_LOG_IN_PRODUCTION=1 to opt in"
+  )]
+  MailLogTransportInProduction,
+  #[error("invalid MAIL_TRANSPORT {0:?}: expected \"log\" or \"smtp\"")]
+  InvalidMailTransport(String),
+  #[error("invalid SMTP_TLS: expected starttls or tls (none is dev-only)")]
+  InvalidSmtpTls,
 }
 
 #[cfg(test)]
@@ -550,6 +693,55 @@ mod tests {
     );
     let _key_file = remove_env("TOTP_ENCRYPTION_KEY_FILE");
     Config::from_env().expect("prod boot with valid APP_ORIGIN");
+  }
+
+  #[test]
+  fn mail_log_transport_refused_in_production_unless_allowed() {
+    let _lock = ENV_LOCK.lock().expect("env lock");
+    let _env = set_env("APP_ENV", "production");
+    let _transport = remove_env("MAIL_TRANSPORT");
+    let _allow = remove_env("MAIL_ALLOW_LOG_IN_PRODUCTION");
+    let _from = set_env("MAIL_FROM", "Lindaflor <loja@example.com>");
+    assert!(matches!(
+      mail_from_env(),
+      Err(ConfigError::MailLogTransportInProduction)
+    ));
+    let _allowed = set_env("MAIL_ALLOW_LOG_IN_PRODUCTION", "1");
+    assert_eq!(
+      mail_from_env().expect("opt-in").transport,
+      MailTransport::Log
+    );
+    drop(_allowed);
+    let _dev = set_env("APP_ENV", "development");
+    assert_eq!(mail_from_env().expect("dev").transport, MailTransport::Log);
+  }
+
+  #[test]
+  fn mail_smtp_config_parses_and_redacts_password() {
+    let _lock = ENV_LOCK.lock().expect("env lock");
+    let _env = set_env("APP_ENV", "production");
+    let _transport = set_env("MAIL_TRANSPORT", "smtp");
+    let _host = set_env("SMTP_HOST", "smtp.example.com");
+    let _port = remove_env("SMTP_PORT");
+    let _tls = set_env("SMTP_TLS", "tls");
+    let _user = set_env("SMTP_USERNAME", "loja");
+    let _pass = set_env("SMTP_PASSWORD", "hunter2-secret");
+    let _from = set_env("MAIL_FROM", "Lindaflor <loja@example.com>");
+    let cfg = mail_from_env().expect("smtp config");
+    let MailTransport::Smtp(smtp) = &cfg.transport else {
+      panic!("expected smtp transport");
+    };
+    assert_eq!(smtp.port, 465);
+    assert_eq!(smtp.tls, SmtpTls::Tls);
+    assert_eq!(smtp.password.as_deref(), Some("hunter2-secret"));
+    let rendered = format!("{cfg:?}");
+    assert!(!rendered.contains("hunter2"), "leaked password: {rendered}");
+    // Plaintext SMTP is dev-only.
+    let _plain = set_env("SMTP_TLS", "none");
+    assert!(matches!(mail_from_env(), Err(ConfigError::InvalidSmtpTls)));
+    // A missing host fails boot instead of failing every send later.
+    let _no_host = remove_env("SMTP_HOST");
+    assert!(matches!(mail_from_env(), Err(ConfigError::MissingVar(_))));
   }
 
   #[test]

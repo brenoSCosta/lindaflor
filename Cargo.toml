@@ -35,6 +35,7 @@ tower-http = { version = "0.7", features = ["set-header"] }
 chacha20poly1305 = "0.10"
 zeroize = "1"
 base64 = "0.22"
+lettre = { version = "0.11", default-features = false, features = ["builder", "hostname", "pool", "smtp-transport", "tokio1-rustls", "aws-lc-rs", "webpki-roots"] }
 
 [build-dependencies]
 topcoat = { version = "0.9", default-features = false, features = ["tailwind", "icon-iconify"] }

@@ -1025,6 +1025,7 @@ async fn create_order_in_tx(
     .await?;
 
   clear_items_in_tx(tx, cart_id).await?;
+  crate::mail::orders::enqueue_order_created(tx, order_id).await?;
 
   Ok(())
 }
@@ -1450,6 +1451,30 @@ mod tests {
     .await
     .expect("unit price");
     assert_eq!(unit, 24_000);
+  }
+
+  #[tokio::test]
+  async fn create_order_queues_pix_mail() {
+    let pool = crate::test_support::fresh_pool().await;
+    ensure_pix_settings(&pool).await;
+    let (_, variant_id) = seed_variant(&pool, UNIT_PRICE_CENTS, 2).await;
+    let cart_id = seed_cart(&pool, variant_id, 1).await;
+    let email = format!("mail-{}@example.com", Uuid::now_v7().simple());
+    let created =
+      create_order(&pool, cart_id, checkout_input(&email, ""), None)
+        .await
+        .expect("create order");
+    let (kind, text): (String, String) = sqlx::query_as(
+      "SELECT kind, text_body FROM email_outbox WHERE to_address = $1",
+    )
+    .bind(&email)
+    .fetch_one(&pool)
+    .await
+    .expect("queued order mail");
+    assert_eq!(kind, "order_created");
+    let link = format!("/pedido/{}?t={}", created.id, created.access_token);
+    assert!(text.contains(&link), "missing order link: {text}");
+    assert!(text.contains("PIX copia-e-cola"));
   }
 
   #[tokio::test]

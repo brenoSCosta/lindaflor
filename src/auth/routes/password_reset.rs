@@ -94,12 +94,14 @@ pub async fn request_password_reset(
             .execute(pool)
             .await?;
 
+      crate::mail::auth::send_password_reset(pool, &email, &user.name, &token)
+        .await?;
+
       tracing::info!(
           user_id = %user.id,
-          email = %email,
           redirect_to = ?body.redirect_to,
           token_hash_prefix = %token_hash_prefix,
-          "password reset token created (mail not wired yet)"
+          "password reset token created; mail queued"
       );
     }
   }
