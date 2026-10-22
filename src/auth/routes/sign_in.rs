@@ -99,12 +99,15 @@ pub async fn sign_in_email(
   .await?;
 
   let Some(row) = row else {
+    // Same Argon2 cost as a wrong password (no timing oracle on e-mails).
+    crate::auth::password::dummy_verify(&body.password);
     crate::valkey::record_auth_fail(conn.clone(), &ip, &email).await;
     crate::valkey::record_auth_email_fail(conn, &email).await;
     return Err(unauthorized().into());
   };
 
   let Some(stored_hash) = row.password.as_deref() else {
+    crate::auth::password::dummy_verify(&body.password);
     crate::valkey::record_auth_fail(conn.clone(), &ip, &email).await;
     crate::valkey::record_auth_email_fail(conn, &email).await;
     return Err(unauthorized().into());
@@ -259,6 +262,9 @@ pub async fn sign_in_social(
       ttl_secs: crate::auth::routes::oauth::OAUTH_STATE_TTL_SECS,
       link_user_id: None,
       session_binding: None,
+      browser_binding: Some(
+        &crate::auth::routes::oauth::issue_oauth_browser_binding(cx),
+      ),
       code_verifier: Some(&code_verifier),
       nonce: Some(&nonce),
     },

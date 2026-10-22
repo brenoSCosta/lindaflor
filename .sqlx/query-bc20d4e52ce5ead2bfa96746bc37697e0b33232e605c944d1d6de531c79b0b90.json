@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE users\n            SET\n                email_verified = CASE\n                    WHEN $2 AND email = $4 THEN true\n                    ELSE email_verified\n                END,\n                image = COALESCE(image, $3),\n                updated_at = now()\n            WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bc20d4e52ce5ead2bfa96746bc37697e0b33232e605c944d1d6de531c79b0b90"
+}

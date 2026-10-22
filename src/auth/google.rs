@@ -80,6 +80,33 @@ fn env_or_file_nonempty(key: &str) -> Option<String> {
     .filter(|v| !v.is_empty())
 }
 
+/// Token endpoint, honoring [`test_endpoint_base`].
+pub fn token_url() -> String {
+  test_endpoint_base()
+    .map(|base| format!("{base}/token"))
+    .unwrap_or_else(|| GOOGLE_TOKEN_URL.to_owned())
+}
+
+fn userinfo_url() -> String {
+  test_endpoint_base()
+    .map(|base| format!("{base}/userinfo"))
+    .unwrap_or_else(|| GOOGLE_USERINFO_URL.to_owned())
+}
+
+/// `GOOGLE_OAUTH_TEST_BASE_URL` points the token/userinfo calls at a local
+/// stub so integration tests can drive the real callback. Ignored unless
+/// `APP_ENV` is development/test: production always talks to Google.
+fn test_endpoint_base() -> Option<String> {
+  if !matches!(
+    crate::config::app_env().as_str(),
+    "development" | "dev" | "test"
+  ) {
+    return None;
+  }
+  env_nonempty("GOOGLE_OAUTH_TEST_BASE_URL")
+    .map(|base| base.trim_end_matches('/').to_owned())
+}
+
 fn env_nonempty(key: &str) -> Option<String> {
   std::env::var(key)
     .ok()
@@ -131,7 +158,7 @@ pub async fn exchange_code(
 ) -> Result<GoogleTokenResponse, GoogleOAuthError> {
   let redirect_uri = config.redirect_uri();
   let response = crate::http_client::shared_http_client()
-    .post(GOOGLE_TOKEN_URL)
+    .post(token_url())
     .header("Accept", "application/json")
     .form(&[
       ("code", code),
@@ -159,7 +186,7 @@ pub async fn fetch_userinfo(
   access_token: &str,
 ) -> Result<GoogleUserInfo, GoogleOAuthError> {
   let response = crate::http_client::shared_http_client()
-    .get(GOOGLE_USERINFO_URL)
+    .get(userinfo_url())
     .bearer_auth(access_token)
     .header("Accept", "application/json")
     .send()

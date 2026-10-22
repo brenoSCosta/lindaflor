@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT id::text AS \"id!\", guest_email, status::text AS \"status!\", total_cents, created_at\n         FROM orders\n         WHERE user_id = $1\n         ORDER BY created_at DESC\n         LIMIT $2 OFFSET $3",
+  "query": "SELECT id::text AS \"id!\", guest_email, status::text AS \"status!\", total_cents, created_at,\n                carrier, tracking_code\n         FROM orders\n         WHERE user_id = $1\n         ORDER BY created_at DESC\n         LIMIT $2 OFFSET $3",
   "describe": {
     "columns": [
       {
@@ -27,6 +27,16 @@
         "ordinal": 4,
         "name": "created_at",
         "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "carrier",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "tracking_code",
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -41,8 +51,10 @@
       true,
       null,
       false,
-      false
+      false,
+      false,
+      true
     ]
   },
-  "hash": "866e6fd34d8e38b429ae721c5fd301775ef49bd24e1a96a220af4fd23543a82c"
+  "hash": "3a830ba7cdadd69ac4226edb9e3164456c56620faf0d66a6655ed57bc4dec0a6"
 }

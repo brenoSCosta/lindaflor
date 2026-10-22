@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM verifications\n        WHERE identifier = $1 OR identifier = $2 OR identifier LIKE $3\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7b39d2da77dfb9f7e8485deff193ba516648292011ffc1082b56987db0208ca4"
+}

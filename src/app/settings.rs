@@ -19,7 +19,7 @@ use topcoat::{
 use uuid::Uuid;
 
 use crate::app::auth_helpers::require_user;
-use crate::app::utils::{object_store, resolve_storage_url};
+use crate::app::utils::{object_store, resolve_avatar_url};
 use crate::auth::CREDENTIAL_PROVIDER_ID;
 use crate::auth::avatar::{self as auth_avatar};
 use crate::auth::google::GOOGLE_PROVIDER_ID;
@@ -29,7 +29,10 @@ use crate::auth::service::{
   portuguese_error_message,
 };
 use crate::auth::session_store;
-use crate::auth::totp::verify_code;
+use crate::auth::step_up::{
+  MSG_IMPERSONATING, StepUpFactors, check_totp_code, step_up_factors,
+  verify_step_up,
+};
 use crate::auth::totp_crypto::decrypt_row_secret;
 use crate::auth::user::User;
 use crate::components::avatar::{
@@ -180,7 +183,8 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   let user_email = su.user.email.clone();
   let user_initials = initials(&user_name);
   let store = object_store(cx);
-  let avatar_url = resolve_storage_url(&store, su.user.image.as_deref()).await;
+  let avatar_url =
+    resolve_avatar_url(&store, su.user.id, su.user.image.as_deref()).await;
   let has_avatar = su
     .user
     .image
@@ -192,6 +196,8 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
     .iter()
     .find(|a| a.provider_id == CREDENTIAL_PROVIDER_ID)
     .map(|_| user_email.clone());
+  // Which re-authentication inputs the sensitive forms must render.
+  let factors = step_up_factors(pool, su.user.id).await?;
 
   // Tab selection as a signal: switching updates `active`/`hidden` bindings
   // in the browser without a document reload. `href` remains as a no-JS
@@ -267,7 +273,7 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                       )
                   </div>
                   <div :hidden=$(active.get() != "account")>
-                      account_tab(email: user_email.clone())
+                      account_tab(email: user_email.clone(), factors: factors)
                   </div>
                   <div :hidden=$(active.get() != "sessions")>
                       sessions_tab(sessions: sessions.clone())
@@ -275,14 +281,16 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
                   <div :hidden=$(active.get() != "security")>
                       security_tab(
                           two_factor_enabled: two_factor_enabled,
-                          pending_enrollment: pending_enrollment
+                          pending_enrollment: pending_enrollment,
+                          factors: factors
                       )
                   </div>
                   <div :hidden=$(active.get() != "linked-accounts")>
                       linked_accounts_tab(
                           accounts: accounts.clone(),
                           credential_email: credential_email.clone(),
-                          has_google: has_google
+                          has_google: has_google,
+                          factors: factors
                       )
                   </div>
                   <div :hidden=$(active.get() != "danger")>
@@ -313,6 +321,7 @@ pub async fn two_factor_setup(cx: &Cx) -> Result<impl View> {
     false
   };
   let qr_uri = flash.as_ref().and_then(|f| totp_qr_image_uri(&f.totp_uri));
+  let factors = step_up_factors(pool, su.user.id).await?;
   Ok(view! {
       container(
           <h1 class="text-2xl font-bold">"Ativar autenticação de dois fatores"</h1>
@@ -320,15 +329,30 @@ pub async fn two_factor_setup(cx: &Cx) -> Result<impl View> {
               enabled: enabled,
               pending: pending,
               flash: flash,
-              qr_uri: qr_uri
+              qr_uri: qr_uri,
+              factors: factors
           )
       )
   })
 }
 
-async fn begin_two_factor_enrollment(cx: &Cx) -> Result<Response> {
+async fn begin_two_factor_enrollment(
+  cx: &Cx,
+  password: Option<&str>,
+  code: Option<&str>,
+) -> Result<Response> {
   let su = require_user(cx).await?;
   let pool = app_context::<PgPool>(cx);
+  let back = href!(page).query([("tab", "security")]).resolve(cx);
+  if su.impersonated_by.is_some() {
+    set_toast(cx, Toast::error(MSG_IMPERSONATING));
+    return toast_redirect(cx, back);
+  }
+  if let Err(msg) = settings_step_up(cx, pool, su.user.id, password, code).await
+  {
+    set_toast(cx, Toast::error(msg));
+    return toast_redirect(cx, back);
+  }
   match service::enable_two_factor(pool, &su.user).await {
     Ok(result) => {
       store_enrollment_flash(cx, &result).await;
@@ -341,11 +365,73 @@ async fn begin_two_factor_enrollment(cx: &Cx) -> Result<Response> {
   }
 }
 
+/// Step-up fields posted with the 2FA enrollment form.
+#[derive(Debug, Default, Deserialize)]
+pub struct StepUpInput {
+  password: Option<String>,
+  code: Option<String>,
+}
+
 /// HTML enable posts here so the browser 303s to a different pathname
 /// (the one-time QR page) with no toast.
 #[route(POST "/settings/two-factor")]
-pub async fn two_factor_setup_enable(cx: &Cx) -> Result<Response> {
-  begin_two_factor_enrollment(cx).await
+pub async fn two_factor_setup_enable(
+  cx: &Cx,
+  Form(body): Form<StepUpInput>,
+) -> Result<Response> {
+  begin_two_factor_enrollment(
+    cx,
+    body.password.as_deref(),
+    body.code.as_deref(),
+  )
+  .await
+}
+
+/// Password / authenticator-code inputs for actions that need a fresh proof
+/// ([`verify_step_up`]). Renders nothing for OAuth-only accounts without
+/// 2FA, which the server lets through on the session alone.
+#[component]
+async fn step_up_fields(
+  id_prefix: String,
+  factors: StepUpFactors,
+) -> Result<impl View> {
+  let password_id = format!("{id_prefix}-password");
+  let code_id = format!("{id_prefix}-code");
+  let code_label = if factors.password {
+    "Ou código do autenticador"
+  } else {
+    "Código do autenticador"
+  };
+  Ok(view! {
+      if factors.password {
+          field(
+              field_label(attrs: attributes! { for=(password_id.clone()) }, "Senha atual")
+              input(
+                  attrs: attributes! {
+                      id=(password_id.clone())
+                      name="password"
+                      type="password"
+                      autocomplete="current-password"
+                  }
+              )
+          )
+      }
+      if factors.totp {
+          field(
+              field_label(attrs: attributes! { for=(code_id.clone()) }, (code_label))
+              input(
+                  attrs: attributes! {
+                      id=(code_id.clone())
+                      name="code"
+                      type="text"
+                      inputmode="numeric"
+                      maxlength="6"
+                      autocomplete="one-time-code"
+                  }
+              )
+          )
+      }
+  })
 }
 
 #[component]
@@ -559,7 +645,11 @@ async fn profile_tab(
 }
 
 #[component]
-async fn account_tab(cx: &Cx, email: String) -> Result<impl View> {
+async fn account_tab(
+  cx: &Cx,
+  email: String,
+  factors: StepUpFactors,
+) -> Result<impl View> {
   let min_password_len = crate::auth::password::MIN_PASSWORD_LEN as f64;
   let max_password_len = crate::auth::password::MAX_PASSWORD_LEN as f64;
   let new_email = signal(cx, String::new);
@@ -689,6 +779,7 @@ async fn account_tab(cx: &Cx, email: String) -> Result<impl View> {
                           attrs: attributes! { id="new_email-error" }
                       )
                   )
+                  step_up_fields(id_prefix: "change_email".to_owned(), factors: factors)
                   button(
                       blocked: email_blocked,
                       attrs: attributes! { type="submit" class="w-fit" },
@@ -888,6 +979,7 @@ async fn two_factor_setup_card(
   pending: bool,
   flash: Option<EnableTwoFactorResult>,
   qr_uri: Option<String>,
+  factors: StepUpFactors,
 ) -> Result<impl View> {
   let totp_code = signal(cx, String::new);
   let totp_code_touched = signal(cx, || false);
@@ -1032,7 +1124,9 @@ async fn two_factor_setup_card(
                       <form
                           method="post"
                           action=(href!(two_factor_setup_enable))
+                          class="flex flex-col gap-4"
                       >
+                          step_up_fields(id_prefix: "rotate".to_owned(), factors: factors)
                           button(
                               variant: ButtonVariant::Outline,
                               size: ButtonSize::Sm,
@@ -1059,6 +1153,7 @@ async fn security_tab(
   cx: &Cx,
   two_factor_enabled: bool,
   pending_enrollment: bool,
+  factors: StepUpFactors,
 ) -> Result<impl View> {
   let totp_code = signal(cx, String::new);
   let totp_code_touched = signal(cx, || false);
@@ -1073,17 +1168,6 @@ async fn security_tab(
       "".to_owned()
     }
   });
-  let disable_password = signal(cx, String::new);
-  let disable_password_touched = signal(cx, || false);
-  let disable_password_error = expr!({
-    if !disable_password_touched.get() {
-      "".to_owned()
-    } else if disable_password.get().is_empty() {
-      "Informe a senha.".to_owned()
-    } else {
-      "".to_owned()
-    }
-  });
   let totp_blocked = expr!({
     if totp_code.get().trim().is_empty() {
       true
@@ -1093,7 +1177,6 @@ async fn security_tab(
       false
     }
   });
-  let disable_blocked = expr!({ disable_password.get().is_empty() });
   Ok(view! {
       card(
           card_header(
@@ -1150,7 +1233,9 @@ async fn security_tab(
                       <form
                           method="post"
                           action=(href!(two_factor_setup_enable))
+                          class="flex flex-col gap-4"
                       >
+                          step_up_fields(id_prefix: "rotate".to_owned(), factors: factors)
                           button(
                               variant: ButtonVariant::Outline,
                               size: ButtonSize::Sm,
@@ -1179,32 +1264,10 @@ async fn security_tab(
                                   novalidate=""
                               >
                               <input type="hidden" name="action" value="disable_2fa">
-                              field(
-                                  attrs: attributes! {
-                                      :data-invalid=$( (!disable_password_error.is_empty()).then_some("true") )
-                                  },
-                                  field_label(attrs: attributes! { for="disable_password" }, "Senha")
-                                  input(
-                                      value: disable_password,
-                                      touched: disable_password_touched.clone(),
-                                      error: disable_password_error.clone(),
-                                      attrs: attributes! {
-                                          id="disable_password"
-                                          name="password"
-                                          type="password"
-                                          autocomplete="current-password"
-                                          aria-describedby="disable-password-error"
-                                      }
-                                  )
-                                  field_error(
-                                      message: disable_password_error,
-                                      attrs: attributes! { id="disable-password-error" }
-                                  )
-                              )
+                              step_up_fields(id_prefix: "disable".to_owned(), factors: factors)
                               button(
                                   variant: ButtonVariant::Outline,
                                   size: ButtonSize::Sm,
-                                  blocked: disable_blocked,
                                   attrs: attributes! { type="submit" },
                                   "Desativar 2FA"
                               )
@@ -1213,7 +1276,9 @@ async fn security_tab(
                           <form
                               method="post"
                               action=(href!(two_factor_setup_enable))
+                              class="flex items-end gap-2"
                               >
+                              step_up_fields(id_prefix: "enable".to_owned(), factors: factors)
                               button(
                                   variant: ButtonVariant::Primary,
                                   size: ButtonSize::Sm,
@@ -1234,6 +1299,7 @@ async fn linked_accounts_tab(
   accounts: Vec<LinkedAccount>,
   credential_email: Option<String>,
   has_google: bool,
+  factors: StepUpFactors,
 ) -> Result<impl View> {
   Ok(view! {
       card(
@@ -1265,23 +1331,16 @@ async fn linked_accounts_tab(
                                   <input type="hidden" name="action" value="unlink">
                                   <input type="hidden" name="provider_id" value=(account.provider_id.clone())>
                                   <input type="hidden" name="account_id" value=(account.account_id.clone())>
-                                  {
-                                      let pid = account.provider_id.clone();
-                                      let aid = account.account_id.clone();
-                                      button(
-                                          variant: ButtonVariant::Outline,
-                                          size: ButtonSize::Sm,
-                                          attrs: attributes! {
-                                              type="submit"
-                                              @click=$(async |e: Event| {
-                                                  e.prevent_default();
-                                                  unlink_account_proc(pid.to_owned(), aid.to_owned()).await;
-                                                  raw!("location.reload()");
-                                              })
-                                          },
-                                          "Desconectar"
-                                      )
-                                  }
+                                  step_up_fields(
+                                      id_prefix: format!("unlink-{}", account.id),
+                                      factors: factors
+                                  )
+                                  button(
+                                      variant: ButtonVariant::Outline,
+                                      size: ButtonSize::Sm,
+                                      attrs: attributes! { type="submit" },
+                                      "Desconectar"
+                                  )
                               </form>
                           }
                       </div>
@@ -1301,6 +1360,7 @@ async fn linked_accounts_tab(
                                   data-toast-loading="Conectando…"
                               >
                               <input type="hidden" name="action" value="link_google">
+                              step_up_fields(id_prefix: "link_google".to_owned(), factors: factors)
                               button(
                                   variant: ButtonVariant::Outline,
                                   size: ButtonSize::Sm,
@@ -1425,6 +1485,13 @@ pub async fn upload_avatar(
   mut multipart: Multipart,
 ) -> Result<Response> {
   let su = require_user(cx).await?;
+  if su.impersonated_by.is_some() {
+    set_toast(cx, Toast::error(MSG_IMPERSONATING));
+    return toast_redirect(
+      cx,
+      href!(page).query([("tab", "profile")]).resolve(cx),
+    );
+  }
   let pool = app_context::<PgPool>(cx);
   let store = object_store(cx);
 
@@ -1465,6 +1532,7 @@ pub async fn upload_avatar(
 #[procedure("/settings/revoke-session")]
 async fn revoke_session_proc(cx: &Cx, session_id: String) -> Result<bool> {
   let su = require_user(cx).await?;
+  crate::auth::step_up::forbid_impersonated(&su)?;
   let pool = app_context::<PgPool>(cx);
   let id = Uuid::parse_str(session_id.trim())
     .map_err(|_| bad_request("Sessão inválida"))?;
@@ -1478,29 +1546,43 @@ async fn revoke_session_proc(cx: &Cx, session_id: String) -> Result<bool> {
 #[procedure("/settings/revoke-other-sessions")]
 async fn revoke_other_sessions_proc(cx: &Cx) -> Result<bool> {
   let su = require_user(cx).await?;
+  crate::auth::step_up::forbid_impersonated(&su)?;
   let pool = app_context::<PgPool>(cx);
   session_store::delete_all_for_user_except(pool, su.user.id, su.session_id)
     .await?;
   Ok(true)
 }
 
-/// JS fast-path for the `unlink` form above. Hidden `provider_id`/`account_id`
-/// inputs stay as the no-JS fallback.
-#[procedure("/settings/unlink-account")]
-async fn unlink_account_proc(
-  cx: &Cx,
-  provider_id: String,
-  account_id: String,
-) -> Result<bool> {
-  let su = require_user(cx).await?;
-  let pool = app_context::<PgPool>(cx);
-  service::unlink_linked_account(pool, su.user.id, &provider_id, &account_id)
-    .await?;
-  Ok(true)
-}
-
 fn settings_tab_url(cx: &Cx, tab: &str) -> String {
   href!(page).query([("tab", tab)]).resolve(cx)
+}
+
+/// [`verify_step_up`] for the HTML forms, with a pt-BR toast message.
+async fn settings_step_up(
+  cx: &Cx,
+  pool: &PgPool,
+  user_id: Uuid,
+  password: Option<&str>,
+  code: Option<&str>,
+) -> Result<(), String> {
+  match verify_step_up(cx, pool, user_id, password, code).await {
+    Ok(()) => Ok(()),
+    Err(err) => {
+      let msg = portuguese_error_message(&err);
+      if msg.starts_with("Muitas tentativas") {
+        Err(msg)
+      } else if password.is_some_and(|p| !p.is_empty())
+        || code.is_some_and(|c| !c.trim().is_empty())
+      {
+        Err("Senha ou código do autenticador incorreto.".to_owned())
+      } else {
+        Err(
+          "Confirme com sua senha atual ou o código do autenticador."
+            .to_owned(),
+        )
+      }
+    }
+  }
 }
 
 /// How recently the user must have signed in for immediate account deletion.
@@ -1566,6 +1648,7 @@ fn check_delete_origin(cx: &Cx) -> Result<(), String> {
 ///
 /// Returns a Portuguese message safe to show in the settings toast.
 async fn authorize_immediate_delete(
+  cx: &Cx,
   pool: &PgPool,
   user: &User,
   session_id: Uuid,
@@ -1659,12 +1742,12 @@ async fn authorize_immediate_delete(
       row.secret_key_version,
     )
     .map_err(|_| "Não foi possível verificar o código.".to_string())?;
-    let ok = verify_code(secret.as_str(), code)
-      .map_err(|_| "Não foi possível verificar o código.".to_string())?;
-    if ok {
-      return Ok(());
-    }
-    return Err("Código do autenticador inválido.".to_string());
+    // Shared per-user TOTP cap + replay guard.
+    return match check_totp_code(cx, user.id, secret.as_str(), code).await {
+      Ok(true) => Ok(()),
+      Ok(false) => Err("Código do autenticador inválido.".to_string()),
+      Err(err) => Err(portuguese_error_message(&err)),
+    };
   }
 
   if has_password && !password.is_empty() {
@@ -1723,6 +1806,12 @@ pub async fn settings_post(
     toast_redirect(cx, settings_tab_url(cx, &tab))
   };
 
+  // An impersonation session is for looking, not for changing the
+  // customer's profile, credentials or sessions.
+  if su.impersonated_by.is_some() {
+    return err_redirect(MSG_IMPERSONATING);
+  }
+
   match action {
     "remove_avatar" => {
       let store = object_store(cx);
@@ -1739,6 +1828,17 @@ pub async fn settings_post(
       }
     }
     "change_email" => {
+      if let Err(msg) = settings_step_up(
+        cx,
+        pool,
+        su.user.id,
+        body.password.as_deref(),
+        body.code.as_deref(),
+      )
+      .await
+      {
+        return err_redirect(&msg);
+      }
       let new_email = body.new_email.as_deref().unwrap_or("");
       let callback = href!(page).query([("tab", "account")]).resolve(cx);
       match service::request_change_email(
@@ -1769,6 +1869,11 @@ pub async fn settings_post(
       }
     }
     "change_password" => {
+      if crate::auth::step_up::check_step_up_rate(cx).is_err() {
+        return err_redirect(
+          "Muitas tentativas. Aguarde um momento e tente novamente.",
+        );
+      }
       let current = body.current_password.as_deref().unwrap_or("");
       let new_password = body.new_password.as_deref().unwrap_or("");
       let confirm = body.confirm_password.as_deref().unwrap_or("");
@@ -1822,7 +1927,14 @@ pub async fn settings_post(
       Ok(()) => ok_redirect(),
       Err(_) => err_redirect("Não foi possível encerrar as outras sessões."),
     },
-    "enable_2fa" => begin_two_factor_enrollment(cx).await,
+    "enable_2fa" => {
+      begin_two_factor_enrollment(
+        cx,
+        body.password.as_deref(),
+        body.code.as_deref(),
+      )
+      .await
+    }
     "confirm_2fa" => {
       let code = body.code.as_deref().unwrap_or("");
       match service::confirm_enable_two_factor(cx, pool, &su.user, code).await {
@@ -1844,7 +1956,15 @@ pub async fn settings_post(
     }
     "disable_2fa" => {
       let password = body.password.as_deref();
-      match service::disable_two_factor(pool, &su.user, password, None).await {
+      let code = body.code.as_deref();
+      if let Err(msg) =
+        settings_step_up(cx, pool, su.user.id, password, code).await
+      {
+        return err_redirect(&msg);
+      }
+      match service::disable_two_factor(cx, pool, &su.user, password, code)
+        .await
+      {
         Ok(()) => {
           set_toast(cx, Toast::success("2FA desativada."));
           toast_redirect(cx, settings_tab_url(cx, &tab))
@@ -1853,6 +1973,17 @@ pub async fn settings_post(
       }
     }
     "link_google" => {
+      if let Err(msg) = settings_step_up(
+        cx,
+        pool,
+        su.user.id,
+        body.password.as_deref(),
+        body.code.as_deref(),
+      )
+      .await
+      {
+        return err_redirect(&msg);
+      }
       let callback =
         href!(page).query([("tab", "linked-accounts")]).resolve(cx);
       let Some(session_hash) = session::token_hash(cx).await? else {
@@ -1861,6 +1992,7 @@ pub async fn settings_post(
       let session_binding =
         crate::auth::session_store::token_hash_hex(&session_hash);
       match service::start_link_google(
+        cx,
         pool,
         su.user.id,
         Some(callback.as_str()),
@@ -1873,6 +2005,17 @@ pub async fn settings_post(
       }
     }
     "unlink" => {
+      if let Err(msg) = settings_step_up(
+        cx,
+        pool,
+        su.user.id,
+        body.password.as_deref(),
+        body.code.as_deref(),
+      )
+      .await
+      {
+        return err_redirect(&msg);
+      }
       let provider_id = body.provider_id.as_deref().unwrap_or("");
       let account_id = body.account_id.as_deref().unwrap_or("");
       match service::unlink_linked_account(
@@ -1888,6 +2031,11 @@ pub async fn settings_post(
       }
     }
     "delete_user" => {
+      if crate::auth::step_up::check_step_up_rate(cx).is_err() {
+        return err_redirect(
+          "Muitas tentativas. Aguarde um momento e tente novamente.",
+        );
+      }
       let confirm = body.confirm_email.as_deref().unwrap_or("");
       let password = body.password.as_deref().unwrap_or("");
       let code = body.code.as_deref().unwrap_or("");
@@ -1895,6 +2043,7 @@ pub async fn settings_post(
         return err_redirect(&msg);
       }
       if let Err(msg) = authorize_immediate_delete(
+        cx,
         pool,
         &su.user,
         su.session_id,

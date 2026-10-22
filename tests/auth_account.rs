@@ -68,6 +68,7 @@ async fn update_user_change_password_list_accounts() {
     serde_json::json!({
         "providerId": "google",
         "accountId": format!("google-{user_id}"),
+        "password": "Quilt-Mango-Brave-Pixel-7395?",
     }),
   )
   .await;

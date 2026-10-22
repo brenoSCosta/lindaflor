@@ -1,4 +1,6 @@
-use lindaflor::app::utils::resolve_storage_url;
+use lindaflor::app::utils::{
+  is_own_avatar_key, resolve_avatar_url, resolve_storage_url,
+};
 use lindaflor::auth::avatar::{remove_avatar, update_avatar};
 use lindaflor::storage::ObjectStore;
 use sqlx::PgPool;
@@ -219,4 +221,142 @@ async fn unavailable_store_rejects_upload_and_keeps_storage_key() {
     Some(key.as_str())
   );
   assert!(store.presign_get(&key).await.is_ok());
+}
+
+// --- B1: `users.image` can never reach objects outside the user's prefix ---
+
+#[tokio::test]
+async fn foreign_keys_in_image_are_never_deleted_or_presigned() {
+  let (pool, _router) = pool_and_router().await;
+  let store = ObjectStore::memory();
+  let user_id = insert_user(&pool).await;
+
+  // A storefront object whose key is public (it appears in image URLs).
+  let product_key =
+    format!("products/{}/{}.jpg", Uuid::now_v7(), Uuid::now_v7());
+  store
+    .put(&product_key, jpeg_bytes(), "image/jpeg")
+    .await
+    .expect("seed product image");
+  set_image(&pool, user_id, &product_key).await;
+  assert!(
+    resolve_avatar_url(&store, user_id, Some(&product_key))
+      .await
+      .is_none(),
+    "a foreign key must not be presigned as an avatar"
+  );
+
+  // Replacing the avatar must not delete the forged "previous" key.
+  let own = update_avatar(&pool, &store, user_id, &png_bytes(), "image/png")
+    .await
+    .expect("upload");
+  assert!(is_own_avatar_key(user_id, &own));
+  assert!(store.presign_get(&product_key).await.is_ok());
+
+  // Removing must not delete another user's avatar either.
+  let other = insert_user(&pool).await;
+  let other_key =
+    update_avatar(&pool, &store, other, &png_bytes(), "image/png")
+      .await
+      .expect("other upload");
+  set_image(&pool, user_id, &other_key).await;
+  remove_avatar(&pool, &store, user_id).await.expect("remove");
+  assert!(user_image(&pool, user_id).await.is_none());
+  assert!(store.presign_get(&other_key).await.is_ok());
+
+  // Remove with a product key: nulled, object kept.
+  set_image(&pool, user_id, &product_key).await;
+  remove_avatar(&pool, &store, user_id)
+    .await
+    .expect("remove foreign");
+  assert!(user_image(&pool, user_id).await.is_none());
+  assert!(store.presign_get(&product_key).await.is_ok());
+}
+
+#[test]
+fn own_avatar_key_rejects_traversal_and_other_users() {
+  let user_id = Uuid::now_v7();
+  assert!(is_own_avatar_key(
+    user_id,
+    &format!("avatars/{user_id}/a.png")
+  ));
+  assert!(!is_own_avatar_key(
+    user_id,
+    &format!("avatars/{user_id}/../../products/x.jpg")
+  ));
+  assert!(!is_own_avatar_key(user_id, &format!("avatars/{user_id}/")));
+  assert!(!is_own_avatar_key(
+    user_id,
+    &format!("avatars/{}/a.png", Uuid::now_v7())
+  ));
+  assert!(!is_own_avatar_key(user_id, "products/p/a.jpg"));
+}
+
+#[tokio::test]
+async fn google_avatar_urls_pass_through_other_urls_do_not() {
+  let store = ObjectStore::memory();
+  let user_id = Uuid::now_v7();
+  let google = "https://lh3.googleusercontent.com/a/abc=s96-c";
+  assert_eq!(
+    resolve_avatar_url(&store, user_id, Some(google))
+      .await
+      .as_deref(),
+    Some(google)
+  );
+  for other in [
+    "https://evil.example/a.png",
+    "https://googleusercontent.com.evil.example/a.png",
+    "http://lh3.googleusercontent.com/a.png",
+  ] {
+    assert!(
+      resolve_avatar_url(&store, user_id, Some(other))
+        .await
+        .is_none(),
+      "{other}"
+    );
+  }
+}
+
+#[tokio::test]
+async fn update_user_api_rejects_client_supplied_image() {
+  let (pool, router) = pool_and_router().await;
+  let email = unique_email("avatar-api");
+  let signed_up = test_support::sign_up(
+    &router,
+    "Avatar Api",
+    &email,
+    "Harbor-Violet-Tiger-4821-Lantern!",
+  )
+  .await;
+  assert_eq!(signed_up.status, http::StatusCode::OK);
+  let cookie = signed_up.next_cookie.clone();
+  let user_id =
+    Uuid::parse_str(signed_up.json["user"]["id"].as_str().unwrap()).unwrap();
+
+  let forged = test_support::json_post(
+    &router,
+    "/api/auth/update-user",
+    cookie.as_deref(),
+    serde_json::json!({ "image": "products/p/a.jpg" }),
+  )
+  .await;
+  assert_eq!(
+    forged.status,
+    http::StatusCode::BAD_REQUEST,
+    "{:?}",
+    forged.json
+  );
+  assert!(user_image(&pool, user_id).await.is_none());
+
+  // Clearing stays allowed (foreign leftovers are nulled, not deleted).
+  set_image(&pool, user_id, "products/p/a.jpg").await;
+  let cleared = test_support::json_post(
+    &router,
+    "/api/auth/update-user",
+    cookie.as_deref(),
+    serde_json::json!({ "image": null }),
+  )
+  .await;
+  assert_eq!(cleared.status, http::StatusCode::OK, "{:?}", cleared.json);
+  assert!(user_image(&pool, user_id).await.is_none());
 }

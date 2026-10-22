@@ -122,6 +122,7 @@ pub async fn revoke_session(
   let Some(su) = session.as_ref() else {
     return Err(unauthorized().into());
   };
+  crate::auth::step_up::forbid_impersonated(su)?;
 
   let raw = body
     .session_id
@@ -166,6 +167,7 @@ pub async fn revoke_other_sessions(cx: &Cx) -> Result<Json<OkStatus>> {
   let Some(su) = session.as_ref() else {
     return Err(unauthorized().into());
   };
+  crate::auth::step_up::forbid_impersonated(su)?;
 
   let Some(hash) = session::token_hash(cx).await? else {
     return Err(unauthorized().into());

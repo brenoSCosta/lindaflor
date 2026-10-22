@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT COUNT(*) FROM orders o WHERE ($1 = '' OR o.guest_email ILIKE '%' || $1 || '%') AND ($2 = 'all' OR o.status::text = $2)",
+  "query": "SELECT COUNT(*) FROM orders o WHERE ($1 = '' OR o.guest_email ILIKE '%' || $1 || '%' OR o.tracking_code ILIKE '%' || $1 || '%') AND ($2 = 'all' OR o.status::text = $2)",
   "describe": {
     "columns": [
       {
@@ -19,5 +19,5 @@
       null
     ]
   },
-  "hash": "f0e57aed78f9949d97a9912a750e30c6f5d234b6b4b7e64f3c6e34350be71799"
+  "hash": "73872a947be84409ff98140f4b6af0706620f13efcf4f13f23cf18385683ea44"
 }

@@ -3,7 +3,7 @@ use topcoat::{Error, Result};
 use uuid::Uuid;
 
 use crate::app::utils::{
-  MSG_UNAVAILABLE, is_storage_key, storage_failure, validate_image,
+  MSG_UNAVAILABLE, is_own_avatar_key, storage_failure, validate_image,
 };
 use crate::storage::{ObjectStore, StorageError};
 
@@ -45,8 +45,10 @@ pub async fn update_avatar(
     return Err(Error::msg(MSG_UPDATE));
   }
 
+  // Only objects under this user's own avatar prefix are ever deleted: a
+  // stale or forged `users.image` must never reach another object.
   if let Some(previous) = previous
-    && is_storage_key(&previous)
+    && is_own_avatar_key(user_id, &previous)
     && previous != key
   {
     let _ = store.delete(&previous).await;
@@ -55,14 +57,15 @@ pub async fn update_avatar(
   Ok(key)
 }
 
-/// Clear `users.image`. Storage keys are deleted; external URLs are only nulled.
+/// Clear `users.image`. Keys under `avatars/{user_id}/` are deleted; any
+/// other value (external URL, foreign key) is only nulled.
 pub async fn remove_avatar(
   pool: &PgPool,
   store: &ObjectStore,
   user_id: Uuid,
 ) -> Result<()> {
   let current = current_image(pool, user_id).await?;
-  if let Some(key) = current.filter(|image| is_storage_key(image)) {
+  if let Some(key) = current.filter(|image| is_own_avatar_key(user_id, image)) {
     if matches!(store, ObjectStore::Unavailable) {
       return Err(Error::msg(MSG_UNAVAILABLE));
     }

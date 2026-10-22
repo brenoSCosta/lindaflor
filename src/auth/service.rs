@@ -23,15 +23,18 @@ use crate::auth::routes::dto::{
 };
 use crate::auth::routes::oauth::{
   NewOAuthState, OAUTH_STATE_TTL_SECS, google_authorize_url,
-  pkce_s256_challenge, store_oauth_state_full,
+  issue_oauth_browser_binding, pkce_s256_challenge, store_oauth_state_full,
 };
 use crate::auth::routes::two_factor::{
   PENDING_2FA_PREFIX, create_pending_2fa, guard_pending_2fa,
 };
 use crate::auth::session_store::{self, token_hash_hex};
+use crate::auth::step_up::{
+  check_totp_code, ensure_totp_not_locked, record_totp_failure, verify_step_up,
+};
 use crate::auth::totp::{
   consume_backup_code, generate_backup_codes, generate_secret,
-  hash_backup_codes, verify_code,
+  hash_backup_codes,
 };
 use crate::auth::totp_crypto::{decrypt_row_secret, encrypt_secret};
 use crate::auth::user::{SessionUser, User, is_currently_banned};
@@ -252,6 +255,12 @@ pub async fn sign_up_email(
     return Err(bad_request(err.to_string()).into());
   }
 
+  // Hash before the existence check so a taken e-mail answers in the same
+  // time as a new one. The status still differs (400 vs a new session):
+  // removing that needs "verify e-mail before the account is usable", which
+  // waits on mail delivery. Accepted risk until then; the 5/min sign-up
+  // limit bounds the probing rate.
+  let password_hash = hash_password(password)?;
   if sqlx::query_scalar!(
     r#"SELECT id AS "id!" FROM users WHERE email = $1"#,
     email
@@ -263,7 +272,6 @@ pub async fn sign_up_email(
     return Err(bad_request("unable to complete sign-up").into());
   }
 
-  let password_hash = hash_password(password)?;
   let user_id = Uuid::now_v7();
   let account_id = Uuid::now_v7();
 
@@ -363,12 +371,15 @@ pub async fn sign_in_email(
   .await?;
 
   let Some(row) = row else {
+    // Same Argon2 cost as a wrong password (no timing oracle on e-mails).
+    crate::auth::password::dummy_verify(password);
     crate::valkey::record_auth_fail(conn.clone(), &ip, &email).await;
     crate::valkey::record_auth_email_fail(conn, &email).await;
     return Err(unauthorized().into());
   };
 
   let Some(stored_hash) = row.password.as_deref() else {
+    crate::auth::password::dummy_verify(password);
     crate::valkey::record_auth_fail(conn.clone(), &ip, &email).await;
     crate::valkey::record_auth_email_fail(conn, &email).await;
     return Err(unauthorized().into());
@@ -415,6 +426,7 @@ pub async fn sign_in_email(
 }
 
 pub async fn start_google_oauth(
+  cx: &Cx,
   pool: &PgPool,
   callback_url: Option<&str>,
   link_user_id: Option<Uuid>,
@@ -438,6 +450,7 @@ pub async fn start_google_oauth(
   let code_verifier = random_token();
   let nonce = random_token();
   let code_challenge = pkce_s256_challenge(&code_verifier);
+  let browser_binding = issue_oauth_browser_binding(cx);
   store_oauth_state_full(
     pool,
     NewOAuthState {
@@ -446,6 +459,7 @@ pub async fn start_google_oauth(
       ttl_secs: OAUTH_STATE_TTL_SECS,
       link_user_id,
       session_binding,
+      browser_binding: Some(&browser_binding),
       code_verifier: Some(&code_verifier),
       nonce: Some(&nonce),
     },
@@ -786,12 +800,7 @@ pub async fn complete_2fa_with_totp(
     tf.secret_key_version,
   )
   .map_err(|_| unauthorized())?;
-  if !verify_code(secret.as_str(), code).map_err(bad_request)? {
-    return Err(unauthorized().into());
-  }
-  if !crate::valkey::totp_reserve(crate::valkey::conn_from(cx), &user_id, code)
-    .await
-  {
+  if !check_totp_code(cx, user_id, secret.as_str(), code).await? {
     return Err(unauthorized().into());
   }
 
@@ -838,9 +847,17 @@ pub async fn complete_2fa_with_backup(
   guard_pending_2fa(cx, pool, pending_token.trim(), user_id, verification_id)
     .await?;
 
+  ensure_totp_not_locked(cx, user_id).await?;
+
   // Rate-limit guard above runs BEFORE the Argon2 work below.
   let stored =
-    consume_backup_code_async(tf.backup_codes, code.to_owned()).await?;
+    match consume_backup_code_async(tf.backup_codes, code.to_owned()).await {
+      Ok(stored) => stored,
+      Err(err) => {
+        record_totp_failure(cx, user_id).await;
+        return Err(err);
+      }
+    };
   sqlx::query!(
     r#"UPDATE two_factor SET backup_codes = $2 WHERE id = $1"#,
     tf.id,
@@ -1198,13 +1215,20 @@ pub async fn unlink_linked_account(
 }
 
 pub async fn start_link_google(
+  cx: &Cx,
   pool: &PgPool,
   user_id: Uuid,
   callback_url: Option<&str>,
   session_binding: &str,
 ) -> Result<String> {
-  start_google_oauth(pool, callback_url, Some(user_id), Some(session_binding))
-    .await
+  start_google_oauth(
+    cx,
+    pool,
+    callback_url,
+    Some(user_id),
+    Some(session_binding),
+  )
+  .await
 }
 
 // --- Delete user ---
@@ -1401,12 +1425,7 @@ pub async fn confirm_enable_two_factor(
     tf.secret_key_version,
   )
   .map_err(|_| unauthorized())?;
-  if !verify_code(secret.as_str(), code).map_err(bad_request)? {
-    return Err(unauthorized().into());
-  }
-  if !crate::valkey::totp_reserve(crate::valkey::conn_from(cx), &user.id, code)
-    .await
-  {
+  if !check_totp_code(cx, user.id, secret.as_str(), code).await? {
     return Err(unauthorized().into());
   }
 
@@ -1448,56 +1467,14 @@ pub async fn has_unverified_two_factor(
 }
 
 pub async fn disable_two_factor(
+  cx: &Cx,
   pool: &PgPool,
   user: &User,
   password: Option<&str>,
   code: Option<&str>,
 ) -> Result<()> {
-  let password_ok = match password.filter(|p| !p.is_empty()) {
-    Some(pw) => {
-      let row = sqlx::query!(
-                r#"SELECT password FROM accounts WHERE user_id = $1 AND provider_id = $2"#,
-                user.id,
-                CREDENTIAL_PROVIDER_ID,
-            )
-            .fetch_optional(pool)
-            .await?;
-      match row.and_then(|r| r.password) {
-        Some(stored) => verify_password(pw, &stored)?,
-        None => false,
-      }
-    }
-    None => false,
-  };
-
-  let totp_ok = if password_ok {
-    false
-  } else if let Some(code) = code.map(str::trim).filter(|c| !c.is_empty()) {
-    let tf = sqlx::query!(
-      r#"SELECT secret_nonce, secret_ciphertext, secret_key_version, verified FROM two_factor WHERE user_id = $1"#,
-      user.id,
-    )
-    .fetch_optional(pool)
-    .await?;
-    match tf {
-      Some(tf) if tf.verified => {
-        let secret = decrypt_row_secret(
-          tf.secret_nonce,
-          tf.secret_ciphertext,
-          tf.secret_key_version,
-        )
-        .map_err(|_| unauthorized())?;
-        verify_code(secret.as_str(), code).map_err(bad_request)?
-      }
-      _ => false,
-    }
-  } else {
-    false
-  };
-
-  if !password_ok && !totp_ok {
-    return Err(unauthorized().into());
-  }
+  // Password or TOTP (with the per-user cap and replay guard).
+  verify_step_up(cx, pool, user.id, password, code).await?;
 
   sqlx::query!(r#"DELETE FROM two_factor WHERE user_id = $1"#, user.id)
     .execute(pool)
@@ -1533,6 +1510,23 @@ pub async fn stop_impersonating(
     session_store::delete_by_token_hash(pool, &hash).await?;
   }
 
+  record_audit_event(
+    pool,
+    AuditEvent {
+      aggregate_type: "user",
+      aggregate_id: &su.user.id.to_string(),
+      entity_type: "user",
+      entity_id: su.user.id,
+      actor_id: Some(admin.id),
+      actor_name: Some(admin.name.as_str()),
+      metadata: serde_json::json!({
+        "action": "impersonate_stop",
+        "session_id": su.session_id,
+      }),
+    },
+  )
+  .await?;
+
   start_session_for_user(cx, pool, admin, None).await
 }
 
@@ -1560,7 +1554,25 @@ pub async fn impersonate_user(
     return Err(bad_request("cannot impersonate a banned user").into());
   }
 
-  start_session_for_user(cx, pool, target, Some(admin.user.id)).await
+  let impersonated =
+    start_session_for_user(cx, pool, target, Some(admin.user.id)).await?;
+  record_audit_event(
+    pool,
+    AuditEvent {
+      aggregate_type: "user",
+      aggregate_id: &target_user_id.to_string(),
+      entity_type: "user",
+      entity_id: target_user_id,
+      actor_id: Some(admin.user.id),
+      actor_name: Some(admin.user.name.as_str()),
+      metadata: serde_json::json!({
+        "action": "impersonate_start",
+        "session_id": impersonated.session_id,
+      }),
+    },
+  )
+  .await?;
+  Ok(impersonated)
 }
 
 // --- Admin user management ---
@@ -1753,8 +1765,26 @@ pub async fn admin_update_user_name(
   name: &str,
 ) -> Result<User> {
   ensure_admin(actor)?;
-  let _ = load_user(pool, user_id).await?;
-  update_user_name(pool, user_id, name).await
+  let before = load_user(pool, user_id).await?;
+  let updated = update_user_name(pool, user_id, name).await?;
+  record_audit_event(
+    pool,
+    AuditEvent {
+      aggregate_type: "user",
+      aggregate_id: &user_id.to_string(),
+      entity_type: "user",
+      entity_id: user_id,
+      actor_id: Some(actor.user.id),
+      actor_name: Some(actor.user.name.as_str()),
+      metadata: serde_json::json!({
+        "action": "rename_user",
+        "from": before.name,
+        "to": updated.name,
+      }),
+    },
+  )
+  .await?;
+  Ok(updated)
 }
 
 pub async fn ban_user(

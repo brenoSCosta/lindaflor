@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT o.id::text AS \"id!\", o.guest_email, o.status::text AS status, o.total_cents, o.created_at,\n                (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) as item_count\n         FROM orders o\n         WHERE ($1 = '' OR o.guest_email ILIKE '%' || $1 || '%')\n           AND ($2 = 'all' OR o.status::text = $2)\n         ORDER BY o.created_at DESC\n         LIMIT $3 OFFSET $4",
+  "query": "SELECT o.id::text AS \"id!\", o.guest_email, o.status::text AS status, o.total_cents, o.created_at,\n                o.carrier, o.tracking_code,\n                (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) as item_count\n         FROM orders o\n         WHERE ($1 = '' OR o.guest_email ILIKE '%' || $1 || '%'\n                OR o.tracking_code ILIKE '%' || $1 || '%')\n           AND ($2 = 'all' OR o.status::text = $2)\n         ORDER BY o.created_at DESC\n         LIMIT $3 OFFSET $4",
   "describe": {
     "columns": [
       {
@@ -30,6 +30,16 @@
       },
       {
         "ordinal": 5,
+        "name": "carrier",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "tracking_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
         "name": "item_count",
         "type_info": "Int8"
       }
@@ -48,8 +58,10 @@
       null,
       false,
       false,
+      false,
+      true,
       null
     ]
   },
-  "hash": "33a6239e2fbb7212731da503a014a2af8469bcdffc2dc77748af1b3aadc1b073"
+  "hash": "e3fc82b228a5f4f2b1343003477021877b5dc9ff2c266cd26f85391789d71489"
 }
