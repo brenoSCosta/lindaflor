@@ -95,12 +95,22 @@ Everything below is merged on `migration` (`git log --oneline e4940e6..HEAD`) an
   - C1–C4: safe local redirects, scoped limits on HTML auth forms, coupon apply budgets, `/metrics` closed in prod.
   - D1–D2: read-only cart lookup, stale-row sweeper, and checkout field caps (`cb2b8d9`, `fdc9b79`, `0022`).
 - [x] Test env: argon2/blake2 are optimized in the dev profile, which removed flaky 2FA enable 500s (`f524fea`). `.sqlx/` is committed.
+- [x] Store gaps (`final-gaps`, `0027_final_gaps.sql`):
+  - Checkout abuse limits. Order creation (`intent=pay`) is capped at 5 orders per IP per 10 min (`SCOPE_CHECKOUT_ORDER`, override with `RATE_LIMIT_CHECKOUT_ORDER_PER_WINDOW`). The check runs in the handler, so coupon/CEP preview POSTs are not counted. `/checkout` stays on the global budget and out of the override tables.
+  - At most 3 unpaid orders at a time per buyer. A buyer is matched by normalized email (`orders.email_norm`), by cart (`orders.cart_id`) or by account. Per-email and per-cart advisory locks serialize racing submits. Rejections are a pt-BR message naming the latest pending order (`#CODE`).
+  - Honeypot field (`website`) on the checkout form. When a bot fills it, the order is dropped and the page redirects back to `/checkout` with no error. There is no third-party CAPTCHA.
+  - Newsletter unsubscribe (LGPD):
+    - Signed one-click link: HMAC-SHA256 of the address keyed with `TOKEN_PEPPER`, no DB token. It is in the welcome mail footer, and newsletter outbox kinds also carry `List-Unsubscribe` + `List-Unsubscribe-Post` (RFC 8058).
+    - `GET /newsletter/cancelar` only shows a confirm button. `POST` sets `unsubscribed_at`, and a one-click POST gets a plain 200. The path is origin-exempt because the token authorizes it.
+    - Re-subscribing reactivates the row without a second welcome mail.
+    - The admin list shows the status and active/cancelled counts. The CSV export only contains active subscribers.
+  - Mercado Pago escape hatch. The admin order page has an "Ações manuais (avançado)" section (collapsed `<details>`) offering one local money edge per status: pay, refund or reopen-and-pay. It requires the typed order code and a reason of 10–500 characters. It writes the normal transition audit row plus an `mp_manual_override` row with the reason in the same transaction. Without those fields the POST is still refused.
+  - Account deletion. Sessions, accounts, 2FA, addresses and wishlist already cascaded; the cart now cascades too (it used to become an anonymous cart). Orders are kept as fiscal records: `user_id` is SET NULL, and a `BEFORE DELETE` trigger copies the account email onto orders that have no contact email. Covered by an integration test through the delete-user flow.
 
 **Still open**
 - [ ] §5 quality: `GLOBAL_OVERRIDE_PREFIXES` is still hand-synced with the scoped layers.
-- [ ] No rate limit or CAPTCHA on `POST /checkout` order creation (anonymous stock holding is bounded only by the 48h hold and the global budget).
 - [ ] The auth-mail per-recipient cap is soft: count and insert are one statement, but two racing requests can both pass at the edge.
-- [ ] Newsletter has no unsubscribe or double opt-in. The welcome email goes once per address (dedupe key).
+- [ ] Newsletter has no double opt-in (anyone can subscribe any address once; the welcome mail now carries the unsubscribe link). Deleting an account does not unsubscribe its address from the newsletter (separate consent).
 - [ ] Ops: WAL archiving/PITR, S3 versioning, and a first restore drill. Grafana/Loki stack (optional).
 - [ ] Housekeeping: leftover `oc/*` worktrees from the first attempt, if still registered.
 

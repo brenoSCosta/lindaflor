@@ -43,6 +43,20 @@ pub fn limit_for(scope: &'static str, default: u32) -> u32 {
     .unwrap_or(default)
 }
 
+/// Env override `RATE_LIMIT_<SCOPE>_PER_WINDOW` for the windowed budgets
+/// checked with [`check_ip_rate_window`], else `default`.
+pub fn window_limit_for(scope: &'static str, default: u32) -> u32 {
+  let key = format!(
+    "RATE_LIMIT_{}_PER_WINDOW",
+    scope.replace([':', '-'], "_").to_ascii_uppercase()
+  );
+  std::env::var(&key)
+    .ok()
+    .and_then(|v| v.parse::<u32>().ok())
+    .filter(|v| *v > 0)
+    .unwrap_or(default)
+}
+
 /// Fixed scopes so governor buckets stay stable across calls.
 pub const SCOPE_SIGN_IN: &str = "auth:sign-in";
 pub const SCOPE_SIGN_UP: &str = "auth:sign-up";
@@ -58,6 +72,9 @@ pub const SCOPE_PEDIDO_PAGE: &str = "pedido:page";
 pub const SCOPE_COUPON: &str = "coupon:apply";
 pub const SCOPE_COUPON_CART: &str = "coupon:cart";
 pub const SCOPE_MP_WEBHOOK: &str = "webhook:mercadopago";
+/// Order creation (`POST /checkout` with `intent=pay`), checked in the page
+/// handler so coupon/CEP preview POSTs on the same path are not counted.
+pub const SCOPE_CHECKOUT_ORDER: &str = "checkout:order";
 pub const SCOPE_GLOBAL: &str = "global";
 
 /// Default budgets: 5/min/IP on auth endpoints, 3/min on
@@ -79,6 +96,11 @@ pub const DEFAULT_COUPON_CART_PER_MIN: u32 = 10;
 /// Mercado Pago notifies from a handful of IPs, in bursts after outages.
 pub const DEFAULT_MP_WEBHOOK_PER_MIN: u32 = 120;
 pub const DEFAULT_GLOBAL_PER_MIN: u32 = 600;
+/// Orders created per IP per [`CHECKOUT_ORDER_WINDOW`] (burst; refills
+/// evenly over the window). Env: `RATE_LIMIT_CHECKOUT_ORDER_PER_WINDOW`.
+pub const DEFAULT_CHECKOUT_ORDERS_PER_WINDOW: u32 = 5;
+pub const CHECKOUT_ORDER_WINDOW: std::time::Duration =
+  std::time::Duration::from_secs(10 * 60);
 
 /// Prefixes the global governor skips so those requests do not consume the
 /// global budget. Includes scoped [`RateLimitLayer`] paths (true override,
@@ -184,6 +206,28 @@ pub fn check_ip_rate(scope: &'static str, ip: &str, per_minute: u32) -> bool {
   let limiter = guard
     .entry(scope)
     .or_insert_with(|| IpLimiter::dashmap(quota_per_minute(per_minute)));
+  limiter.check_key(&format!("{scope}:{ip}")).is_ok()
+}
+
+/// Like [`check_ip_rate`], but `max` requests per `window` (burst `max`,
+/// one cell back every `window / max`) for budgets coarser than a minute,
+/// e.g. [`SCOPE_CHECKOUT_ORDER`]. The quota is fixed by the first call for
+/// a scope.
+pub fn check_ip_rate_window(
+  scope: &'static str,
+  ip: &str,
+  max: u32,
+  window: std::time::Duration,
+) -> bool {
+  let max = NonZeroU32::new(max.max(1)).expect("max >= 1");
+  let period = (window / max.get()).max(std::time::Duration::from_millis(1));
+  let quota = Quota::with_period(period)
+    .expect("non-zero period")
+    .allow_burst(max);
+  let mut guard = limiters().lock().unwrap_or_else(|e| e.into_inner());
+  let limiter = guard
+    .entry(scope)
+    .or_insert_with(|| IpLimiter::dashmap(quota));
   limiter.check_key(&format!("{scope}:{ip}")).is_ok()
 }
 
@@ -347,6 +391,31 @@ mod tests {
         "{path} must be limited under {scope}"
       );
     }
+  }
+
+  #[test]
+  fn windowed_budget_allows_burst_then_blocks() {
+    const SCOPE: &str = "test:window";
+    let window = std::time::Duration::from_secs(600);
+    for _ in 0..5 {
+      assert!(check_ip_rate_window(SCOPE, "10.9.9.1", 5, window));
+    }
+    assert!(!check_ip_rate_window(SCOPE, "10.9.9.1", 5, window));
+    // Per IP: another client still has its own budget.
+    assert!(check_ip_rate_window(SCOPE, "10.9.9.2", 5, window));
+  }
+
+  #[test]
+  fn checkout_order_budget_is_checked_in_the_handler() {
+    // Only `intent=pay` POSTs count, so `/checkout` is no layer-owned path:
+    // the global budget keeps counting every `/checkout` request.
+    assert!(!GLOBAL_OVERRIDE_PREFIXES.contains(&"/checkout"));
+    assert!(!GLOBAL_OVERRIDE_MUTATION_PREFIXES.contains(&"/checkout"));
+    assert!(
+      FORM_RATE_LIMITS
+        .iter()
+        .all(|(_, scope, _)| *scope != SCOPE_CHECKOUT_ORDER)
+    );
   }
 
   #[test]

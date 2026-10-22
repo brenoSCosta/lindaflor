@@ -96,14 +96,23 @@ impl Mailer {
     }
   }
 
-  /// Deliver one message. Called by the outbox worker only.
-  pub async fn send(&self, to: &str, email: &Email) -> Result<(), MailError> {
+  /// Deliver one message. Called by the outbox worker only. With
+  /// `unsubscribe_url` (marketing mail), the message carries
+  /// `List-Unsubscribe` + `List-Unsubscribe-Post: List-Unsubscribe=One-Click`
+  /// (RFC 8058).
+  pub async fn send(
+    &self,
+    to: &str,
+    email: &Email,
+    unsubscribe_url: Option<&str>,
+  ) -> Result<(), MailError> {
     match self {
       Self::Log => {
         // Bodies carry one-time links: never at info, never in production.
         tracing::info!(
           to = %redact_address(to),
           subject = %email.subject,
+          list_unsubscribe = unsubscribe_url.is_some(),
           "mail (log transport, not sent)"
         );
         if crate::config::app_env() != "production" {
@@ -116,10 +125,14 @@ impl Mailer {
           to.parse().map_err(|e: lettre::address::AddressError| {
             MailError::Address(e.to_string())
           })?;
-        let message = Message::builder()
+        let mut builder = Message::builder()
           .from(smtp.from.clone())
           .to(to)
-          .subject(email.subject.clone())
+          .subject(email.subject.clone());
+        for header in list_unsubscribe_headers(unsubscribe_url) {
+          builder = builder.raw_header(header);
+        }
+        let message = builder
           .multipart(MultiPart::alternative_plain_html(
             email.text.clone(),
             email.html.clone(),
@@ -134,6 +147,27 @@ impl Mailer {
       }
     }
   }
+}
+
+/// RFC 2369 / RFC 8058 one-click unsubscribe headers for `url` (none
+/// without one). The URL is ASCII (the address is percent-encoded).
+fn list_unsubscribe_headers(
+  url: Option<&str>,
+) -> Vec<lettre::message::header::HeaderValue> {
+  use lettre::message::header::{HeaderName, HeaderValue};
+  let Some(url) = url else {
+    return Vec::new();
+  };
+  vec![
+    HeaderValue::new(
+      HeaderName::new_from_ascii_str("List-Unsubscribe"),
+      format!("<{url}>"),
+    ),
+    HeaderValue::new(
+      HeaderName::new_from_ascii_str("List-Unsubscribe-Post"),
+      "List-Unsubscribe=One-Click".to_string(),
+    ),
+  ]
 }
 
 /// `ana@example.com` → `a***@example.com`, for logs.
@@ -189,9 +223,31 @@ mod tests {
   async fn log_mailer_never_fails() {
     let email = templates::password_reset("Ana", "http://x/reset?token=t");
     Mailer::Log
-      .send("ana@example.com", &email)
+      .send("ana@example.com", &email, None)
       .await
       .expect("log transport");
+  }
+
+  #[test]
+  fn list_unsubscribe_headers_are_one_click() {
+    assert!(list_unsubscribe_headers(None).is_empty());
+    let url =
+      "https://loja.example.com/newsletter/cancelar?email=a%40b.com&token=ff";
+    let headers = list_unsubscribe_headers(Some(url));
+    let message = headers
+      .into_iter()
+      .fold(
+        Message::builder()
+          .from("Loja <loja@example.com>".parse().unwrap())
+          .to("ana@example.com".parse().unwrap())
+          .subject("x"),
+        |builder, header| builder.raw_header(header),
+      )
+      .body("oi".to_string())
+      .unwrap();
+    let raw = String::from_utf8(message.formatted()).unwrap();
+    assert!(raw.contains(&format!("List-Unsubscribe: <{url}>")), "{raw}");
+    assert!(raw.contains("List-Unsubscribe-Post: List-Unsubscribe=One-Click"));
   }
 
   // The pooled transport spawns its reaper on the Tokio runtime.

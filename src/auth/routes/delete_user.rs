@@ -176,7 +176,9 @@ pub(crate) async fn complete_delete(
     .execute(pool)
     .await?;
 
-  // Cascades sessions / accounts / two_factor via FK ON DELETE cascade.
+  // FK cascades remove sessions, accounts, two_factor, addresses,
+  // wishlist and cart; orders are kept (user_id SET NULL, contact email
+  // preserved by the `users_keep_order_contact` trigger, 0027).
   let deleted = sqlx::query!(r#"DELETE FROM users WHERE id = $1"#, user_id)
     .execute(pool)
     .await?;

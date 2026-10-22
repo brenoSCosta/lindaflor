@@ -34,9 +34,14 @@ use crate::app::store::cart::{
 };
 pub use crate::app::store::checkout_service::CheckoutInput;
 use crate::app::store::checkout_service::{
-  CheckoutError, create_order_with, payment_available, phone_digit_count,
-  validate_pay_fields,
+  CheckoutError, HONEYPOT_FIELD, create_order_with, honeypot_tripped,
+  payment_available, phone_digit_count, validate_pay_fields,
 };
+
+/// Shown when one IP creates too many orders
+/// ([`crate::rate_limit::SCOPE_CHECKOUT_ORDER`]).
+const CHECKOUT_RATE_LIMITED_MESSAGE: &str =
+  "Muitos pedidos em pouco tempo. Aguarde alguns minutos e tente novamente.";
 use crate::app::store::coupons::{
   COUPON_GONE_MESSAGE, CouponReject, ResolvedCoupon, resolve_coupon,
 };
@@ -140,8 +145,23 @@ pub async fn page(
     && intent == "pay"
     && let Some(Form(posted)) = body.as_ref()
   {
+    if honeypot_tripped(posted) {
+      // Silent drop: back to the checkout as if nothing happened.
+      tracing::info!("checkout honeypot tripped; order dropped");
+      return Err(redirect(href!(page).resolve(cx)).into());
+    }
     if let Err(message) = validate_pay_fields(posted) {
       checkout_error = Some(message);
+    } else if !crate::rate_limit::check_ip_rate_window(
+      crate::rate_limit::SCOPE_CHECKOUT_ORDER,
+      &crate::valkey::client_ip(cx),
+      crate::rate_limit::window_limit_for(
+        crate::rate_limit::SCOPE_CHECKOUT_ORDER,
+        crate::rate_limit::DEFAULT_CHECKOUT_ORDERS_PER_WINDOW,
+      ),
+      crate::rate_limit::CHECKOUT_ORDER_WINDOW,
+    ) {
+      checkout_error = Some(CHECKOUT_RATE_LIMITED_MESSAGE.to_string());
     } else {
       let provider = crate::payments::PaymentProvider::from_cx(cx);
       match create_order_with(
@@ -412,6 +432,19 @@ pub async fn page(
                     class="grid gap-4 @lg/page:grid-cols-[1.2fr_0.8fr]"
                     novalidate=""
                 >
+                // Honeypot: off-screen (not `display:none`, which bots skip)
+                // and out of the tab order; only bots fill it.
+                <div class="absolute -left-[9999px] h-px w-px overflow-hidden" aria-hidden="true">
+                    <label for="checkout-website">"Não preencha este campo"</label>
+                    <input
+                        id="checkout-website"
+                        type="text"
+                        name=(HONEYPOT_FIELD)
+                        value=""
+                        tabindex="-1"
+                        autocomplete="off"
+                    >
+                </div>
                 <div class="flex flex-col gap-4">
                     card(
                         card_header(
@@ -798,6 +831,7 @@ fn saved_address_prefill(
       coupon_code: None,
       intent: None,
       save_address: None,
+      website: None,
     },
   ))
 }

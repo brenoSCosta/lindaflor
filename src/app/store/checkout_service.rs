@@ -49,6 +49,37 @@ pub struct CheckoutInput {
   /// "Salvar este endereço" (signed-in buyers only).
   #[serde(default)]
   pub(crate) save_address: Option<String>,
+
+  /// Honeypot: an off-screen field humans never see or fill. See
+  /// [`honeypot_tripped`].
+  #[serde(default)]
+  pub(crate) website: Option<String>,
+}
+
+/// Name of the honeypot input on the checkout form.
+pub(crate) const HONEYPOT_FIELD: &str = "website";
+
+/// A filled honeypot means a form-filling bot: the page drops the order
+/// silently (no error that would teach the bot what went wrong).
+pub(crate) fn honeypot_tripped(form_data: &CheckoutInput) -> bool {
+  form_data
+    .website
+    .as_deref()
+    .is_some_and(|value| !value.trim().is_empty())
+}
+
+/// Unpaid orders one buyer (normalized email, cart or account) may hold at
+/// a time. Each one reserves stock for up to 48h, so this bounds how much
+/// inventory a single visitor can lock up.
+pub(crate) const MAX_PENDING_ORDERS: i64 = 3;
+
+fn pending_limit_message(latest_code: &str) -> String {
+  format!(
+    "Você já tem {MAX_PENDING_ORDERS} pedidos aguardando pagamento \
+     (o mais recente é o #{latest_code}). Pague pelo link que enviamos \
+     para o seu e-mail ou aguarde a reserva expirar antes de fazer um \
+     novo pedido."
+  )
 }
 
 /// Server-side caps (in characters) for the free-text checkout fields,
@@ -108,6 +139,7 @@ mod field_length_tests {
       coupon_code: None,
       intent: Some("pay".into()),
       save_address: None,
+      website: None,
     }
   }
 
@@ -316,6 +348,10 @@ async fn create_order_in_tx(
     shipping_uf,
     provider_kind,
   } = params;
+  let email_norm =
+    crate::app::store::coupons::normalize_email(&form_data.guest_email);
+  enforce_pending_limit(tx, email_norm.as_deref(), cart_id, user_id).await?;
+
   // No global expiry sweep here (the background sweeper owns it); the quote
   // only reclaims expired holds on this cart's own inventory rows.
   let items = quote_cart_for_checkout(tx, cart_id)
@@ -400,8 +436,8 @@ async fn create_order_in_tx(
   };
 
   sqlx::query(
-        "INSERT INTO orders (id, user_id, guest_email, status, subtotal_cents, shipping_cents, discount_cents, pix_discount_cents, total_cents, shipping_address, notes, coupon_id, access_token)
-         VALUES ($1, $2, $3, 'pending_payment', $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+        "INSERT INTO orders (id, user_id, guest_email, status, subtotal_cents, shipping_cents, discount_cents, pix_discount_cents, total_cents, shipping_address, notes, coupon_id, access_token, email_norm, cart_id)
+         VALUES ($1, $2, $3, 'pending_payment', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
     )
     .bind(order_id)
     .bind(user_id)
@@ -415,6 +451,8 @@ async fn create_order_in_tx(
     .bind(notes.as_deref())
     .bind(coupon_id)
     .bind(access_token)
+    .bind(email_norm.as_deref())
+    .bind(cart_id)
     .execute(&mut **tx)
     .await?;
 
@@ -512,6 +550,48 @@ async fn create_order_in_tx(
   Ok(())
 }
 
+/// Refuse a new order while the buyer already holds
+/// [`MAX_PENDING_ORDERS`] unpaid, unexpired ones (matched by normalized
+/// email, cart, or account). Transaction-scoped advisory locks on the email
+/// and the cart serialize concurrent checkouts of the same buyer, so two
+/// racing submits cannot both slip under the cap. Always email first, then
+/// cart: a fixed order, so no lock cycles.
+async fn enforce_pending_limit(
+  tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+  email_norm: Option<&str>,
+  cart_id: Uuid,
+  user_id: Option<Uuid>,
+) -> Result<(), CheckoutError> {
+  if let Some(email) = email_norm {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+      .bind(format!("checkout:email:{email}"))
+      .execute(&mut **tx)
+      .await?;
+  }
+  sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+    .bind(format!("checkout:cart:{cart_id}"))
+    .execute(&mut **tx)
+    .await?;
+  let pending: Vec<Uuid> = sqlx::query_scalar(
+    "SELECT id FROM orders
+     WHERE status = 'pending_payment'
+       AND (reservation_expires_at IS NULL OR reservation_expires_at > now())
+       AND (email_norm = $1 OR cart_id = $2
+            OR ($3::uuid IS NOT NULL AND user_id = $3))
+     ORDER BY created_at DESC, id DESC",
+  )
+  .bind(email_norm)
+  .bind(cart_id)
+  .bind(user_id)
+  .fetch_all(&mut **tx)
+  .await?;
+  if pending.len() as i64 >= MAX_PENDING_ORDERS {
+    let latest = crate::mail::templates::order_code(pending[0]);
+    return Err(CheckoutError::Form(pending_limit_message(&latest)));
+  }
+  Ok(())
+}
+
 /// Whether checkout can take payment: Mercado Pago (breaker closed) or a
 /// configured static PIX key.
 pub(crate) fn payment_available(
@@ -582,6 +662,7 @@ mod tests {
       coupon_code: Some(code.to_string()),
       intent: Some("pay".to_string()),
       save_address: None,
+      website: None,
     }
   }
 
@@ -1470,5 +1551,89 @@ mod tests {
     .expect("reserved");
     assert_eq!(reserved, 0, "no order, no hold");
     assert_eq!(mock.requests().len(), requests_before, "no MP call");
+  }
+
+  async fn refill_cart(pool: &PgPool, cart_id: Uuid, variant_id: Uuid) {
+    sqlx::query(
+      "INSERT INTO cart_items (id, cart_id, variant_id, quantity)
+       VALUES ($1, $2, $3, 1)",
+    )
+    .bind(Uuid::now_v7())
+    .bind(cart_id)
+    .bind(variant_id)
+    .execute(pool)
+    .await
+    .expect("refill cart");
+  }
+
+  #[test]
+  fn honeypot_trips_only_when_filled() {
+    let mut form = checkout_input("hp@example.com", "");
+    assert!(!honeypot_tripped(&form));
+    form.website = Some("   ".to_string());
+    assert!(!honeypot_tripped(&form));
+    form.website = Some("http://spam.example".to_string());
+    assert!(honeypot_tripped(&form));
+    assert_eq!(HONEYPOT_FIELD, "website");
+  }
+
+  #[tokio::test]
+  async fn pending_orders_are_capped_per_email_and_cart() {
+    let pool = crate::test_support::fresh_pool().await;
+    ensure_pix_settings(&pool).await;
+    let (_, variant_id) = seed_variant(&pool, UNIT_PRICE_CENTS, 20).await;
+    let local = format!("cap.{}", Uuid::now_v7().simple());
+    let email = format!("{local}@gmail.com");
+    let cart_id = seed_cart(&pool, variant_id, 1).await;
+
+    let mut created = Vec::new();
+    for _ in 0..MAX_PENDING_ORDERS {
+      created.push(
+        create_order(&pool, cart_id, checkout_input(&email, ""), None)
+          .await
+          .expect("under the cap"),
+      );
+      refill_cart(&pool, cart_id, variant_id).await;
+    }
+
+    // Same cart, different email: still the same buyer.
+    let other = format!("other-{}@example.com", Uuid::now_v7().simple());
+    let err = create_order(&pool, cart_id, checkout_input(&other, ""), None)
+      .await
+      .expect_err("cart at the cap");
+    let latest = crate::mail::templates::order_code(created[2].id);
+    assert!(
+      matches!(&err, CheckoutError::Form(message)
+        if message.contains(&format!("#{latest}"))
+          && message.contains("aguardando pagamento")),
+      "{err}"
+    );
+
+    // Fresh cart, Gmail alias of the same address: still capped.
+    let alias = format!("{}+promo@googlemail.com", local.replace('.', ""));
+    let second_cart = seed_cart(&pool, variant_id, 1).await;
+    let err =
+      create_order(&pool, second_cart, checkout_input(&alias, ""), None)
+        .await
+        .expect_err("email at the cap");
+    assert!(matches!(err, CheckoutError::Form(_)));
+    let reserved: i32 = sqlx::query_scalar(
+      "SELECT reserved FROM inventory WHERE variant_id = $1",
+    )
+    .bind(variant_id)
+    .fetch_one(&pool)
+    .await
+    .expect("reserved");
+    assert_eq!(reserved, 3, "rejected attempts hold no stock");
+
+    // Once one pending order leaves the pending state, a new one is allowed.
+    sqlx::query("UPDATE orders SET status = 'cancelled' WHERE id = $1")
+      .bind(created[0].id)
+      .execute(&pool)
+      .await
+      .expect("cancel one");
+    create_order(&pool, second_cart, checkout_input(&alias, ""), None)
+      .await
+      .expect("back under the cap");
   }
 }

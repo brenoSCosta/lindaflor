@@ -122,7 +122,7 @@ async fn request_password_reset_queues_mail_with_working_link() {
     text,
   };
   lindaflor::mail::Mailer::Log
-    .send(&email, &queued)
+    .send(&email, &queued, None)
     .await
     .expect("log transport");
 

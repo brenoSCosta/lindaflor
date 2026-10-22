@@ -16,8 +16,8 @@ use uuid::Uuid;
 
 use crate::app::auth_helpers::require_admin;
 use crate::app::store::order::{
-  ApplyOptions, DEFAULT_CARRIER, OrderEvent, Tracking, apply_with_audit,
-  tracking_url,
+  ApplyError, ApplyOptions, DEFAULT_CARRIER, OrderEvent, OrderStatus, Tracking,
+  apply_with_audit, tracking_url,
 };
 use crate::app::store::queries::format_price;
 use crate::components::badge::{BadgeVariant, badge};
@@ -43,6 +43,12 @@ pub struct StatusInput {
   carrier: String,
   #[serde(default)]
   tracking_code: String,
+  /// "Ações manuais (avançado)": the typed order code (confirmation).
+  #[serde(default)]
+  override_confirm: Option<String>,
+  /// Why the PSP-backed path could not be used; stored in the audit trail.
+  #[serde(default)]
+  override_reason: Option<String>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -83,6 +89,104 @@ fn manual_money_event_blocked(mercado_pago: bool, event: OrderEvent) -> bool {
       event,
       OrderEvent::Pay | OrderEvent::ReopenPay | OrderEvent::Refund
     )
+}
+
+/// Bounds for the override reason (stored in `audit_events.metadata`).
+const OVERRIDE_REASON_MIN_CHARS: usize = 10;
+const OVERRIDE_REASON_MAX_CHARS: usize = 500;
+
+/// Validate the "Ações manuais (avançado)" form: the admin must type the
+/// order code shown on the page and give a reason. Returns the trimmed
+/// reason.
+fn check_manual_override(
+  order_id: Uuid,
+  confirm: &str,
+  reason: &str,
+) -> Result<String, &'static str> {
+  let expected = crate::mail::templates::order_code(order_id);
+  let typed = confirm.trim().trim_start_matches('#');
+  if !typed.eq_ignore_ascii_case(&expected) {
+    return Err(
+      "Confirmação incorreta: digite o código do pedido exatamente como aparece.",
+    );
+  }
+  let reason = reason.trim();
+  let chars = reason.chars().count();
+  if chars < OVERRIDE_REASON_MIN_CHARS {
+    return Err("Informe o motivo da ação manual (mínimo de 10 caracteres).");
+  }
+  if chars > OVERRIDE_REASON_MAX_CHARS {
+    return Err("O motivo deve ter no máximo 500 caracteres.");
+  }
+  Ok(reason.to_string())
+}
+
+/// Manual money transition on a Mercado Pago order, for when the PSP sync
+/// is broken. Applies `event` through the state machine (with its usual
+/// audit row) and records a second `mp_manual_override` audit row with the
+/// reason, both in one transaction.
+pub(crate) async fn apply_mp_manual_override(
+  pool: &PgPool,
+  order_id: Uuid,
+  event: OrderEvent,
+  restock: bool,
+  reason: &str,
+  actor_id: Option<Uuid>,
+  actor_name: Option<&str>,
+) -> Result<OrderStatus, ApplyError> {
+  let mut tx = pool.begin().await?;
+  let next = apply_with_audit(
+    &mut tx,
+    order_id,
+    event,
+    ApplyOptions::with_restock(restock),
+    actor_id,
+    actor_name,
+  )
+  .await?;
+  crate::audit::record_audit_event(
+    &mut *tx,
+    crate::audit::AuditEvent {
+      aggregate_type: "order",
+      aggregate_id: &order_id.to_string(),
+      entity_type: "order",
+      entity_id: order_id,
+      actor_id,
+      actor_name,
+      metadata: serde_json::json!({
+        "action": "mp_manual_override",
+        "event": event.action_name(),
+        "to": next.as_str(),
+        "restock": restock,
+        "reason": reason,
+        "provider": crate::payments::ProviderKind::MercadoPago.as_str(),
+      }),
+    },
+  )
+  .await?;
+  tx.commit().await?;
+  Ok(next)
+}
+
+/// The manual money transition offered under "Ações manuais (avançado)"
+/// for a Mercado Pago order in `status`: `(form status value, label,
+/// offers restock)`.
+fn manual_override_action(
+  status: &str,
+  reopenable: bool,
+) -> Option<(&'static str, &'static str, bool)> {
+  match status {
+    "pending_payment" => Some(("paid", "Marcar como pago manualmente", false)),
+    "paid" | "processing" | "shipped" | "delivered" => Some((
+      "refunded",
+      "Marcar como estornado (não estorna no Mercado Pago)",
+      true,
+    )),
+    "cancelled" if reopenable => {
+      Some(("reopen_pay", "Recebido após expirar (manual)", false))
+    }
+    _ => None,
+  }
 }
 
 const MP_MANUAL_BLOCKED_MSG: &str = "Pedido do Mercado Pago: use \"Sincronizar com Mercado Pago\" ou \"Estornar no Mercado Pago\". A baixa manual não movimenta dinheiro.";
@@ -163,7 +267,39 @@ async fn update_order(
   let mercado_pago = provider.as_deref()
     == Some(crate::payments::ProviderKind::MercadoPago.as_str());
   if manual_money_event_blocked(mercado_pago, event) {
-    return fail(MP_MANUAL_BLOCKED_MSG);
+    // Default: refuse. Only the explicit "Ações manuais (avançado)" form
+    // (typed order code + reason) may move money state locally.
+    let (Some(confirm), Some(reason)) = (
+      form.override_confirm.as_deref(),
+      form.override_reason.as_deref(),
+    ) else {
+      return fail(MP_MANUAL_BLOCKED_MSG);
+    };
+    let reason = match check_manual_override(order_id, confirm, reason) {
+      Ok(reason) => reason,
+      Err(message) => return fail(message),
+    };
+    return match apply_mp_manual_override(
+      pool,
+      order_id,
+      event,
+      form.restock.is_some(),
+      &reason,
+      Some(actor.user.id),
+      Some(actor.user.name.as_str()),
+    )
+    .await
+    {
+      Ok(_) => {
+        set_toast(cx, Toast::success("Ação manual registrada no pedido."));
+        toast_redirect(cx, back)
+      }
+      Err(ApplyError::Db(error)) => {
+        tracing::error!(%order_id, %error, "manual override failed");
+        fail("Não foi possível atualizar o pedido. Tente novamente.")
+      }
+      Err(error) => fail(&error.to_string()),
+    };
   }
   // The checkbox is always the explicit restock choice: browsers omit an
   // unchecked box, so absent = "do not restock". The forms pre-check it for
@@ -287,6 +423,14 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
   // Static-PIX orders keep the manual "Marcar como pago" / "Estornar";
   // Mercado Pago orders only get the PSP-backed actions.
   let manual_money = payment.is_none();
+  // Escape hatch for Mercado Pago orders when the PSP sync is broken: one
+  // local money transition per status, behind a typed confirmation.
+  let override_action = if manual_money {
+    None
+  } else {
+    manual_override_action(&order.status, reopenable)
+  };
+  let override_code = crate::mail::templates::order_code(order_id);
   let expires = order.reservation_expires_at.clone().unwrap_or_default();
   let created = order.created_at.clone();
   let status = order.status.clone();
@@ -565,6 +709,61 @@ pub async fn page(cx: &Cx) -> Result<impl View> {
               )
           }
 
+          if let Some((override_status, override_label, override_restock)) = override_action {
+              <details class="rounded-lg border border-destructive/40 p-4">
+                  <summary class="cursor-pointer text-sm font-medium">"Ações manuais (avançado)"</summary>
+                  <div class="mt-3 flex flex-col gap-3">
+                      <p class="text-sm text-muted-foreground">
+                          "Use só quando a sincronização com o Mercado Pago falhar. A alteração é local: nenhum dinheiro é cobrado ou devolvido no Mercado Pago, e a ação fica registrada na auditoria com o motivo."
+                      </p>
+                      <form
+                          method="post"
+                          action=(href!(page, Id(order_id.to_string())))
+                          class="flex flex-col gap-3"
+                      >
+                          <input type="hidden" name="status" value=(override_status)>
+                          if override_restock {
+                              <div class="flex items-center gap-2">
+                                  checkbox(attrs: attributes! { id="restock-override" name="restock" value="1" })
+                                  label(attrs: attributes! { for="restock-override" }, "Devolver ao estoque")
+                              </div>
+                          }
+                          <div class="flex flex-col gap-1.5">
+                              label(attrs: attributes! { for="override_reason" }, "Motivo")
+                              input(attrs: attributes! {
+                                  id="override_reason"
+                                  name="override_reason"
+                                  required=""
+                                  minlength="10"
+                                  maxlength="500"
+                                  autocomplete="off"
+                              })
+                          </div>
+                          <div class="flex flex-col gap-1.5">
+                              label(
+                                  attrs: attributes! { for="override_confirm" },
+                                  "Para confirmar, digite o código do pedido: " (override_code.clone())
+                              )
+                              input(attrs: attributes! {
+                                  id="override_confirm"
+                                  name="override_confirm"
+                                  required=""
+                                  maxlength="9"
+                                  autocomplete="off"
+                              })
+                          </div>
+                          <div>
+                              button(
+                                  variant: ButtonVariant::Destructive,
+                                  attrs: attributes! { type="submit" },
+                                  (override_label)
+                              )
+                          </div>
+                      </form>
+                  </div>
+              </details>
+          }
+
           card(
               card_header(card_title("Cliente"))
               card_content(
@@ -684,5 +883,107 @@ mod tests {
     ] {
       assert!(!manual_money_event_blocked(true, event), "{event:?}");
     }
+  }
+
+  #[test]
+  fn manual_override_needs_typed_code_and_reason() {
+    let order_id = Uuid::now_v7();
+    let code = crate::mail::templates::order_code(order_id);
+    let reason = "MP fora do ar, PIX conferido no extrato";
+    assert_eq!(
+      check_manual_override(order_id, &code.to_lowercase(), reason),
+      Ok(reason.to_string())
+    );
+    assert!(
+      check_manual_override(order_id, &format!(" #{code} "), reason).is_ok()
+    );
+    assert!(check_manual_override(order_id, "", reason).is_err());
+    assert!(check_manual_override(order_id, "DEADBEEF", reason).is_err());
+    assert!(check_manual_override(order_id, &code, "curto").is_err());
+    assert!(check_manual_override(order_id, &code, &"x".repeat(501)).is_err());
+  }
+
+  #[test]
+  fn manual_override_offers_one_money_edge_per_status() {
+    assert_eq!(
+      manual_override_action("pending_payment", false).map(|a| a.0),
+      Some("paid")
+    );
+    for status in ["paid", "processing", "shipped", "delivered"] {
+      assert_eq!(
+        manual_override_action(status, false).map(|a| a.0),
+        Some("refunded")
+      );
+    }
+    assert_eq!(
+      manual_override_action("cancelled", true).map(|a| a.0),
+      Some("reopen_pay")
+    );
+    assert_eq!(manual_override_action("cancelled", false), None);
+    assert_eq!(manual_override_action("refunded", false), None);
+  }
+
+  #[tokio::test]
+  async fn mp_override_applies_and_audits_reason() {
+    let pool = crate::test_support::isolated_pool().await;
+    let order_id = Uuid::now_v7();
+    sqlx::query(
+      "INSERT INTO orders (id, guest_email, status, total_cents, payment_provider)
+       VALUES ($1, 'mp@example.com', 'pending_payment', 1000, 'mercadopago')",
+    )
+    .bind(order_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let reason = "Webhook do MP falhou; pagamento conferido no painel";
+    let next = apply_mp_manual_override(
+      &pool,
+      order_id,
+      OrderEvent::Pay,
+      false,
+      reason,
+      None,
+      Some("Admin"),
+    )
+    .await
+    .expect("override");
+    assert_eq!(next, OrderStatus::Paid);
+
+    let actions: Vec<serde_json::Value> = sqlx::query_scalar(
+      "SELECT metadata FROM audit_events
+       WHERE aggregate_type = 'order' AND aggregate_id = $1
+       ORDER BY metadata->>'action' = 'mp_manual_override'",
+    )
+    .bind(order_id.to_string())
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(actions.len(), 2, "{actions:?}");
+    assert_eq!(actions[0]["action"], "pay");
+    assert_eq!(actions[1]["action"], "mp_manual_override");
+    assert_eq!(actions[1]["event"], "pay");
+    assert_eq!(actions[1]["reason"], reason);
+    assert_eq!(actions[1]["to"], "paid");
+
+    // An invalid transition rolls back both rows.
+    let err = apply_mp_manual_override(
+      &pool,
+      order_id,
+      OrderEvent::ReopenPay,
+      false,
+      reason,
+      None,
+      Some("Admin"),
+    )
+    .await;
+    assert!(err.is_err());
+    let count: i64 = sqlx::query_scalar(
+      "SELECT count(*) FROM audit_events WHERE aggregate_id = $1",
+    )
+    .bind(order_id.to_string())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 2);
   }
 }

@@ -110,12 +110,17 @@ pub fn router(
   // governed by OriginPolicy (plus SameSite=Lax cookies). OriginLayer is
   // the router's outermost check: non-GET|HEAD|OPTIONS and WebSocket
   // upgrades; sec-fetch-site, else Origin==Host. No dangerous_disable.
-  // Only exempt path: the Mercado Pago webhook, a cookie-less
-  // server-to-server POST authenticated by its own HMAC signature.
+  // Exempt paths: the Mercado Pago webhook, a cookie-less
+  // server-to-server POST authenticated by its own HMAC signature, and the
+  // newsletter one-click unsubscribe (RFC 8058 POSTs come from mail
+  // providers; the signed token is the authorization and the action only
+  // removes the address from marketing mail).
   // Production boot requires APP_ORIGIN; when present it is also trusted
   // (and used as base_url).
-  let mut origin_policy =
-    OriginPolicy::new().exempt_paths([crate::payments::webhook::WEBHOOK_PATH]);
+  let mut origin_policy = OriginPolicy::new().exempt_paths([
+    crate::payments::webhook::WEBHOOK_PATH,
+    crate::app::newsletter::UNSUBSCRIBE_PATH,
+  ]);
   if let Some(origin) = crate::auth::google::app_origin() {
     builder = builder.base_url(origin.as_str());
     origin_policy = origin_policy.trust_origins([origin]);

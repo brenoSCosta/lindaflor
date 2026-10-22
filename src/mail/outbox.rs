@@ -38,6 +38,11 @@ pub mod kind {
   pub const ORDER_REFUNDED: &str = "order_refunded";
   pub const NEWSLETTER_WELCOME: &str = "newsletter_welcome";
 
+  /// Marketing mail: delivered with `List-Unsubscribe` /
+  /// `List-Unsubscribe-Post` headers (RFC 8058) pointing at the signed
+  /// unsubscribe link of the recipient.
+  pub const NEWSLETTER: [&str; 1] = [NEWSLETTER_WELCOME];
+
   /// Auth mail anyone can trigger for an arbitrary address (sign-up /
   /// resend verification, password reset, change-email confirmation):
   /// capped per recipient by [`super::enqueue_throttled`].
@@ -195,7 +200,13 @@ pub async fn drain_once(
       html: row.html_body,
       text: row.text_body,
     };
-    match mailer.send(&row.to_address, &email).await {
+    let unsubscribe = kind::NEWSLETTER
+      .contains(&row.kind.as_str())
+      .then(|| crate::app::newsletter::unsubscribe_url(&row.to_address));
+    match mailer
+      .send(&row.to_address, &email, unsubscribe.as_deref())
+      .await
+    {
       Ok(()) => {
         sqlx::query(
           "UPDATE email_outbox

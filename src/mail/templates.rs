@@ -43,6 +43,15 @@ struct Body<'a> {
 }
 
 fn render(subject: String, body: Body<'_>) -> Email {
+  render_with_unsubscribe(subject, body, None)
+}
+
+/// [`render`] plus, for marketing mail, a "Cancelar inscrição" footer link.
+fn render_with_unsubscribe(
+  subject: String,
+  body: Body<'_>,
+  unsubscribe_url: Option<&str>,
+) -> Email {
   let mut html = String::new();
   html.push_str(
     "<!doctype html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\">\
@@ -102,9 +111,16 @@ fn render(subject: String, body: Body<'_>) -> Email {
   }
   html.push_str(&format!(
     "</td></tr></table><p style=\"font-size:11px;color:#999;\">\
-     {BRAND} · Esta é uma mensagem automática, não responda.</p>\
-     </td></tr></table></body></html>"
+     {BRAND} · Esta é uma mensagem automática, não responda.</p>"
   ));
+  if let Some(url) = unsubscribe_url {
+    html.push_str(&format!(
+      "<p style=\"font-size:11px;color:#999;\">Não quer mais receber nossos \
+       e-mails? <a href=\"{url}\" style=\"color:#999;\">Cancelar inscrição</a></p>",
+      url = escape(url),
+    ));
+  }
+  html.push_str("</td></tr></table></body></html>");
 
   let mut text = format!("{BRAND}\n\n{}\n\n", body.heading);
   for paragraph in &body.paragraphs {
@@ -124,6 +140,9 @@ fn render(subject: String, body: Body<'_>) -> Email {
   text.push_str(&format!(
     "-- \n{BRAND} · Esta é uma mensagem automática, não responda.\n"
   ));
+  if let Some(url) = unsubscribe_url {
+    text.push_str(&format!("Cancelar inscrição: {url}\n"));
+  }
 
   Email {
     subject,
@@ -237,6 +256,7 @@ pub fn newsletter_welcome(
   name: &str,
   shop_url: &str,
   first_purchase_code: Option<&str>,
+  unsubscribe_url: &str,
 ) -> Email {
   let mut paragraphs = vec![
     greeting(name),
@@ -250,7 +270,7 @@ pub fn newsletter_welcome(
       "Presente de boas-vindas: use o cupom {code} na sua primeira compra."
     ));
   }
-  render(
+  render_with_unsubscribe(
     format!("Boas-vindas à newsletter · {BRAND}"),
     Body {
       heading: "Que bom ter você por aqui",
@@ -258,9 +278,10 @@ pub fn newsletter_welcome(
       action: Some(("Visitar a loja", shop_url)),
       code: None,
       footnote: Some(
-        "Se você não se inscreveu, ignore este e-mail: não enviaremos outra confirmação.",
+        "Se você não se inscreveu, use o link \"Cancelar inscrição\" no fim deste e-mail.",
       ),
     },
+    Some(unsubscribe_url),
   )
 }
 
@@ -587,13 +608,33 @@ mod tests {
       "Ana",
       "https://loja.example.com/",
       Some("BEMVINDA10"),
+      "https://loja.example.com/newsletter/cancelar?email=a&token=b",
     );
     assert!(with.subject.contains("newsletter"));
     assert!(with.text.contains("cupom BEMVINDA10"));
     assert!(with.html.contains("https://loja.example.com/"));
-    let without = newsletter_welcome("", "https://loja.example.com/", None);
+    let without = newsletter_welcome(
+      "",
+      "https://loja.example.com/",
+      None,
+      "https://loja.example.com/newsletter/cancelar?email=a&token=b",
+    );
     assert!(!without.text.contains("cupom"));
     assert!(without.text.contains("Olá!"));
+  }
+
+  #[test]
+  fn newsletter_welcome_carries_unsubscribe_link() {
+    let url = "https://loja.example.com/newsletter/cancelar?email=a&token=b";
+    let email =
+      newsletter_welcome("Ana", "https://loja.example.com/", None, url);
+    assert!(email.text.contains(&format!("Cancelar inscrição: {url}")));
+    assert!(email.html.contains(
+      "href=\"https://loja.example.com/newsletter/cancelar?email=a&amp;token=b\""
+    ));
+    // Transactional mail has no unsubscribe footer.
+    let reset = password_reset("Ana", "https://x/reset?token=t");
+    assert!(!reset.text.contains("Cancelar inscrição"));
   }
 
   #[test]

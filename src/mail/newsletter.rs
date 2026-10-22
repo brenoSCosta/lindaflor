@@ -1,6 +1,8 @@
 //! Newsletter welcome mail, queued with the subscription row (see
 //! `app::newsletter`). Deduplicated per address: re-subscribing (or a
-//! request for someone else's address) never sends a second copy.
+//! request for someone else's address) never sends a second copy. Every
+//! newsletter mail links to the signed unsubscribe page, and the outbox
+//! adds `List-Unsubscribe` headers for the [`kind::NEWSLETTER`] kinds.
 
 use sqlx::PgExecutor;
 
@@ -17,6 +19,7 @@ pub async fn send_welcome<'e>(
     name,
     &absolute_url("/"),
     first_purchase_code,
+    &crate::app::newsletter::unsubscribe_url(to),
   );
   let dedupe = format!("newsletter-welcome:{}", to.trim().to_lowercase());
   enqueue(

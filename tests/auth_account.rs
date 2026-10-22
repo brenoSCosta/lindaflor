@@ -125,6 +125,175 @@ async fn delete_user_with_token() {
   assert_eq!(refuse.status, StatusCode::UNAUTHORIZED);
 }
 
+/// LGPD: deleting the account removes personal data (sessions, addresses,
+/// wishlist, cart) but keeps orders as fiscal records, detached from the
+/// user and still carrying a contact email (`0027_final_gaps.sql`).
+#[tokio::test]
+async fn delete_user_purges_personal_data_and_keeps_orders() {
+  let (pool, router) = pool_and_router().await;
+  let email = unique_email("lgpd");
+  let password = "Harbor-Violet-Tiger-4821-Lantern!";
+  let signed_up = sign_up(&router, "Lgpd User", &email, password).await;
+  assert_eq!(signed_up.status, StatusCode::OK);
+  let cookie = signed_up.next_cookie.clone();
+  let user_id =
+    Uuid::parse_str(signed_up.json["user"]["id"].as_str().unwrap()).unwrap();
+
+  let product_id = Uuid::now_v7();
+  let variant_id = Uuid::now_v7();
+  sqlx::query(
+    "INSERT INTO products (id, name, slug, price_in_cents)
+     VALUES ($1, 'Peça LGPD', $2, 1000)",
+  )
+  .bind(product_id)
+  .bind(format!("lgpd-{product_id}"))
+  .execute(&pool)
+  .await
+  .unwrap();
+  sqlx::query(
+    "INSERT INTO product_variants (id, product_id, sku, size, color)
+     VALUES ($1, $2, $3, 'm', 'azul')",
+  )
+  .bind(variant_id)
+  .bind(product_id)
+  .bind(format!("lgpd-{variant_id}"))
+  .execute(&pool)
+  .await
+  .unwrap();
+  sqlx::query(
+    "INSERT INTO user_addresses
+       (id, user_id, recipient_name, zip_code, street, number, neighborhood,
+        city, state, phone)
+     VALUES ($1, $2, 'Lgpd User', '49000000', 'Rua A', '1', 'Centro',
+             'Aracaju', 'SE', '79999999999')",
+  )
+  .bind(Uuid::now_v7())
+  .bind(user_id)
+  .execute(&pool)
+  .await
+  .unwrap();
+  sqlx::query(
+    "INSERT INTO wishlist_items (user_id, product_id) VALUES ($1, $2)",
+  )
+  .bind(user_id)
+  .bind(product_id)
+  .execute(&pool)
+  .await
+  .unwrap();
+  let cart_id = Uuid::now_v7();
+  sqlx::query("INSERT INTO carts (id, token, user_id) VALUES ($1, $2, $3)")
+    .bind(cart_id)
+    .bind(Uuid::new_v4())
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+  sqlx::query(
+    "INSERT INTO cart_items (id, cart_id, variant_id, quantity)
+     VALUES ($1, $2, $3, 1)",
+  )
+  .bind(Uuid::now_v7())
+  .bind(cart_id)
+  .bind(variant_id)
+  .execute(&pool)
+  .await
+  .unwrap();
+  // One order with the checkout email, one legacy row without any.
+  let typed_order = Uuid::now_v7();
+  let bare_order = Uuid::now_v7();
+  for (order_id, guest_email) in [
+    (typed_order, Some("entrega@example.com")),
+    (bare_order, None),
+  ] {
+    sqlx::query(
+      "INSERT INTO orders (id, user_id, guest_email, status, total_cents,
+                           shipping_address)
+       VALUES ($1, $2, $3, 'delivered', 1000,
+               '{\"name\": \"Lgpd User\", \"city\": \"Aracaju\"}')",
+    )
+    .bind(order_id)
+    .bind(user_id)
+    .bind(guest_email)
+    .execute(&pool)
+    .await
+    .unwrap();
+  }
+
+  let request = json_post(
+    &router,
+    "/api/auth/delete-user",
+    cookie.as_deref(),
+    serde_json::json!({ "password": password }),
+  )
+  .await;
+  assert_eq!(request.status, StatusCode::OK, "{:?}", request.json);
+  let token =
+    verification_token_like(&pool, &format!("delete-user:{user_id}")).await;
+  let deleted = json_post(
+    &router,
+    "/api/auth/delete-user",
+    cookie.as_deref(),
+    serde_json::json!({ "token": token }),
+  )
+  .await;
+  assert_eq!(deleted.status, StatusCode::OK, "{:?}", deleted.json);
+
+  for (table, sql) in [
+    (
+      "sessions",
+      "SELECT count(*) FROM sessions WHERE user_id = $1",
+    ),
+    (
+      "accounts",
+      "SELECT count(*) FROM accounts WHERE user_id = $1",
+    ),
+    (
+      "user_addresses",
+      "SELECT count(*) FROM user_addresses WHERE user_id = $1",
+    ),
+    (
+      "wishlist_items",
+      "SELECT count(*) FROM wishlist_items WHERE user_id = $1",
+    ),
+    ("carts", "SELECT count(*) FROM carts WHERE user_id = $1"),
+  ] {
+    let left: i64 = sqlx::query_scalar(sql)
+      .bind(user_id)
+      .fetch_one(&pool)
+      .await
+      .unwrap();
+    assert_eq!(left, 0, "{table} rows must go with the user");
+  }
+  let cart_items: i64 =
+    sqlx::query_scalar("SELECT count(*) FROM cart_items WHERE cart_id = $1")
+      .bind(cart_id)
+      .fetch_one(&pool)
+      .await
+      .unwrap();
+  assert_eq!(cart_items, 0, "the cart is deleted, not orphaned");
+
+  let orders: Vec<(Uuid, Option<Uuid>, Option<String>, serde_json::Value)> =
+    sqlx::query_as(
+      "SELECT id, user_id, guest_email, shipping_address FROM orders
+       WHERE id = ANY($1)",
+    )
+    .bind(vec![typed_order, bare_order])
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+  assert_eq!(orders.len(), 2, "orders are retained (fiscal records)");
+  for (order_id, owner, guest_email, address) in orders {
+    assert_eq!(owner, None, "orders are detached from the deleted user");
+    assert_eq!(address["city"], "Aracaju");
+    let expected = if order_id == typed_order {
+      "entrega@example.com".to_string()
+    } else {
+      email.clone()
+    };
+    assert_eq!(guest_email.as_deref(), Some(expected.as_str()));
+  }
+}
+
 struct EnvRestore {
   key: &'static str,
   previous: Option<String>,
