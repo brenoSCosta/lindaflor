@@ -33,10 +33,12 @@ const shutdownTimeout = 30 * time.Second
 
 func main() {
 	healthcheck := flag.Bool("healthcheck", false,
-		"probe GET /api/health on 127.0.0.1:$PORT and exit 0 (healthy) or 1 (container HEALTHCHECK; the runtime image has no curl)")
+		"probe GET -healthcheck-path on 127.0.0.1:$PORT and exit 0 (2xx) or 1 (container HEALTHCHECK; the runtime image has no curl)")
+	healthPath := flag.String("healthcheck-path", "/api/health",
+		"path probed by -healthcheck (/api/health = liveness, /api/readyz = readiness)")
 	flag.Parse()
 	if *healthcheck {
-		os.Exit(probeHealth())
+		os.Exit(probeHealth(*healthPath))
 	}
 	if err := run(); err != nil {
 		slog.Error("server exited", "error", err)
@@ -125,9 +127,13 @@ func run() error {
 	return err
 }
 
-// probeHealth is the container liveness probe: a GET of /api/health on the
-// loopback interface, using PORT like the server does.
-func probeHealth() int {
+// probeHealth is the container probe: a GET of path (/api/health or
+// /api/readyz) on the loopback interface, using PORT like the server does.
+func probeHealth(path string) int {
+	if path != "/api/health" && path != "/api/readyz" {
+		fmt.Fprintln(os.Stderr, "healthcheck: -healthcheck-path must be /api/health or /api/readyz")
+		return 1
+	}
 	port := 4200
 	if raw := os.Getenv("PORT"); raw != "" {
 		p, err := strconv.ParseUint(raw, 10, 16)
@@ -137,7 +143,7 @@ func probeHealth() int {
 		}
 		port = int(p)
 	}
-	url := "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(port)) + "/api/health"
+	url := "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(port)) + path
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil) //nolint:gosec // fixed loopback URL
@@ -151,7 +157,7 @@ func probeHealth() int {
 		return 1
 	}
 	_ = res.Body.Close()
-	if res.StatusCode != http.StatusOK {
+	if res.StatusCode < 200 || res.StatusCode > 299 {
 		fmt.Fprintln(os.Stderr, "healthcheck: status", res.StatusCode)
 		return 1
 	}

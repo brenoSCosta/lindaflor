@@ -4,9 +4,20 @@
 #   APP_ORIGIN=https://example.com docker compose -f docker-compose.prod.yml up -d --build
 #
 # Rollout order is enforced by depends_on: postgres healthy -> migrate job
-# (pre-migrate pg_dump + `sqlx migrate run`) exits 0 -> web starts. The web
-# process never migrates in production and refuses to boot on pending
-# migrations.
+# (pre-migrate pg_dump + `goose up`) exits 0 -> web starts. The web process
+# never migrates in production and refuses to boot on pending migrations.
+#
+# The schema is goose-managed (db/migrations, consolidated 00001_init.sql):
+# deploy onto a fresh `lindaflor` database. The first migrate run on an empty
+# database still takes a (tiny) pre-migrate dump. A pgdata volume left over
+# from the Rust/sqlx release is NOT compatible: dump it, then recreate the
+# volume (`docker compose down` + `docker volume rm lindaflor_pgdata`).
+#
+# Admin bootstrap and demo data use the CLIs shipped in the web image:
+#   docker compose -f docker-compose.prod.yml run --rm -T --entrypoint create-admin \
+#     web --email you@example.com < password.txt
+#   docker compose -f docker-compose.prod.yml run --rm --entrypoint seed \
+#     -e SEED_ADMIN_PASSWORD=... web
 #
 # Secrets are files under ./secrets/ (gitignored), mounted at /run/secrets/<name>
 # and read through the app's `*_FILE` variables. Required files:
@@ -43,11 +54,31 @@ x-app-env: &app-env
   TOKEN_PEPPER_FILE: /run/secrets/token_pepper
   TOTP_ENCRYPTION_KEY_FILE: /run/secrets/totp_encryption_key
   METRICS_TOKEN_FILE: /run/secrets/metrics_token
+  # Mail: SMTP in production (MAIL_TRANSPORT=log needs
+  # MAIL_ALLOW_LOG_IN_PRODUCTION=1 and drops every email).
+  MAIL_TRANSPORT: ${MAIL_TRANSPORT:-smtp}
+  MAIL_FROM: ${MAIL_FROM:?set MAIL_FROM, e.g. Lindaflor <nao-responda@lindaflor.com.br>}
+  MAIL_ALLOW_LOG_IN_PRODUCTION: ${MAIL_ALLOW_LOG_IN_PRODUCTION:-}
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-}
+  SMTP_TLS: ${SMTP_TLS:-starttls}
+  SMTP_USERNAME: ${SMTP_USERNAME:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  # Payments: mercadopago (MP_ACCESS_TOKEN + MP_WEBHOOK_SECRET), or the
+  # static PIX key with ALLOW_STATIC_PIX=1 (manual confirmation).
+  PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-}
+  MP_ACCESS_TOKEN: ${MP_ACCESS_TOKEN:-}
+  MP_WEBHOOK_SECRET: ${MP_WEBHOOK_SECRET:-}
+  ALLOW_STATIC_PIX: ${ALLOW_STATIC_PIX:-}
   # Google OAuth: plain env here; GOOGLE_CLIENT_ID_FILE /
   # GOOGLE_CLIENT_SECRET_FILE also work if you mount them as secrets.
   GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
   GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-  RUST_LOG: ${RUST_LOG:-info}
+  # Cloudflare Turnstile on sign-up/sign-in (optional).
+  TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
+  TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
+  # JSON logs to stdout; LOG_SAMPLE_RATE samples successful requests.
+  LOG_SAMPLE_RATE: ${LOG_SAMPLE_RATE:-1}
 
 services:
   web:
@@ -70,7 +101,7 @@ services:
       - metrics_token
     # Publish on loopback only; the TLS reverse proxy is the public edge.
     ports:
-      - "127.0.0.1:4200:4200"
+      - "127.0.0.1:${LINDAFLOR_HTTP_PORT:-4200}:4200"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -80,9 +111,10 @@ services:
         condition: service_healthy
       rustfs:
         condition: service_started
-    # Readiness (DB + Valkey + bucket). The image HEALTHCHECK is liveness.
+    # Readiness (DB + Valkey + bucket). The image HEALTHCHECK is liveness;
+    # the runtime image is distroless (no curl), the binary probes itself.
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:4200/api/readyz"]
+      test: ["CMD", "/app/server", "-healthcheck", "-healthcheck-path=/api/readyz"]
       interval: 15s
       timeout: 3s
       start_period: 20s
