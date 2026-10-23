@@ -64,7 +64,7 @@ web/styles         input.css (Tailwind v4 source)
 |---|---|
 | **wave1-A Auth** | `internal/auth/**`, `internal/web/authapi/**`, `internal/web/authpages/**`, `cmd/create-admin/**`, `db/queries/auth*.sql` (+ `users.sql`) |
 | **wave1-B Platform** | `internal/mail/**`, `internal/storage/**`, `internal/payments/**`, `internal/ratelimit/**`, `internal/logging/**`, `internal/metrics/**`, `internal/seo/**`, `internal/web/platform/**` (keep `/api/health` + `/api/readyz`), `db/queries/{mail,payments,seo,platform}.sql` |
-| **wave1-C Store domain** | `internal/store/**` (new), `internal/jobs/**`, `cmd/seed/**`, `db/queries/{catalog,cart,inventory,orders,coupons,checkout,returns,reviews,reports,wishlist,stock_alerts,addresses,newsletter,settings}.sql`; exposes domain functions (e.g. store settings, nav sets, cart count) that D calls from `ShellLoader` |
+| **wave1-C Store domain** | `internal/store/**` (new), `internal/jobs/**`, `cmd/seed/**`, `db/queries/{store_*,maintenance,seed}.sql`; exposes domain functions (e.g. store settings, nav sets, cart count) that D calls from `ShellLoader` |
 | **wave2-D Storefront** | `internal/web/storefront/**` (incl. `ShellLoader`), page templ files there |
 | **wave2-E Checkout & account** | `internal/web/checkout/**`, `internal/web/account/**` |
 | **wave2-F Admin** | `internal/web/admin/**` |
@@ -227,9 +227,22 @@ before `render.Page`. Private paths (`seo.IsPrivatePath`) are always noindex.
 - Live availability: use the view `inventory_live` (`live_available`
   column) or `inventory_live_available(i.id, i.quantity, i.reserved)` —
   the Rust `LIVE_AVAILABLE_SQL`. Lock rows `ORDER BY i.id FOR UPDATE` as in Rust.
-- Dynamic catalog filters: `sqlc.narg()` + `CASE` sort keys; fall back to
-  hand-written pgx in your package only when sqlc cannot express it.
-- `make generate` (or `sqlc generate`) and commit `internal/db/sqlc/`.
+- No raw SQL strings in application code: every statement lives in
+  `db/queries/*.sql` (tests may keep raw SQL fixtures). Arrays are
+  `sqlc.arg(ids)::uuid[]`; optional filters `(sqlc.narg(x)::type IS NULL OR …)`.
+- Dynamic catalog filters: `sqlc.narg()` + `CASE` sort keys (see
+  `StoreListProducts` in `store_catalog.sql`); product cards select from
+  the `product_summaries` view. Fall back to hand-written pgx in your
+  package only when sqlc cannot express it, with a comment saying why.
+- **Nullability:** sqlc types every computed expression (scalar subquery,
+  `to_char`, `CASE`, aggregate, `x::text` of a nullable column) as NOT NULL,
+  so a NULL fails the scan at runtime. Cast such an expression to a
+  `null_<type>` domain (`null_text`, `null_int4`, `null_int8`, `null_bool`,
+  `null_uuid`, `null_timestamptz`; migration 00002) to get a pointer, or
+  make it non-null with `COALESCE`. `date` maps to `time.Time`.
+- `make generate` (or `sqlc generate`) and commit `internal/db/sqlc/`;
+  `make lint` runs `sqlc compile` + `sqlc vet`, `make drift` fails on stale
+  generated code.
 
 ## Tests
 
