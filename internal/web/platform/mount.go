@@ -2,7 +2,9 @@
 // /metrics, /robots.txt, /sitemap.xml, /api/openapi.json + docs (dev),
 // the Mercado Pago webhook.
 //
-// Owner: wave0 (health, readyz) and wave1-B (the rest).
+// Owner: wave0 (health, readyz) and wave1-B (the rest). The OpenAPI
+// document is hand-maintained in openapi.json (generated once from the Rust
+// utoipa spec, plus the webhook): update it with every /api route change.
 package platform
 
 import (
@@ -14,15 +16,41 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/wellington-vell/lindaflor/internal/app"
+	"github.com/wellington-vell/lindaflor/internal/metrics"
+	"github.com/wellington-vell/lindaflor/internal/payments"
+	"github.com/wellington-vell/lindaflor/internal/ratelimit"
+	"github.com/wellington-vell/lindaflor/internal/seo"
 	"github.com/wellington-vell/lindaflor/internal/storage"
+	"github.com/wellington-vell/lindaflor/internal/web/render"
 )
 
 // Mount registers the platform routes.
 func Mount(r chi.Router, d *app.Deps) {
 	r.Get("/api/health", Health)
 	r.Get("/api/readyz", Readyz(d))
-	// TODO(wave1-B): /metrics, /robots.txt, /sitemap.xml, /api/openapi.json,
-	// /api/docs, /api/swagger (dev only), POST /api/webhooks/mercadopago.
+
+	r.Method(http.MethodGet, metrics.Path, metrics.Handler(d.Cfg.MetricsToken, d.Cfg.AppEnv == "production"))
+
+	r.Get(seo.RobotsPath, seo.RobotsHandler(d.Cfg.AppOrigin))
+	r.Get(seo.SitemapPath, seo.SitemapHandler(d.Cfg.AppOrigin, d.Q, &seo.SitemapCache{}))
+
+	notFound := func(w http.ResponseWriter, r *http.Request) { render.NotFound(w, r, d) }
+	docs := func(h http.HandlerFunc) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if !d.Cfg.OpenAPIDocsEnabled {
+				notFound(w, r)
+				return
+			}
+			h(w, r)
+		}
+	}
+	r.Get("/api/openapi.json", docs(OpenAPIJSON))
+	r.Get("/api/docs", docs(ScalarDocs))
+	r.Get("/api/swagger", docs(SwaggerDocs))
+
+	svc := &payments.Service{Pool: d.Pool, Provider: d.Payments, Orders: d.Orders}
+	r.With(ratelimit.Limit(ratelimit.ScopeMPWebhook, ratelimit.DefaultMPWebhookPerMin)).
+		Post(payments.WebhookPath, svc.WebhookHandler(notFound))
 }
 
 // HealthResponse is the liveness payload.
