@@ -8,6 +8,11 @@
 let
   # Go 1.27.3 (same toolchain as flake.nix).
   go = pkgs.go_1_27;
+  # Keep the module cache outside the checkout: the templ LSP walks the
+  # workspace for *.templ files and opens the generated _templ.go files as
+  # gopls overlays, but `go list` rejects overlays beneath GOMODCACHE.
+  home = builtins.getEnv "HOME";
+  goModCache = if home == "" then "${config.env.DEVENV_STATE}/go/pkg/mod" else "${home}/go/pkg/mod";
   generatedFiles = [
     "^web/static/vendor/"
     "^web/static/css/app\\.css$"
@@ -42,6 +47,7 @@ in
   };
 
   env.GOTOOLCHAIN = "local";
+  env.GOMODCACHE = goModCache;
   env.DATABASE_URL = "postgres://postgres:postgres@127.0.0.1:4201/lindaflor?sslmode=disable";
   env.PGPORT = lib.mkForce "4201";
   env.VALKEY_URL = "redis://127.0.0.1:4202";
