@@ -1,0 +1,2376 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Linda Flor API",
+    "description": "HTTP API for Linda Flor",
+    "license": {
+      "name": ""
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/auth/admin/ban-user": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "ban_user",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BanUserBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "User banned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOkStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Cannot ban yourself or user missing"
+          },
+          "401": {
+            "description": "Missing session"
+          },
+          "403": {
+            "description": "Not an admin"
+          }
+        }
+      }
+    },
+    "/api/auth/admin/impersonate-user": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "impersonate_user",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImpersonateUserBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Now impersonating target user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionPayload"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing session"
+          },
+          "403": {
+            "description": "Not an admin, or target is an admin"
+          }
+        }
+      }
+    },
+    "/api/auth/admin/list-user-sessions": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "list_user_sessions",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserIdBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Active sessions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListUserSessionsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing session"
+          },
+          "403": {
+            "description": "Not an admin"
+          }
+        }
+      }
+    },
+    "/api/auth/admin/list-users": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "list_users",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Match name or email",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size, 1 to 100",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Zero-based offset",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching users",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListUsersResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing session"
+          },
+          "403": {
+            "description": "Not an admin"
+          }
+        }
+      }
+    },
+    "/api/auth/admin/remove-user": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "remove_user",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserIdBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "User removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOkStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Cannot remove yourself"
+          },
+          "401": {
+            "description": "Missing session"
+          },
+          "403": {
+            "description": "Not an admin"
+          }
+        }
+      }
+    },
+    "/api/auth/admin/revoke-user-session": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "revoke_user_session",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeUserSessionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Session revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOkStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Session not found"
+          },
+          "401": {
+            "description": "Missing session"
+          },
+          "403": {
+            "description": "Not an admin"
+          }
+        }
+      }
+    },
+    "/api/auth/admin/revoke-user-sessions": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "revoke_user_sessions",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserIdBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Sessions revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOkStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing session"
+          },
+          "403": {
+            "description": "Not an admin"
+          }
+        }
+      }
+    },
+    "/api/auth/admin/set-role": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "set_role",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetRoleBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Role updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid role or user"
+          },
+          "401": {
+            "description": "Missing session"
+          },
+          "403": {
+            "description": "Not an admin"
+          }
+        }
+      }
+    },
+    "/api/auth/admin/stop-impersonating": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "stop_impersonating",
+        "responses": {
+          "200": {
+            "description": "Restored admin session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionPayload"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not currently impersonating"
+          },
+          "401": {
+            "description": "Missing session"
+          }
+        }
+      }
+    },
+    "/api/auth/admin/unban-user": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "unban_user",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserIdBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "User unbanned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOkStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing session"
+          },
+          "403": {
+            "description": "Not an admin"
+          }
+        }
+      }
+    },
+    "/api/auth/admin/update-user": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "update_user",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminUpdateUserBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Name updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid name or user"
+          },
+          "401": {
+            "description": "Missing session"
+          },
+          "403": {
+            "description": "Not an admin"
+          }
+        }
+      }
+    },
+    "/api/auth/callback/google": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "google_callback",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "description": "Authorization code from Google",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "CSRF state token",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "description": "OAuth error code from Google",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error_description",
+            "in": "query",
+            "description": "OAuth error detail",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "Signed in; redirect to callbackURL"
+          },
+          "400": {
+            "description": "Missing/invalid OAuth parameters or state"
+          }
+        }
+      }
+    },
+    "/api/auth/change-email": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "change_email",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeEmailBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Confirmation email queued (logged in dev)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/change-email/confirm": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "confirm_change_email",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmChangeEmailBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Email updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/change-password": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "change_password",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Password updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing session or wrong current password"
+          }
+        }
+      }
+    },
+    "/api/auth/delete-user": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "delete_user",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteUserBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Delete verification queued, or account deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/get-session": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "get_session",
+        "responses": {
+          "200": {
+            "description": "Current session, or null when unauthenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SessionPayload"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/link-social": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "link_social",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkSocialBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OAuth authorize URL for linking",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignInSocialResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialNotImplementedBody"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing session"
+          },
+          "501": {
+            "description": "Social linking not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialNotImplementedBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/list-accounts": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "list_accounts",
+        "responses": {
+          "200": {
+            "description": "Linked accounts (no passwords)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AccountJson"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing session"
+          }
+        }
+      }
+    },
+    "/api/auth/list-sessions": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "list_sessions",
+        "responses": {
+          "200": {
+            "description": "Sessions for the current user",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ListedSessionJson"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing session"
+          }
+        }
+      }
+    },
+    "/api/auth/request-password-reset": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "request_password_reset",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestPasswordResetBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Always succeeds (anti-enumeration)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/reset-password": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "reset_password",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Password updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/revoke-other-sessions": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "revoke_other_sessions",
+        "responses": {
+          "200": {
+            "description": "Other sessions revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing session"
+          }
+        }
+      }
+    },
+    "/api/auth/revoke-session": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "revoke_session",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeSessionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Session revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing session"
+          }
+        }
+      }
+    },
+    "/api/auth/send-verification-email": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "send_verification_email",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendVerificationEmailBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Verification email queued (logged in dev)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/sign-in/email": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "sign_in_email",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignInEmailBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionPayload"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Two-factor authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwoFactorRequiredBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/sign-in/social": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Start Google OAuth. Returns `{ url }` for the client to redirect.",
+        "operationId": "sign_in_social",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignInSocialBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OAuth authorize URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignInSocialResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unsupported provider",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialNotImplementedBody"
+                }
+              }
+            }
+          },
+          "501": {
+            "description": "Social sign-in not configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SocialNotImplementedBody"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/sign-out": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "sign_out",
+        "responses": {
+          "200": {
+            "description": "Signed out",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignOutResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/sign-up/email": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "sign_up_email",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignUpEmailBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "User created and signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionPayload"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/two-factor/disable": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "disable",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DisableTwoFactorBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Two-factor disabled",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/two-factor/enable": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "enable",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnableTwoFactorBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "TOTP enrollment started (unverified). The secret is shown ONCE here — it is stored encrypted and never returned again; re-POST to rotate.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnableTwoFactorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/two-factor/generate-backup-codes": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "generate_backup_codes_route",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateBackupCodesBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "New backup codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupCodesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/two-factor/verify-backup-code": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "verify_backup_code",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyBackupCodeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Backup code accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionPayload"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/two-factor/verify-totp": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "verify_totp",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyTotpBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Enable confirmed without new session payload shape",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/unlink-account": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "unlink_account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnlinkAccountBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Account unlinked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkStatus"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Cannot unlink last login method"
+          },
+          "401": {
+            "description": "Missing session"
+          }
+        }
+      }
+    },
+    "/api/auth/update-user": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "update_user",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUserBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "User updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateUserResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing session"
+          }
+        }
+      }
+    },
+    "/api/auth/verify-email": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "verify_email",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "description": "Verification token",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "callbackURL",
+            "in": "query",
+            "description": "Optional redirect hint",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Email verified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkStatus"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "verify_email_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyEmailBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Email verified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OkStatus"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/health": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Liveness check used by probes and OpenAPI examples.",
+        "description": "Cheap by design: no backend I/O. Pair with `GET /api/readyz` for\ndependency-aware readiness.",
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/readyz": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Readiness check: `SELECT 1` (Postgres), `PING` (Valkey), `HEAD` bucket\n(S3) — each bounded by a 2s timeout. Returns `200` when every\n*registered* backend passes and `503` when any of them is degraded.",
+        "description": "Backends with no context registered (e.g. the API-only test router, or\nan `Unavailable` object store) are reported as `skipped`, not failures.",
+        "operationId": "readyz",
+        "responses": {
+          "200": {
+            "description": "All backends ready",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "One or more backends degraded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/webhooks/mercadopago": {
+      "post": {
+        "tags": [
+          "payments"
+        ],
+        "summary": "Mercado Pago payment notification",
+        "description": "Server-to-server webhook authenticated by the `x-signature` HMAC (manifest `id:{data.id};request-id:{x-request-id};ts:{ts};`). The body is never trusted: the payment is re-fetched from the MP API before being applied. 404 when the payment provider is not Mercado Pago.",
+        "operationId": "mercadopago_webhook",
+        "parameters": [
+          {
+            "name": "data.id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "description": "Applied (`ok`), still applying (`accepted`) or nothing to do (`ignored`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, stale or invalid signature"
+          },
+          "404": {
+            "description": "Mercado Pago is not the configured provider"
+          },
+          "503": {
+            "description": "Mercado Pago unreachable: redeliver later (`retry`)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AccountJson": {
+        "type": "object",
+        "required": [
+          "id",
+          "providerId",
+          "accountId",
+          "createdAt"
+        ],
+        "properties": {
+          "accountId": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "providerId": {
+            "type": "string"
+          }
+        }
+      },
+      "AdminOkStatus": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "boolean"
+          }
+        }
+      },
+      "AdminSessionJson": {
+        "type": "object",
+        "required": [
+          "id",
+          "createdAt",
+          "expiresAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "ipAddress": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "userAgent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "AdminUpdateUserBody": {
+        "type": "object",
+        "required": [
+          "userId",
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "userId": {
+            "type": "string"
+          }
+        }
+      },
+      "AdminUserResponse": {
+        "type": "object",
+        "required": [
+          "user"
+        ],
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/AuthUserJson"
+          }
+        }
+      },
+      "AuthSessionJson": {
+        "type": "object",
+        "description": "Session object (no raw token).",
+        "required": [
+          "id",
+          "expiresAt",
+          "userId"
+        ],
+        "properties": {
+          "expiresAt": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "impersonatedBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "userId": {
+            "type": "string"
+          }
+        }
+      },
+      "AuthUserJson": {
+        "type": "object",
+        "description": "User object.",
+        "required": [
+          "id",
+          "name",
+          "email",
+          "emailVerified",
+          "twoFactorEnabled",
+          "banned"
+        ],
+        "properties": {
+          "banExpires": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "banReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "banned": {
+            "type": "boolean"
+          },
+          "email": {
+            "type": "string"
+          },
+          "emailVerified": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "image": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "twoFactorEnabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "BackupCodesResponse": {
+        "type": "object",
+        "required": [
+          "backupCodes"
+        ],
+        "properties": {
+          "backupCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "BanUserBody": {
+        "type": "object",
+        "required": [
+          "userId"
+        ],
+        "properties": {
+          "banReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "userId": {
+            "type": "string"
+          }
+        }
+      },
+      "ChangeEmailBody": {
+        "type": "object",
+        "required": [
+          "newEmail"
+        ],
+        "properties": {
+          "callbackUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "TOTP code alternative (required when 2FA is enabled and no password is\ngiven, or when the account has no credential password)."
+          },
+          "newEmail": {
+            "type": "string",
+            "description": "New email address (`newEmail` or `new_email`)."
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Password re-check (required on the request path when the account\nhas a credential password)."
+          }
+        }
+      },
+      "ChangePasswordBody": {
+        "type": "object",
+        "required": [
+          "currentPassword",
+          "newPassword"
+        ],
+        "properties": {
+          "currentPassword": {
+            "type": "string"
+          },
+          "newPassword": {
+            "type": "string"
+          },
+          "revokeOtherSessions": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "When false, keep other sessions for this user. Defaults to true:\nomitting the flag revokes every other session."
+          }
+        }
+      },
+      "ConfirmChangeEmailBody": {
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
+          }
+        }
+      },
+      "DeleteUserBody": {
+        "type": "object",
+        "properties": {
+          "callbackUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "TOTP code alternative (required when 2FA is enabled and no password is\ngiven, or when the account has no credential password)."
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Password re-check (required on the request path when the account\nhas a credential password)."
+          },
+          "token": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When present, completes deletion instead of requesting verification."
+          }
+        }
+      },
+      "DisableTwoFactorBody": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "TOTP code (alternative to password)."
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "EnableTwoFactorBody": {
+        "type": "object",
+        "description": "Re-authentication for enrolling 2FA: the current password, or (when an\nenrollment is being rotated on an account that already has TOTP) a code.",
+        "properties": {
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "EnableTwoFactorResponse": {
+        "type": "object",
+        "required": [
+          "totpUri",
+          "secret",
+          "backupCodes"
+        ],
+        "properties": {
+          "backupCodes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "secret": {
+            "type": "string"
+          },
+          "totpUri": {
+            "type": "string"
+          }
+        }
+      },
+      "GenerateBackupCodesBody": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "TOTP code (alternative to password; for OAuth/passwordless users)."
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Password re-check (required unless a TOTP `code` is supplied)."
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "ImpersonateUserBody": {
+        "type": "object",
+        "required": [
+          "userId"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string"
+          }
+        }
+      },
+      "LinkSocialBody": {
+        "type": "object",
+        "required": [
+          "provider"
+        ],
+        "properties": {
+          "callbackUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "… or a current TOTP code (accounts with 2FA)."
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Step-up: current password (accounts with a password) …"
+          },
+          "provider": {
+            "type": "string"
+          }
+        }
+      },
+      "ListUserSessionsResponse": {
+        "type": "object",
+        "required": [
+          "sessions"
+        ],
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminSessionJson"
+            }
+          }
+        }
+      },
+      "ListUsersResponse": {
+        "type": "object",
+        "required": [
+          "users",
+          "total"
+        ],
+        "properties": {
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuthUserJson"
+            }
+          }
+        }
+      },
+      "ListedSessionJson": {
+        "type": "object",
+        "required": [
+          "id",
+          "token",
+          "createdAt",
+          "expiresAt",
+          "current"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "current": {
+            "type": "boolean",
+            "description": "True when this row matches the request's current cookie token hash."
+          },
+          "expiresAt": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "ipAddress": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "token": {
+            "type": "string",
+            "description": "Session id (we store a hash, not the raw token)."
+          },
+          "userAgent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "OkStatus": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ReadyResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "database",
+          "valkey",
+          "storage"
+        ],
+        "properties": {
+          "database": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "storage": {
+            "type": "string"
+          },
+          "valkey": {
+            "type": "string"
+          }
+        }
+      },
+      "RequestPasswordResetBody": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "redirectTo": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ResetPasswordBody": {
+        "type": "object",
+        "required": [
+          "token",
+          "newPassword"
+        ],
+        "properties": {
+          "newPassword": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          }
+        }
+      },
+      "RevokeSessionBody": {
+        "type": "object",
+        "properties": {
+          "sessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "token": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Alias for `sessionId`."
+          }
+        }
+      },
+      "RevokeUserSessionBody": {
+        "type": "object",
+        "required": [
+          "sessionId",
+          "userId"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string"
+          },
+          "userId": {
+            "type": "string"
+          }
+        }
+      },
+      "SendVerificationEmailBody": {
+        "type": "object",
+        "properties": {
+          "callbackUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "SessionPayload": {
+        "type": "object",
+        "description": "`{ user, session }` payload returned by sign-up / sign-in / get-session.",
+        "required": [
+          "user",
+          "session"
+        ],
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/AuthSessionJson"
+          },
+          "user": {
+            "$ref": "#/components/schemas/AuthUserJson"
+          }
+        }
+      },
+      "SetRoleBody": {
+        "type": "object",
+        "required": [
+          "userId",
+          "role"
+        ],
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "userId": {
+            "type": "string"
+          }
+        }
+      },
+      "SignInEmailBody": {
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "SignInSocialBody": {
+        "type": "object",
+        "required": [
+          "provider"
+        ],
+        "properties": {
+          "callbackUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "errorCallbackUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider": {
+            "type": "string"
+          }
+        }
+      },
+      "SignInSocialResponse": {
+        "type": "object",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "Google authorize URL for the client to navigate to."
+          }
+        }
+      },
+      "SignOutResponse": {
+        "type": "object",
+        "required": [
+          "success"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SignUpEmailBody": {
+        "type": "object",
+        "required": [
+          "name",
+          "email",
+          "password"
+        ],
+        "properties": {
+          "email": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        }
+      },
+      "SocialNotImplementedBody": {
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "TwoFactorRequiredBody": {
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "twoFactorRedirect",
+          "token"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string",
+            "description": "Short-lived token for `/api/auth/two-factor/verify-totp` / `verify-backup-code`."
+          },
+          "twoFactorRedirect": {
+            "type": "boolean"
+          }
+        }
+      },
+      "UnlinkAccountBody": {
+        "type": "object",
+        "required": [
+          "providerId",
+          "accountId"
+        ],
+        "properties": {
+          "accountId": {
+            "type": "string"
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "… or a current TOTP code (accounts with 2FA)."
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Step-up: current password (accounts with a password) …"
+          },
+          "providerId": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateUserBody": {
+        "type": "object",
+        "properties": {
+          "image": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Absent = leave unchanged; `null` (or `\"\"`) clears. Any other value is\nrejected: avatars are uploaded through `/settings/avatar`."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "UpdateUserResponse": {
+        "type": "object",
+        "required": [
+          "user"
+        ],
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/AuthUserJson"
+          }
+        }
+      },
+      "UserIdBody": {
+        "type": "object",
+        "required": [
+          "userId"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string"
+          }
+        }
+      },
+      "VerifyBackupCodeBody": {
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "token": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pending 2FA token from sign-in."
+          }
+        }
+      },
+      "VerifyEmailBody": {
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
+          }
+        }
+      },
+      "VerifyTotpBody": {
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "token": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pending 2FA token from sign-in (`TWO_FACTOR_REQUIRED`)."
+          }
+        }
+      },
+      "WebhookResponse": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "accepted",
+              "ignored",
+              "retry"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "system",
+      "description": "System health and metadata"
+    },
+    {
+      "name": "auth",
+      "description": "Authentication; see /api/auth/* routes"
+    },
+    {
+      "name": "payments",
+      "description": "Payment provider callbacks"
+    }
+  ]
+}

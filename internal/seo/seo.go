@@ -1,10 +1,10 @@
 // Package seo: per-page <head> metadata (title, description, canonical,
 // robots, Open Graph/Twitter, JSON-LD), robots.txt and sitemap.xml.
 //
-// Wave 0: Head + SetHead/HeadFrom request plumbing + Resolve (what the root
-// layout renders). TODO(wave1-B): structured data builders (Product,
-// Organization, WebSite, aggregateRating), sitemap/robots, tests from
-// src/seo.rs.
+// Pages call SetHead before render.Page; the root layout renders Resolve's
+// output. Builders for the storefront heads live in structured.go
+// (ProductHead, SetPageHead, HomeHead); robots.txt and sitemap.xml in
+// sitemap.go.
 package seo
 
 import (
