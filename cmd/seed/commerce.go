@@ -18,6 +18,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 )
 
 //go:embed data/catalog.json
@@ -163,8 +165,8 @@ func takeProducts(products []catalogProduct, count int) []catalogProduct {
 }
 
 func seedWarehouse(ctx context.Context, pool *pgxpool.Pool) (uuid.UUID, error) {
-	var id uuid.UUID
-	err := pool.QueryRow(ctx, `SELECT id FROM warehouses WHERE code = 'PRINCIPAL'`).Scan(&id)
+	q := sqlc.New(pool)
+	id, err := q.SeedWarehouseID(ctx)
 	if err == nil {
 		return id, nil
 	}
@@ -172,8 +174,7 @@ func seedWarehouse(ctx context.Context, pool *pgxpool.Pool) (uuid.UUID, error) {
 		return uuid.Nil, err
 	}
 	id = uuid.Must(uuid.NewV7())
-	if _, err := pool.Exec(ctx, `INSERT INTO warehouses (id, code, name, is_default, active, created_at)
-		VALUES ($1, 'PRINCIPAL', 'Depósito Principal', true, true, now())`, id); err != nil {
+	if err := q.SeedInsertWarehouse(ctx, id); err != nil {
 		return uuid.Nil, err
 	}
 	slog.InfoContext(ctx, "Warehouse created: PRINCIPAL (Depósito Principal)")
@@ -183,36 +184,34 @@ func seedWarehouse(ctx context.Context, pool *pgxpool.Pool) (uuid.UUID, error) {
 const firstPurchaseCoupon = "BEMVINDA10"
 
 func seedSettings(ctx context.Context, pool *pgxpool.Pool) error {
-	tag, err := pool.Exec(ctx, `INSERT INTO store_settings (id, pix_key, pix_key_type, pix_merchant_name, pix_merchant_city, pix_discount_percent, announcement_text, first_purchase_coupon_code, whatsapp_number, whatsapp_message_template, created_at, updated_at)
-		VALUES (true, $1, 'phone', 'Linda Flor Moda Praia', 'Aracaju', 5, NULL, $4, $2, $3, now(), now())
-		ON CONFLICT (id) DO NOTHING`,
-		envStr("SEED_PIX_KEY", "79998165115"),
-		envStr("SEED_WHATSAPP_NUMBER", "5579998165115"),
-		envStr("SEED_WHATSAPP_MESSAGE_TEMPLATE", "Olá! Fiz o pedido {{order_id}} no valor de {{total}} e quero confirmar o pagamento via PIX."),
-		firstPurchaseCoupon)
+	q := sqlc.New(pool)
+	inserted, err := q.SeedInsertSettings(ctx, sqlc.SeedInsertSettingsParams{
+		PixKey:                  envStr("SEED_PIX_KEY", "79998165115"),
+		WhatsappNumber:          envStr("SEED_WHATSAPP_NUMBER", "5579998165115"),
+		WhatsappMessageTemplate: envStr("SEED_WHATSAPP_MESSAGE_TEMPLATE", "Olá! Fiz o pedido {{order_id}} no valor de {{total}} e quero confirmar o pagamento via PIX."),
+		FirstPurchaseCouponCode: firstPurchaseCoupon,
+	})
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if inserted == 0 {
 		slog.InfoContext(ctx, "Store settings already present, leaving unchanged")
 	} else {
 		slog.InfoContext(ctx, "Store settings created")
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO coupons (id, code, discount_type, discount_value, min_subtotal_cents, active, usage_type, per_user_limit, created_at, updated_at)
-		VALUES ($1, $2, 'percent', 10, 0, true, 'unlimited', 1, now(), now())
-		ON CONFLICT ((upper(code))) DO NOTHING`, uuid.Must(uuid.NewV7()), firstPurchaseCoupon); err != nil {
+	if err := q.SeedInsertFirstPurchaseCoupon(ctx, sqlc.SeedInsertFirstPurchaseCouponParams{
+		ID: uuid.Must(uuid.NewV7()), Code: firstPurchaseCoupon,
+	}); err != nil {
 		return err
 	}
-	var banners int64
-	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM home_banners`).Scan(&banners); err != nil {
+	banners, err := q.SeedCountBanners(ctx)
+	if err != nil {
 		return err
 	}
 	if banners == 0 {
-		if _, err := pool.Exec(ctx, `INSERT INTO home_banners (id, title, subtitle, cta_label, link_url, image_url, sort_order, active, created_at)
-			VALUES
-			($1, 'Verão 2027', 'Coleção Nova', 'Explorar', '/produtos?sort=novos', 'https://images.unsplash.com/photo-1519046904884-53103b34b206?w=1200&h=600&fit=crop', 0, true, now()),
-			($2, 'Liquida', '20% OFF', 'Ver Liquida', '/produtos?sale=true', 'https://images.unsplash.com/photo-1473496169904-658ba7c44d8a?w=1200&h=600&fit=crop', 1, true, now())`,
-			uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())); err != nil {
+		if err := q.SeedInsertBanners(ctx, sqlc.SeedInsertBannersParams{
+			FirstID: uuid.Must(uuid.NewV7()), SecondID: uuid.Must(uuid.NewV7()),
+		}); err != nil {
 			return err
 		}
 		slog.InfoContext(ctx, "Home banners created")
@@ -223,31 +222,23 @@ func seedSettings(ctx context.Context, pool *pgxpool.Pool) error {
 func compareUUID(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) }
 
 func seedLooks(ctx context.Context, pool *pgxpool.Pool) error {
-	rows, err := pool.Query(ctx, `SELECT p.id, p.category::text, pv.color
-		FROM products p
-		INNER JOIN product_variants pv ON pv.product_id = p.id
-		WHERE p.active = true
-		  AND p.category IN ('biquini_top'::product_category, 'biquini_bottom'::product_category)`)
+	q := sqlc.New(pool)
+	rows, err := q.SeedLookCandidates(ctx)
 	if err != nil {
 		return err
 	}
 	colors := map[uuid.UUID]map[string]bool{}
 	tops, bottoms := map[uuid.UUID]bool{}, map[uuid.UUID]bool{}
-	var id uuid.UUID
-	var category, color string
-	if _, err := pgx.ForEachRow(rows, []any{&id, &category, &color}, func() error {
-		if colors[id] == nil {
-			colors[id] = map[string]bool{}
+	for _, r := range rows {
+		if colors[r.ID] == nil {
+			colors[r.ID] = map[string]bool{}
 		}
-		colors[id][color] = true
-		if category == "biquini_top" {
-			tops[id] = true
+		colors[r.ID][r.Color] = true
+		if r.Category == "biquini_top" {
+			tops[r.ID] = true
 		} else {
-			bottoms[id] = true
+			bottoms[r.ID] = true
 		}
-		return nil
-	}); err != nil {
-		return err
 	}
 	const maxLooks = 8
 	for top := range tops {
@@ -268,8 +259,9 @@ func seedLooks(ctx context.Context, pool *pgxpool.Pool) error {
 		slices.SortFunc(sharing, compareUUID)
 		for sort, bottom := range sharing[:min(len(sharing), maxLooks)] {
 			for _, pair := range [][2]uuid.UUID{{top, bottom}, {bottom, top}} {
-				if _, err := pool.Exec(ctx, `INSERT INTO product_looks (product_id, related_product_id, sort_order)
-					VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, pair[0], pair[1], int32(sort)); err != nil { //nolint:gosec // ≤ 8
+				if err := q.SeedInsertLook(ctx, sqlc.SeedInsertLookParams{
+					ProductID: pair[0], RelatedProductID: pair[1], SortOrder: int32(sort), //nolint:gosec // ≤ 8
+				}); err != nil {
 					return err
 				}
 			}
@@ -284,19 +276,11 @@ type setMember struct {
 }
 
 func setMemberBySlug(ctx context.Context, pool *pgxpool.Pool, slug string) (*setMember, error) {
-	var m setMember
-	err := pool.QueryRow(ctx, `SELECT p.id, pv.id, p.price_in_cents
-		FROM products p
-		INNER JOIN LATERAL (
-		  SELECT pv.id FROM product_variants pv
-		  WHERE pv.product_id = p.id
-		  ORDER BY pv.created_at ASC LIMIT 1
-		) pv ON true
-		WHERE p.slug = $1 AND p.active = true`, slug).Scan(&m.productID, &m.variantID, &m.price)
+	r, err := sqlc.New(pool).SeedSetMemberBySlug(ctx, slug)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
-	return &m, err
+	return &setMember{productID: r.ProductID, variantID: r.VariantID, price: r.PriceInCents}, err
 }
 
 func seedSets(ctx context.Context, pool *pgxpool.Pool, c catalog) error {
@@ -304,6 +288,7 @@ func seedSets(ctx context.Context, pool *pgxpool.Pool, c catalog) error {
 	if err != nil {
 		return err
 	}
+	q := sqlc.New(pool)
 	for i, set := range c.Sets {
 		if int64(i) >= maxSets {
 			break
@@ -322,52 +307,46 @@ func seedSets(ctx context.Context, pool *pgxpool.Pool, c catalog) error {
 		}
 		sum := top.price + bottom.price
 		price := sum * 90 / 100
-		var setID uuid.UUID
-		err = pool.QueryRow(ctx, `SELECT id FROM sets WHERE slug = $1`, set.Slug).Scan(&setID)
+		setID, err := q.SeedSetIDBySlug(ctx, set.Slug)
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			setID = uuid.Must(uuid.NewV7())
-			if _, err := pool.Exec(ctx, `INSERT INTO sets (id, name, slug, description, active, price_in_cents, compare_at_price_in_cents, created_at, updated_at)
-				VALUES ($1, $2, $3, $4, true, $5, $6, now(), now())`, setID, set.Name, set.Slug, set.Description, price, sum); err != nil {
+			if err := q.SeedInsertSet(ctx, sqlc.SeedInsertSetParams{
+				ID: setID, Name: set.Name, Slug: set.Slug, Description: &set.Description,
+				PriceInCents: &price, CompareAtPriceInCents: &sum,
+			}); err != nil {
 				return err
 			}
 			slog.InfoContext(ctx, "Set created", "name", set.Name)
 		case err != nil:
 			return err
 		}
-		var images int64
-		if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM set_images WHERE set_id = $1`, setID).Scan(&images); err != nil {
+		images, err := q.SeedCountSetImages(ctx, setID)
+		if err != nil {
 			return err
 		}
 		if images == 0 {
-			rows, err := pool.Query(ctx, `SELECT url, alt FROM product_images
-				WHERE product_id = ANY($1) ORDER BY sort_order ASC LIMIT 3`, []uuid.UUID{top.productID, bottom.productID})
-			if err != nil {
-				return err
-			}
-			type img struct {
-				URL string  `db:"url"`
-				Alt *string `db:"alt"`
-			}
-			imgs, err := pgx.CollectRows(rows, pgx.RowToStructByName[img])
+			imgs, err := q.SeedMemberImages(ctx, []uuid.UUID{top.productID, bottom.productID})
 			if err != nil {
 				return err
 			}
 			for sort, im := range imgs {
-				if _, err := pool.Exec(ctx, `INSERT INTO set_images (id, set_id, url, alt, sort_order, created_at)
-					VALUES ($1, $2, $3, $4, $5, now())`, uuid.Must(uuid.NewV7()), setID, im.URL, im.Alt, int32(sort)); err != nil { //nolint:gosec // ≤ 3
+				if err := q.SeedInsertSetImage(ctx, sqlc.SeedInsertSetImageParams{
+					ID: uuid.Must(uuid.NewV7()), SetID: setID, Url: im.Url, Alt: im.Alt, SortOrder: int32(sort), //nolint:gosec // ≤ 3
+				}); err != nil {
 					return err
 				}
 			}
 		}
 		for order, pid := range []uuid.UUID{top.productID, bottom.productID} {
-			if _, err := pool.Exec(ctx, `INSERT INTO set_members (set_id, product_id, sort_order)
-				VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, setID, pid, int32(order)); err != nil { //nolint:gosec // 2 members
+			if err := q.SeedInsertSetMember(ctx, sqlc.SeedInsertSetMemberParams{
+				SetID: setID, ProductID: pid, SortOrder: int32(order), //nolint:gosec // 2 members
+			}); err != nil {
 				return err
 			}
 		}
-		var slots int64
-		if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM set_slots WHERE set_id = $1`, setID).Scan(&slots); err != nil {
+		slots, err := q.SeedCountSetSlots(ctx, setID)
+		if err != nil {
 			return err
 		}
 		if slots == 0 {
@@ -376,12 +355,12 @@ func seedSets(ctx context.Context, pool *pgxpool.Pool, c catalog) error {
 				variant uuid.UUID
 			}{{"Top", top.variantID}, {"Calcinha", bottom.variantID}} {
 				slotID := uuid.Must(uuid.NewV7())
-				if _, err := pool.Exec(ctx, `INSERT INTO set_slots (id, set_id, label, sort_order) VALUES ($1, $2, $3, $4)`,
-					slotID, setID, s.label, int32(order)); err != nil { //nolint:gosec // 2 slots
+				if err := q.SeedInsertSetSlot(ctx, sqlc.SeedInsertSetSlotParams{
+					ID: slotID, SetID: setID, Label: &s.label, SortOrder: int32(order), //nolint:gosec // 2 slots
+				}); err != nil {
 					return err
 				}
-				if _, err := pool.Exec(ctx, `INSERT INTO set_slot_options (slot_id, variant_id, price_override_cents)
-					VALUES ($1, $2, NULL) ON CONFLICT DO NOTHING`, slotID, s.variant); err != nil {
+				if err := q.SeedInsertSlotOption(ctx, sqlc.SeedInsertSlotOptionParams{SlotID: slotID, VariantID: s.variant}); err != nil {
 					return err
 				}
 			}
@@ -411,13 +390,13 @@ func seedProducts(ctx context.Context, pool *pgxpool.Pool, warehouseID uuid.UUID
 	if err != nil {
 		return err
 	}
+	q := sqlc.New(pool)
 	for productIndex, p := range takeProducts(c.Products, int(max(count, 0))) {
 		if !slices.Contains(validCategories, p.Category) {
 			slog.WarnContext(ctx, "Skipping product with invalid category", "slug", p.Slug, "category", p.Category)
 			continue
 		}
-		var existing uuid.UUID
-		err := pool.QueryRow(ctx, `SELECT id FROM products WHERE slug = $1`, p.Slug).Scan(&existing)
+		_, err := q.SeedProductIDBySlug(ctx, p.Slug)
 		if err == nil {
 			continue
 		}
@@ -433,9 +412,10 @@ func seedProducts(ctx context.Context, pool *pgxpool.Pool, warehouseID uuid.UUID
 				compare = &v
 			}
 		}
-		if _, err := pool.Exec(ctx, `INSERT INTO products (id, name, slug, description, price_in_cents, compare_at_price_in_cents, category, active, featured, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7::text::product_category, true, $8, now(), now())`,
-			id, p.Name, p.Slug, p.Description, price, compare, p.Category, p.Featured); err != nil {
+		if err := q.SeedInsertProduct(ctx, sqlc.SeedInsertProductParams{
+			ID: id, Name: p.Name, Slug: p.Slug, Description: &p.Description, PriceInCents: price,
+			CompareAtPriceInCents: compare, Category: p.Category, Featured: p.Featured,
+		}); err != nil {
 			return err
 		}
 		var sizes []string
@@ -452,9 +432,9 @@ func seedProducts(ctx context.Context, pool *pgxpool.Pool, warehouseID uuid.UUID
 			for _, color := range p.Colors {
 				variantID := uuid.Must(uuid.NewV7())
 				sku := fmt.Sprintf("%s-%s-%s", p.Slug, size, slugify(color.Name))
-				if _, err := pool.Exec(ctx, `INSERT INTO product_variants (id, product_id, sku, size, color, color_hex, price_in_cents, low_stock_threshold, created_at, updated_at)
-					VALUES ($1, $2, $3, $4::text::product_size, $5, $6, NULL, 5, now(), now())`,
-					variantID, id, sku, size, color.Name, color.Hex); err != nil {
+				if err := q.SeedInsertVariant(ctx, sqlc.SeedInsertVariantParams{
+					ID: variantID, ProductID: id, Sku: sku, Size: size, Color: color.Name, ColorHex: &color.Hex,
+				}); err != nil {
 					return err
 				}
 				quantity := stockMin
@@ -465,15 +445,17 @@ func seedProducts(ctx context.Context, pool *pgxpool.Pool, warehouseID uuid.UUID
 					quantity = stockMin + rand.Int64N(stockMax-stockMin+1) //nolint:gosec // seed data, not security
 				}
 				variantIndex++
-				if _, err := pool.Exec(ctx, `INSERT INTO inventory (id, variant_id, warehouse_id, quantity, reserved, updated_at)
-					VALUES ($1, $2, $3, $4, 0, now())`, uuid.Must(uuid.NewV7()), variantID, warehouseID, int32(quantity)); err != nil { //nolint:gosec // env-bounded
+				if err := q.SeedInsertInventory(ctx, sqlc.SeedInsertInventoryParams{
+					ID: uuid.Must(uuid.NewV7()), VariantID: variantID, WarehouseID: warehouseID, Quantity: int32(quantity), //nolint:gosec // env-bounded
+				}); err != nil {
 					return err
 				}
 			}
 		}
 		for sort, img := range p.Images[:min(len(p.Images), 8)] {
-			if _, err := pool.Exec(ctx, `INSERT INTO product_images (id, product_id, url, alt, sort_order, created_at)
-				VALUES ($1, $2, $3, $4, $5, now())`, uuid.Must(uuid.NewV7()), id, img.URL, img.Alt, int32(sort)); err != nil { //nolint:gosec // ≤ 8
+			if err := q.SeedInsertProductImage(ctx, sqlc.SeedInsertProductImageParams{
+				ID: uuid.Must(uuid.NewV7()), ProductID: id, Url: img.URL, Alt: &img.Alt, SortOrder: int32(sort), //nolint:gosec // ≤ 8
+			}); err != nil {
 				return err
 			}
 		}

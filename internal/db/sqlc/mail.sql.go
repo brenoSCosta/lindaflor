@@ -70,8 +70,39 @@ func (q *Queries) MailClaimDue(ctx context.Context, arg MailClaimDueParams) ([]M
 	return items, nil
 }
 
-const mailEnqueueThrottled = `-- name: MailEnqueueThrottled :execrows
+const mailEnqueue = `-- name: MailEnqueue :exec
 
+INSERT INTO email_outbox (id, kind, to_address, subject, html_body, text_body, dedupe_key)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING
+`
+
+type MailEnqueueParams struct {
+	ID        uuid.UUID `json:"id"`
+	Kind      string    `json:"kind"`
+	ToAddress string    `json:"to_address"`
+	Subject   string    `json:"subject"`
+	HtmlBody  string    `json:"html_body"`
+	TextBody  string    `json:"text_body"`
+	DedupeKey *string   `json:"dedupe_key"`
+}
+
+// Owner: wave1-B (mail outbox, worker, mail hooks).
+// A second enqueue under the same dedupe_key is a silent no-op.
+func (q *Queries) MailEnqueue(ctx context.Context, arg MailEnqueueParams) error {
+	_, err := q.db.Exec(ctx, mailEnqueue,
+		arg.ID,
+		arg.Kind,
+		arg.ToAddress,
+		arg.Subject,
+		arg.HtmlBody,
+		arg.TextBody,
+		arg.DedupeKey,
+	)
+	return err
+}
+
+const mailEnqueueThrottled = `-- name: MailEnqueueThrottled :execrows
 INSERT INTO email_outbox (id, kind, to_address, subject, html_body, text_body)
 SELECT $1::uuid, $2::text, $3::text,
        $4::text, $5::text, $6::text
@@ -95,7 +126,6 @@ type MailEnqueueThrottledParams struct {
 	MaxPerWindow   int64     `json:"max_per_window"`
 }
 
-// Owner: wave1-B (mail outbox, worker, mail hooks).
 // Insert unless the recipient already has max_per_window throttled mails
 // (any of the throttled kinds, case-insensitive address) in the window.
 func (q *Queries) MailEnqueueThrottled(ctx context.Context, arg MailEnqueueThrottledParams) (int64, error) {

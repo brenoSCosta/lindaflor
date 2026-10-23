@@ -1,5 +1,11 @@
 -- Owner: wave1-B (mail outbox, worker, mail hooks).
 
+-- name: MailEnqueue :exec
+-- A second enqueue under the same dedupe_key is a silent no-op.
+INSERT INTO email_outbox (id, kind, to_address, subject, html_body, text_body, dedupe_key)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING;
+
 -- name: MailEnqueueThrottled :execrows
 -- Insert unless the recipient already has max_per_window throttled mails
 -- (any of the throttled kinds, case-insensitive address) in the window.
