@@ -51,9 +51,6 @@
   "explorer.fileNesting.enabled": true,
   "explorer.compactFolders": true,
   "explorer.fileNesting.patterns": {
-    "*.templ": "${capture}_templ.go",
-    "go.mod": "go.sum",
-    "flake.nix": "flake.lock",
-    "devenv.nix": "devenv.lock, devenv.yaml"
+    "flake.nix": "*.lock, go.sum, go.mod, Makefile, *.md, *.yaml, Dockerfile, .yml, .*, docker-compose.*, *.nix",
   }
 }
