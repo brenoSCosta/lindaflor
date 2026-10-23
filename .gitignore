@@ -1,16 +1,17 @@
-**/target
 .*
 !.gitignore
 !.vscode
 !.dockerignore
 !.github
-!.sqlx
 !.golangci.yml
 !.air.toml
 dump.rdb
 node_modules/
 backups/
 secrets/
+# Nix build output
+result
+result-*
 # Go
 /bin/
 /tmp/

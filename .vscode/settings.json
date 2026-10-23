@@ -1,105 +1,59 @@
 {
-  "editor.defaultFormatter": "rust-lang.rust-analyzer",
-  "[rust]": {
-    "editor.defaultFormatter": "rust-lang.rust-analyzer"
+  "go.useLanguageServer": true,
+  "go.alternateTools": {
+    "go": "${workspaceFolder}/.devenv/profile/bin/go",
+    "gopls": "${workspaceFolder}/.devenv/profile/bin/gopls"
   },
-  "[json]": {
-    "editor.defaultFormatter": "rust-lang.rust-analyzer"
+  "go.toolsEnvVars": {
+    "GOTOOLCHAIN": "local"
   },
-  "[jsonc]": {
-    "editor.defaultFormatter": "rust-lang.rust-analyzer"
+  "go.lintTool": "golangci-lint-v2",
+  "go.lintFlags": ["--fast-only"],
+  "gopls": {
+    "formatting.gofumpt": true,
+    "build.buildFlags": []
   },
-  "[markdown]": {
-    "editor.defaultFormatter": "rust-lang.rust-analyzer"
+  "[go]": {
+    "editor.defaultFormatter": "golang.go",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "explicit"
+    }
   },
-  "[tailwindcss]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
+  "[templ]": {
+    "editor.defaultFormatter": "a-h.templ",
+    "editor.formatOnSave": true
   },
-  "rust-analyzer.files.exclude": [
-    "target",
-    ".git",
-    ".github",
-    "node_modules",
-    "dist",
-    "build"
-  ],
-  "rust-analyzer.files.watcher": "server",
-  "rust-analyzer.cargo.autoreload": true,
-  "rust-analyzer.cargo.buildScripts.enable": false,
-  "rust-analyzer.cargo.noDeps": true,
-  "rust-analyzer.checkOnSave": false,
-  "rust-analyzer.procMacro.enable": false,
-  "rust-analyzer.inlayHints.enable": false,
-  "rust-analyzer.lens.enable": false,
-  "rust-analyzer.completion.autoimport.enable": false,
-  "rust-analyzer.diagnostics.enable": true,
-  "rust-analyzer.diagnostics.experimental.enable": false,
-  // Disable caching
-  "rust-analyzer.cachePriming.enable": false,
-  "rust-analyzer.numThreads": 1,
-  "rust-analyzer.lru.capacity": 64,
-  "files.exclude": {
-    "**/target": true,
-    "**/.git": true,
-    "**/.github": true,
-    "**/node_modules": true,
-    "**/dist": true,
-    "**/build": true
+  "templ.goplsOptions": {},
+  "tailwindCSS.includeLanguages": {
+    "templ": "html"
   },
-  "rust-analyzer.linkedProjects": ["Cargo.toml"],
-  "rust-analyzer.server.path": "${workspaceFolder}/.devenv/profile/bin/rust-analyzer",
-  "rust-analyzer.cargo.allTargets": false,
-  "rust-analyzer.cargo.targetDir": true,
-  "rust-analyzer.server.extraEnv": {
-    "PATH": "${workspaceFolder}/.devenv/profile/bin:${env:PATH}",
-    "PKG_CONFIG_PATH": "${workspaceFolder}/.devenv/profile/lib/pkgconfig",
-    "LD_LIBRARY_PATH": "${workspaceFolder}/.devenv/profile/lib:${env:LD_LIBRARY_PATH}",
-    "DATABASE_URL": "postgresql://postgres:postgres@localhost:4201/topcoat",
-    "SQLX_OFFLINE": "true"
+  "tailwindCSS.experimental.configFile": "web/styles/input.css",
+  "emmet.includeLanguages": {
+    "templ": "html"
   },
-  "rust-analyzer.cargo.extraEnv": {
-    "PATH": "${workspaceFolder}/.devenv/profile/bin:${env:PATH}",
-    "PKG_CONFIG_PATH": "${workspaceFolder}/.devenv/profile/lib/pkgconfig",
-    "LD_LIBRARY_PATH": "${workspaceFolder}/.devenv/profile/lib:${env:LD_LIBRARY_PATH}",
-    "DATABASE_URL": "postgresql://postgres:postgres@localhost:4201/topcoat",
-    "SQLX_OFFLINE": "true"
-  },
-  "rust-analyzer.check.extraEnv": {
-    "PATH": "${workspaceFolder}/.devenv/profile/bin:${env:PATH}",
-    "PKG_CONFIG_PATH": "${workspaceFolder}/.devenv/profile/lib/pkgconfig",
-    "LD_LIBRARY_PATH": "${workspaceFolder}/.devenv/profile/lib:${env:LD_LIBRARY_PATH}",
-    "DATABASE_URL": "postgresql://postgres:postgres@localhost:4201/topcoat",
-    "SQLX_OFFLINE": "true"
-  },
-  "rust-analyzer.check.command": "check",
-  "rust-analyzer.check.extraArgs": ["--bin", "lindaflor", "--jobs", "2"],
   "files.associations": {
     "*.css": "tailwindcss"
   },
   "files.watcherExclude": {
-    "**/target/**": true,
-    "**/node_modules/**": true,
-    "**/.sqlx/**": true,
-    "**/.git/**": true,
-    "**/.github/**": true,
-    "**/dist/**": true,
-    "**/build/**": true
+    "**/.devenv/**": true,
+    "**/.direnv/**": true,
+    "**/.git/**": true
   },
   "search.exclude": {
-    "**/target": true,
-    "**/.sqlx": true,
+    "**/*_templ.go": true,
+    "internal/db/sqlc/**": true,
+    "web/static/css/app.css": true,
+    "web/static/vendor/**": true,
     "**/*.lock": true,
-    "**/target/**": true,
-    "**/.git/**": true,
-    "**/.github/**": true,
-    "**/node_modules/**": true,
-    "**/dist/**": true,
-    "**/build/**": true
+    "go.sum": true
   },
   "explorer.fileNesting.enabled": true,
   "explorer.compactFolders": true,
   "explorer.fileNesting.patterns": {
-    "package.json": "*.ts, *.lock",
-    "flake.nix": "*.lock, *.toml, *.yml, *.yaml, .*, *.md, *.html, *.rdb, *.rs, *.css, *.nix"
+    "*.templ": "${capture}_templ.go",
+    "go.mod": "go.sum",
+    "flake.nix": "flake.lock",
+    "devenv.nix": "devenv.lock, devenv.yaml"
   }
 }

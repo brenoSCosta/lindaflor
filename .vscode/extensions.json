@@ -1,9 +1,9 @@
 {
   "recommendations": [
     "mkhl.direnv",
-    "vadimcn.vscode-lldb",
-    "tamasfe.even-better-toml",
-    "rust-lang.rust-analyzer",
-    "oxc.oxc-vscode"
+    "golang.go",
+    "a-h.templ",
+    "bradlc.vscode-tailwindcss",
+    "jnoortheen.nix-ide"
   ]
 }

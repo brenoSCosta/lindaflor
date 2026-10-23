@@ -7,9 +7,10 @@ goose migrations, Valkey. Start with [`README.md`](README.md) for setup and
 contracts (`app.Deps`, `auth.CurrentUser`, `render.Page`, toasts, …),
 conventions and test helpers. htmx 4 specifics: [`docs/htmx4-notes.md`](docs/htmx4-notes.md).
 
-The Rust/Topcoat code (`src/`, `crates/`, `migrations/`, `assets/`,
-`styles.css`, `Cargo.*`) is legacy and being deleted; do not extend it. Where
-behavior is unclear, it is the reference for what the Go code must do.
+The app was migrated from Rust/Topcoat; that code has been deleted and only
+lives in git history (comments like "port of src/…rs" point there). Behavior
+differences that were chosen on purpose are listed in
+`docs/GO_MIGRATION.md` ("Intentional differences from the Rust app").
 
 ## Canonical references
 

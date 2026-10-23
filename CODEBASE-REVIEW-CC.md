@@ -1,5 +1,11 @@
 # Lindaflor — Codebase Review (Claude Code)
 
+> **Historical document.** This review describes the pre-migration
+> Rust/Topcoat codebase (`src/`, `migrations/`, `Cargo.toml`, …), which was
+> replaced by the Go app and deleted on branch `migration-golang`. File paths
+> and line numbers refer to that tree (see git history); the findings were
+> carried into the Go port. Current layout: `docs/GO_MIGRATION.md`.
+
 **Date:** 2026-10-13 (status section updated 2026-10-22)
 **Branch / commit:** `migration` @ `0a75006`
 **Stack:** Rust 2024 + Topcoat 0.9, sqlx/Postgres, Valkey (redis-rs), S3/RustFS

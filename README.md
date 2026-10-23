@@ -11,8 +11,10 @@ OpenAPI in development).
 - **Object storage**: S3 API ([RustFS](https://rustfs.com) locally) for product images and avatars
 - **Environment**: Nix flake + [devenv](https://devenv.sh) 2.3 or newer for the toolchain, Postgres, Valkey and RustFS
 
-> The Rust/Topcoat implementation (`src/`, `crates/`, `migrations/`, …) is
-> being removed after the Go port; see [`docs/GO_MIGRATION.md`](docs/GO_MIGRATION.md).
+> Lindaflor was migrated from a Rust/Topcoat implementation, which has been
+> removed (it lives in git history); see
+> [`docs/GO_MIGRATION.md`](docs/GO_MIGRATION.md) for the migration record and
+> the intentional behavior differences.
 
 ## Quick start
 

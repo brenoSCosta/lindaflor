@@ -1,5 +1,11 @@
 # Lindaflor — Production Readiness Review
 
+> **Historical document.** This review describes the pre-migration
+> Rust/Topcoat codebase (`src/`, `migrations/`, `Cargo.toml`, …), which was
+> replaced by the Go app and deleted on branch `migration-golang`. File paths
+> and line numbers refer to that tree (see git history); the findings were
+> carried into the Go port. Current layout: `docs/GO_MIGRATION.md`.
+
 **Date:** 2026-10-07
 **Stack:** Rust + Topcoat 0.9 (Axum), sqlx/Postgres, Valkey (redis-rs), RustFS/S3, `topcoat dev`
 **Scope:** `src/auth/**`, `src/app/checkout|carrinho|store|pedido|conta|admin|dashboard`, `src/config|db|valkey|storage|logging|main|api|app`, planned `src/payments/` (§2.0), `migrations/0001–0006`, `Cargo.toml`, `devenv.*`
