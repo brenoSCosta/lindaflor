@@ -141,6 +141,9 @@ func (h *handlers) checkoutPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := newCheckoutView(sum, posted, checkoutError)
+	if u, ok := auth.CurrentUser(ctx); ok && posted == nil {
+		data.Email = u.Email // signed-in buyers start with their account e-mail
+	}
 	status := http.StatusOK
 	if checkoutError != "" {
 		status = http.StatusUnprocessableEntity

@@ -302,13 +302,16 @@ func TestCheckoutSavedAddresses(t *testing.T) {
 	s := testutil.NewServer(t, testutil.Options{})
 	pixSettings(t, s.Pool)
 	c := s.Client(t)
-	res := c.SignUp("Compradora", testutil.UniqueEmail("buyer"), "Harbor-Violet-Tiger-4821-Lantern!")
+	buyer := testutil.UniqueEmail("buyer")
+	res := c.SignUp("Compradora", buyer, "Harbor-Violet-Tiger-4821-Lantern!")
 	wantStatus(t, res, http.StatusOK)
 	userID := uuid.MustParse(res.JSON(t)["user"].(map[string]any)["id"].(string))
 	cartFor(t, s, c, seedVariant(t, s.Pool, "Top", 5), 1)
 
 	res = c.Get("/checkout")
-	wantContains(t, res, "Salvar este endereço")
+	// Regression: the contact e-mail started empty for a signed-in buyer
+	// (and "Pagar com PIX" stayed disabled until it was retyped).
+	wantContains(t, res, "Salvar este endereço", `value="`+buyer+`"`)
 	if strings.Contains(res.Body, "Endereços salvos:") {
 		t.Fatal("no saved addresses yet")
 	}
