@@ -69,6 +69,18 @@ func TestFavicon(t *testing.T) {
 			t.Fatalf("%s: %d %q", path, res.StatusCode, res.Header.Get("Content-Type"))
 		}
 	}
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodHead, s.URL+"/favicon.ico", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := s.Server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = head.Body.Close()
+	if head.StatusCode != http.StatusOK {
+		t.Fatalf("HEAD /favicon.ico: %d", head.StatusCode)
+	}
 }
 
 func TestProdHeadersAndOriginCheck(t *testing.T) {

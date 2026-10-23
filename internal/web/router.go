@@ -64,6 +64,7 @@ func NewRouter(d *app.Deps) (http.Handler, error) {
 
 	r.Handle(static.Prefix+"*", static.Handler())
 	r.Get("/favicon.ico", static.Favicon)
+	r.Head("/favicon.ico", static.Favicon)
 
 	platform.Mount(r, d)
 	authapi.Mount(r, d)
