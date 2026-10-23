@@ -1,0 +1,396 @@
+package authpages
+
+import "github.com/wellington-vell/lindaflor/internal/web/components"
+
+// brandShell is the centered card layout of the auth pages.
+templ brandShell() {
+	@components.Container(components.ContainerProps{Variant: components.ContainerCentered}) {
+		<div class="w-full">
+			<div class="mb-8 text-center">
+				<a href="/" class="text-2xl font-bold text-primary">Linda Flor</a>
+			</div>
+			@components.Card(components.Props{}) {
+				{ children... }
+			}
+		</div>
+	}
+}
+
+templ cardHeader(title, description string) {
+	@components.CardHeader(components.Props{}) {
+		@components.CardTitle(components.Props{}) {
+			{ title }
+		}
+		@components.CardDescription(components.Props{}) {
+			{ description }
+		}
+	}
+}
+
+templ footerLink(href templ.SafeURL, label string) {
+	@components.CardFooter(components.Props{}) {
+		<a href={ href } class="text-sm text-primary">{ label }</a>
+	}
+}
+
+templ footerButton(href templ.SafeURL, label string) {
+	@components.CardFooter(components.Props{}) {
+		<a href={ href } class={ components.ButtonVariants(components.ButtonPrimary, components.ButtonMd) }>{ label }</a>
+	}
+}
+
+templ alpineField(f textField) {
+	@components.Field(components.FieldProps{Attrs: f.fieldAttrs()}) {
+		@components.FieldLabel(components.LabelProps{For: f.ID}) {
+			{ f.Label }
+		}
+		@components.Input(components.InputProps{Class: f.InputClass, Attrs: f.inputAttrs()})
+		@components.FieldError("", components.Props{Attrs: f.errorAttrs()})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// /login (signin + signup modes)
+// ---------------------------------------------------------------------------
+
+type loginData struct {
+	Signup       bool
+	DefaultName  string
+	DefaultEmail string
+	InviteID     string
+	Next         string
+	CallbackURL  string
+}
+
+func (d loginData) title() string {
+	if d.Signup {
+		return "Cadastre-se na Linda Flor"
+	}
+	return "Entre na Linda Flor"
+}
+
+func (d loginData) heroSrc() string {
+	if d.Signup {
+		return "https://images.unsplash.com/photo-1519046904884-53103b34b206?auto=format&fit=crop&w=1600&q=80"
+	}
+	return "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=1600&q=80"
+}
+
+func (d loginData) heroAlt() string {
+	if d.Signup {
+		return "Saída de praia"
+	}
+	return "Mar e horizonte"
+}
+
+templ loginHero(d loginData) {
+	<div class="relative hidden bg-muted lg:block lg:w-1/2">
+		<img src={ d.heroSrc() } alt={ d.heroAlt() } class="absolute inset-0 h-full w-full object-cover"/>
+	</div>
+}
+
+templ hiddenContext(d loginData) {
+	if d.InviteID != "" {
+		<input type="hidden" name="invite_id" value={ d.InviteID }/>
+	}
+	if d.Next != "" {
+		<input type="hidden" name="next" value={ d.Next }/>
+	}
+}
+
+templ signinForm(d loginData) {
+	<form class="flex flex-col gap-4" { formAttrs("/login", signinData, "email = $refs.email.value", "Entrando…")... }>
+		@hiddenContext(d)
+		@alpineField(textField{ID: "email", Name: "email", Type: "email", Label: "E-mail", Placeholder: "E-mail", Autocomplete: "email", Value: d.DefaultEmail, Model: "email"})
+		@alpineField(textField{ID: "password", Name: "password", Type: "password", Label: "Senha", Placeholder: "Senha", Autocomplete: "current-password", Model: "password", Extra: templ.Attributes{"maxlength": "128"}})
+		@components.Button(components.ButtonProps{Class: "w-full", Attrs: submitAttrs()}) {
+			Continuar com e-mail
+		}
+		<a href="/forgot-password" class="block text-center text-sm text-muted-foreground underline-offset-4 hover:underline">
+			Esqueceu a senha?
+		</a>
+	</form>
+}
+
+templ signupForm(d loginData) {
+	<form class="flex flex-col gap-4" { formAttrs("/signup", signupData, "name = $refs.name.value; email = $refs.email.value", "Criando conta…")... }>
+		@hiddenContext(d)
+		@alpineField(textField{ID: "name", Name: "name", Type: "text", Label: "Nome", Placeholder: "Nome", Autocomplete: "name", Value: d.DefaultName, Model: "name"})
+		@alpineField(textField{ID: "email", Name: "email", Type: "email", Label: "E-mail", Placeholder: "E-mail", Autocomplete: "email", Value: d.DefaultEmail, Model: "email"})
+		@alpineField(textField{ID: "password", Name: "password", Type: "password", Label: "Senha", Placeholder: "Senha", Autocomplete: "new-password", Model: "password", Extra: templ.Attributes{"maxlength": "128"}})
+		@components.Button(components.ButtonProps{Class: "w-full", Attrs: submitAttrs()}) {
+			Continuar com e-mail
+		}
+	</form>
+}
+
+templ loginPage(d loginData) {
+	<div class="flex min-h-full flex-1">
+		if d.Signup {
+			@loginHero(d)
+		}
+		<div class="flex w-full items-center justify-center p-6 md:p-10 lg:w-1/2">
+			<div class="relative w-full max-w-xs">
+				<div class="pointer-events-none absolute inset-x-0 top-0 w-[calc(100%+4rem)] -translate-x-8 border-t max-sm:hidden"></div>
+				<div class="pointer-events-none absolute inset-x-0 bottom-0 w-[calc(100%+4rem)] -translate-x-8 border-b max-sm:hidden"></div>
+				<div class="pointer-events-none absolute inset-y-0 left-0 h-[calc(100%+4rem)] -translate-y-8 border-s max-sm:hidden"></div>
+				<div class="pointer-events-none absolute inset-y-0 right-0 h-[calc(100%+4rem)] -translate-y-8 border-e max-sm:hidden"></div>
+				<div class="pointer-events-none absolute inset-x-0 -top-1 w-[calc(100%+3rem)] -translate-x-6 border-t max-sm:hidden"></div>
+				<div class="pointer-events-none absolute inset-x-0 -bottom-1 w-[calc(100%+3rem)] -translate-x-6 border-b max-sm:hidden"></div>
+				<div class="pointer-events-none absolute inset-y-0 -left-1 h-[calc(100%+3rem)] -translate-y-6 border-s max-sm:hidden"></div>
+				<div class="pointer-events-none absolute inset-y-0 -right-1 h-[calc(100%+3rem)] -translate-y-6 border-e max-sm:hidden"></div>
+				<div class="flex w-full flex-col gap-6 p-8">
+					<div class="flex flex-col items-center gap-2 text-center">
+						@components.Icon("flower-2", "size-8 text-primary")
+						<h1 class="text-2xl font-bold tracking-tight">{ d.title() }</h1>
+					</div>
+					<form method="post" action="/login/google" class="w-full">
+						<input type="hidden" name="callback_url" value={ d.CallbackURL }/>
+						@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Class: "w-full", Attrs: components.Attr("type", "submit")}) {
+							Continuar com Google
+						}
+					</form>
+					@components.FieldSeparator(components.Props{}) {
+						OU
+					}
+					if d.Signup {
+						@signupForm(d)
+					} else {
+						@signinForm(d)
+					}
+					<p class="text-center text-sm text-muted-foreground">
+						if d.Signup {
+							Já tem uma conta? <a href="/login?mode=signin" class="underline underline-offset-4 hover:text-foreground">Entrar</a>
+						} else {
+							Não tem uma conta? <a href="/login?mode=signup" class="underline underline-offset-4 hover:text-foreground">Criar conta</a>
+						}
+					</p>
+					<p class="text-center text-xs text-muted-foreground">
+						Ao continuar, você concorda com nossos <a href="/termos" class="underline underline-offset-4 hover:text-foreground">Termos de Uso</a> e <a href="/politica-privacidade" class="underline underline-offset-4 hover:text-foreground">Política de Privacidade</a>.
+					</p>
+				</div>
+			</div>
+		</div>
+		if !d.Signup {
+			@loginHero(d)
+		}
+	</div>
+}
+
+// ---------------------------------------------------------------------------
+// /two-factor
+// ---------------------------------------------------------------------------
+templ twoFactorExpired() {
+	@brandShell() {
+		@cardHeader("Sessão expirada", "Faça login novamente para continuar a verificação em duas etapas.")
+		@footerButton("/login", "Ir para o login")
+	}
+}
+
+templ twoFactorPage(backup bool) {
+	@brandShell() {
+		@cardHeader("Verificação em duas etapas", "Digite o código do seu aplicativo autenticador ou use um código de backup.")
+		@components.CardContent(components.Props{}) {
+			@components.Tabs(components.Props{}) {
+				@components.TabsList(components.Props{}) {
+					@components.TabsTrigger("/two-factor", !backup, components.Props{}) {
+						Autenticador
+					}
+					@components.TabsTrigger("/two-factor?method=backup", backup, components.Props{}) {
+						Código de backup
+					}
+				}
+				@components.TabsContent(components.Props{}) {
+					if backup {
+						<form class="flex flex-col gap-4" { formAttrs("/two-factor?method=backup", backupData, "", "Verificando…")... }>
+							@alpineField(textField{ID: "backup_code", Name: "backup_code", Type: "text", Label: "Código de backup", Placeholder: "xxxx-xxxx", Autocomplete: "off", Model: "backupCode", InputClass: "font-mono"})
+							@components.Button(components.ButtonProps{Attrs: submitAttrs()}) {
+								Verificar
+							}
+						</form>
+					} else {
+						<form class="flex flex-col gap-4" { formAttrs("/two-factor", totpData, "", "Verificando…")... }>
+							@alpineField(textField{ID: "code", Name: "code", Type: "text", Label: "Código de 6 dígitos", Placeholder: "000000", Autocomplete: "one-time-code", Model: "code", InputClass: "text-center text-xl tracking-widest font-mono", Extra: templ.Attributes{"inputmode": "numeric", "maxlength": "6"}})
+							@components.Button(components.ButtonProps{Attrs: submitAttrs()}) {
+								Verificar
+							}
+						</form>
+					}
+				}
+			}
+		}
+		@footerLink("/login", "Cancelar e fazer login novamente")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// /forgot-password (+ /sent), /reset-password
+// ---------------------------------------------------------------------------
+templ forgotPage() {
+	@brandShell() {
+		@cardHeader("Esqueceu a senha", "Informe seu e-mail e enviaremos um link para redefinir sua senha.")
+		@components.CardContent(components.Props{}) {
+			<form method="post" action="/forgot-password" class="flex flex-col gap-4" novalidate x-data={ forgotData }>
+				@alpineField(textField{ID: "email", Name: "email", Type: "email", Label: "E-mail", Autocomplete: "email", Model: "email"})
+				@components.Button(components.ButtonProps{Attrs: submitAttrs()}) {
+					Enviar link
+				}
+			</form>
+		}
+		@footerLink("/login", "Voltar para o login")
+	}
+}
+
+templ forgotSentPage() {
+	@brandShell() {
+		@cardHeader("Link enviado", "Se existir uma conta com esse e-mail, um link de redefinição foi enviado. Verifique sua caixa de entrada.")
+		@footerButton("/login", "Voltar para o login")
+	}
+}
+
+templ resetPage(token string) {
+	@brandShell() {
+		if token == "" {
+			@cardHeader("Link inválido", "O link de redefinição pode estar expirado ou já foi usado. Solicite um novo na página de login.")
+			@footerButton("/forgot-password", "Solicitar novo link")
+		} else {
+			@cardHeader("Redefinir senha", "Escolha uma nova senha para sua conta.")
+			@components.CardContent(components.Props{}) {
+				<form class="flex flex-col gap-4" { formAttrs("/reset-password", resetData, "", "Redefinindo senha…")... }>
+					<input type="hidden" name="token" value={ token }/>
+					@alpineField(textField{ID: "new_password", Name: "new_password", Type: "password", Label: "Nova senha", Autocomplete: "new-password", Model: "newPassword", Extra: templ.Attributes{"maxlength": "128"}})
+					@alpineField(textField{ID: "confirm_password", Name: "confirm_password", Type: "password", Label: "Confirmar nova senha", Autocomplete: "new-password", Model: "confirmPassword"})
+					@components.Button(components.ButtonProps{Attrs: submitAttrs()}) {
+						Redefinir senha
+					}
+				</form>
+			}
+			@footerLink("/login", "Voltar para o login")
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// /verify-email, /check-email
+// ---------------------------------------------------------------------------
+
+type verifyState int
+
+const (
+	verifyPrompt verifyState = iota
+	verifyFailed
+	verifyDone
+	verifyResent
+)
+
+templ resendForm(action, email string) {
+	<form method="post" action={ templ.SafeURL(action) } class="flex flex-col gap-4">
+		<div class="space-y-2">
+			@components.Label(components.LabelProps{For: "email"}) {
+				E-mail
+			}
+			@components.Input(components.InputProps{Attrs: templ.Attributes{"type": "email", "name": "email", "id": "email", "value": email, "required": true}})
+		</div>
+		@components.Button(components.ButtonProps{Attrs: components.Attr("type", "submit")}) {
+			Reenviar verificação
+		}
+	</form>
+}
+
+templ verifyEmailPage(state verifyState, sessionEmail string) {
+	@brandShell() {
+		switch state {
+			case verifyFailed:
+				@cardHeader("Falha na verificação", "O link pode estar expirado ou já foi usado. Solicite um novo abaixo.")
+				@components.CardContent(components.Props{}) {
+					@resendForm("/verify-email/resend", sessionEmail)
+				}
+				@footerButton("/login", "Voltar para o login")
+			case verifyDone:
+				@cardHeader("E-mail verificado", "Seu e-mail foi confirmado com sucesso.")
+				@footerButton("/dashboard", "Ir para o painel")
+			case verifyResent:
+				@cardHeader("Link reenviado", "Enviamos um novo link de verificação para o seu e-mail.")
+				@footerButton("/dashboard", "Ir para o painel")
+			default:
+				@cardHeader("Verificar e-mail", "Abra o link enviado ao seu e-mail, ou solicite um novo abaixo.")
+				@components.CardContent(components.Props{}) {
+					@resendForm("/verify-email/resend", sessionEmail)
+				}
+				@footerLink("/login", "Voltar para o login")
+		}
+	}
+}
+
+templ checkEmailPage(email string, resent bool) {
+	@brandShell() {
+		if resent {
+			@cardHeader("E-mail reenviado", "Enviamos um novo link de verificação. Verifique sua caixa de entrada.")
+			@footerButton("/login", "Voltar para o login")
+		} else {
+			@components.CardHeader(components.Props{}) {
+				@components.CardTitle(components.Props{}) {
+					Verifique sua caixa de entrada
+				}
+				@components.CardDescription(components.Props{}) {
+					if email == "" {
+						Enviamos um link de verificação para o seu e-mail. Clique no link para concluir o login.
+					} else {
+						<span>Enviamos um link de verificação para <strong>{ email }</strong>. Clique no link para concluir o login.</span>
+					}
+				}
+			}
+			@components.CardContent(components.Props{}) {
+				<form method="post" action="/check-email/resend">
+					<input type="hidden" name="email" value={ email }/>
+					@components.Button(components.ButtonProps{Attrs: components.Attr("type", "submit")}) {
+						Reenviar e-mail de verificação
+					}
+				</form>
+			}
+			@footerLink("/login", "Voltar para o login")
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// /confirmar-email, /excluir-conta (GET renders a button; POST acts, so
+// link scanners that prefetch URLs cannot consume the token)
+// ---------------------------------------------------------------------------
+templ confirmEmailPage(token string) {
+	@brandShell() {
+		if token == "" {
+			@cardHeader("Link inválido", "O link de confirmação pode estar expirado ou já foi usado. Solicite a troca novamente nas configurações da conta.")
+		} else {
+			@cardHeader("Confirmar novo e-mail", "Confirme para usar este endereço na sua conta. Você precisará entrar novamente.")
+			@components.CardContent(components.Props{}) {
+				<form method="post" action="/confirmar-email" class="flex flex-col gap-4">
+					<input type="hidden" name="token" value={ token }/>
+					<button type="submit" class={ components.ButtonVariants(components.ButtonPrimary, components.ButtonMd) }>
+						Confirmar e-mail
+					</button>
+				</form>
+			}
+		}
+		@footerLink("/login", "Ir para o login")
+	}
+}
+
+templ deleteAccountPage(token string) {
+	@brandShell() {
+		if token == "" {
+			@cardHeader("Link inválido", "O link de exclusão pode estar expirado ou já foi usado. Solicite novamente nas configurações da conta.")
+		} else {
+			@cardHeader("Excluir conta", "Esta ação é permanente e não pode ser desfeita.")
+			@components.CardContent(components.Props{}) {
+				<form method="post" action="/excluir-conta" class="flex flex-col gap-4">
+					<input type="hidden" name="token" value={ token }/>
+					<button type="submit" class={ components.ButtonVariants(components.ButtonDestructive, components.ButtonMd) }>
+						Excluir minha conta
+					</button>
+				</form>
+			}
+		}
+		@footerLink("/", "Voltar para a loja")
+	}
+}
