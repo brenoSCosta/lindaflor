@@ -1,23 +1,15 @@
-# Build context for the Dockerfile. Keep `.sqlx/` (offline query cache) in.
-**/target
-.git
-.github
-.devenv
-.devenv.flake.nix
-.direnv
-.envrc
-.env
-.env.*
-.vscode
-.idea
-.claude
-node_modules
-dump.rdb
-*.log
-backups
-Dockerfile
-.dockerignore
-docker-compose*.yml
-# Docs are not needed to build the binary.
-*.md
-design
+# Build context allow-list: only what the Go build and the migrate image need.
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/
+!db/
+!web/
+!scripts/backup.sh
+!scripts/migrate.sh
+# Never ship local state even if it lands under an allowed directory.
+**/.env
+**/.env.*
+**/*.log
+**/tmp

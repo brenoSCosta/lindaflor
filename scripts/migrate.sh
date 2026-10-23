@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Migrate job: back up, then apply pending sqlx migrations.
+# Migrate job: back up, then apply pending goose migrations.
 #
 # Run this (once, single instance) before rolling out a web release. The web
 # process never migrates in production (`MIGRATE_ON_BOOT` defaults off) and
@@ -11,20 +11,25 @@
 #
 # Environment (see scripts/backup.sh for the backup variables):
 #   DATABASE_URL / DATABASE_URL_FILE   required
-#   MIGRATIONS_DIR        default: <repo>/migrations
+#   MIGRATIONS_DIR        default: <repo>/db/migrations (image: /migrations)
 #   SKIP_PRE_MIGRATE_BACKUP=1          skip the backup (e.g. first deploy on
 #                                      an empty database) — never routine.
 #
-# There are no down-migrations (forward-fix only). If a migration breaks
-# production, restore the pre-migrate dump or use PITR, then ship a fix.
+# Migrations are forward-only (no `-- +goose Down` is ever run in
+# production). If a migration breaks production, restore the pre-migrate
+# dump or use PITR, then ship a fix.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-migrations_dir="${MIGRATIONS_DIR:-$script_dir/../migrations}"
+migrations_dir="${MIGRATIONS_DIR:-$script_dir/../db/migrations}"
 
 log() { printf '[migrate] %s\n' "$*" >&2; }
 
 if [ -z "${DATABASE_URL:-}" ] && [ -n "${DATABASE_URL_FILE:-}" ]; then
+  if [ ! -r "$DATABASE_URL_FILE" ]; then
+    log "DATABASE_URL_FILE=$DATABASE_URL_FILE is not readable"
+    exit 1
+  fi
   DATABASE_URL="$(cat "$DATABASE_URL_FILE")"
   export DATABASE_URL
 fi
@@ -32,6 +37,11 @@ if [ -z "${DATABASE_URL:-}" ]; then
   log "DATABASE_URL (or DATABASE_URL_FILE) is required"
   exit 1
 fi
+
+goose_cmd() {
+  # Same table goose's Go provider uses in internal/db (goose_db_version).
+  goose -dir "$migrations_dir" postgres "$DATABASE_URL" "$@"
+}
 
 wait_for_db() {
   for _ in $(seq 1 30); do
@@ -52,7 +62,8 @@ case "$command_name" in
     ;;
   info)
     wait_for_db
-    exec sqlx migrate info --source "$migrations_dir"
+    goose_cmd status
+    exit 0
     ;;
   migrate) ;;
   *)
@@ -64,7 +75,7 @@ esac
 wait_for_db
 
 log "migration status before:"
-sqlx migrate info --source "$migrations_dir" >&2
+goose_cmd status >&2
 
 if [ "${SKIP_PRE_MIGRATE_BACKUP:-0}" = "1" ]; then
   log "SKIP_PRE_MIGRATE_BACKUP=1: not taking a pre-migrate backup"
@@ -73,5 +84,6 @@ else
 fi
 
 log "applying migrations from $migrations_dir"
-sqlx migrate run --source "$migrations_dir"
+goose_cmd up
+goose_cmd version
 log "done"
