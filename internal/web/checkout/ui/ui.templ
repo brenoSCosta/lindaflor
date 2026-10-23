@@ -1,0 +1,78 @@
+package ui
+
+import (
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+)
+
+// Field renders a labelled TextField with its (Alpine) error line.
+templ Field(f TextField) {
+	@components.Field(components.FieldProps{Attrs: f.FieldAttrs()}) {
+		@components.FieldLabel(components.LabelProps{For: f.ID}) {
+			{ f.Label }
+		}
+		@components.Input(components.InputProps{Attrs: f.InputAttrs()})
+		if !f.Plain {
+			@components.FieldError("", components.Props{Attrs: f.ErrorAttrs()})
+		}
+	}
+}
+
+// TrackingLine is the tracking code with a link to the carrier's page
+// when known (nothing without a code).
+templ TrackingLine(p store.OrderProgress) {
+	if p.TrackingCode != nil {
+		<p class="flex flex-wrap items-center gap-2 text-sm">
+			@components.Icon("truck", "size-4 text-muted-foreground")
+			<span class="text-muted-foreground">{ p.Carrier }:</span>
+			<span class="font-mono">{ *p.TrackingCode }</span>
+			if link := p.TrackingLink(); link != "" {
+				<a href={ templ.URL(link) } target="_blank" rel="noreferrer" class="text-primary hover:underline">
+					Rastrear
+				</a>
+			}
+		</p>
+	}
+}
+
+// OrderTimeline is the vertical step list. Cancelled/refunded orders
+// render nothing (callers show the status label instead).
+templ OrderTimeline(p store.OrderProgress) {
+	if steps := p.Steps(); steps != nil {
+		<ol class="flex flex-col gap-3">
+			for _, step := range steps {
+				<li class="flex items-start gap-3">
+					if step.Done {
+						<span class="mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+							@components.Icon("check", "size-3")
+						</span>
+					} else {
+						<span class="mt-0.5 inline-flex size-5 shrink-0 rounded-full border border-border"></span>
+					}
+					<div class="flex flex-col">
+						<span class={ stepLabelClass(step.Done) }>{ step.Label }</span>
+						if step.Date != "" {
+							<span class="text-xs text-muted-foreground">{ step.Date }</span>
+						}
+					</div>
+				</li>
+			}
+		</ol>
+		@TrackingLine(p)
+	}
+}
+
+// ProgressBar is the compact 4-segment progress of the order history
+// ("—" for cancelled/refunded orders).
+templ ProgressBar(status string) {
+	if step, ok := store.ReachedStep(status); ok {
+		<div class="flex items-center gap-2" title={ store.TimelineStepLabels[step] }>
+			for i := range len(store.TimelineStepLabels) {
+				<span class={ stepBarClass(i <= step) }></span>
+			}
+			<span class="text-xs text-muted-foreground">{ store.TimelineStepLabels[step] }</span>
+		</div>
+	} else {
+		<span class="text-xs text-muted-foreground">—</span>
+	}
+}

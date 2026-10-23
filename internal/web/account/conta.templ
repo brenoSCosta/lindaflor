@@ -1,0 +1,374 @@
+package account
+
+import (
+	"strconv"
+
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/checkout/ui"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+	"github.com/wellington-vell/lindaflor/internal/web/format"
+)
+
+func orderHref(o store.RecentOrder) templ.SafeURL {
+	return templ.SafeURL("/pedido/" + o.ID.String())
+}
+
+// wholeReais is "R$ <total / 100>" (integer reais, as the Rust tables).
+func wholeReais(cents int64) string { return "R$ " + strconv.FormatInt(cents/100, 10) }
+
+templ th(label string) {
+	@components.TableHead(components.Props{}) {
+		{ label }
+	}
+}
+
+templ dashboardPage(orders []store.RecentOrder, offer string) {
+	@components.Container(components.ContainerProps{}) {
+		if offer != "" {
+			<div class="rounded-xl border border-primary/30 bg-primary/10 px-5 py-4 text-sm text-primary">
+				Primeira compra? Use o cupom
+				<strong>{ offer }</strong>
+				e ganhe desconto no seu primeiro pedido.
+			</div>
+		}
+		<div class="grid gap-4 @sm/page:grid-cols-2">
+			<a href="/conta/pedidos" class="rounded-xl border border-border bg-background p-5 shadow-sm transition-colors hover:border-primary">
+				<p class="text-sm text-muted-foreground">Meus Pedidos</p>
+				<p class="mt-1 text-2xl font-bold">Ver pedidos</p>
+			</a>
+			<a href="/settings" class="rounded-xl border border-border bg-background p-5 shadow-sm transition-colors hover:border-primary">
+				<p class="text-sm text-muted-foreground">Configurações</p>
+				<p class="mt-1 text-2xl font-bold">Ajustar conta</p>
+			</a>
+		</div>
+		<div class="overflow-hidden rounded-xl border border-border bg-background shadow-sm">
+			<div class="flex items-center justify-between border-b border-border px-6 py-4">
+				<h2 class="font-semibold">Pedidos recentes</h2>
+				<a href="/conta/pedidos" class="text-sm text-primary">Ver todos</a>
+			</div>
+			if len(orders) == 0 {
+				<div class="p-12 text-center">
+					<p class="text-sm text-muted-foreground">Nenhum pedido ainda.</p>
+					<a href="/produtos" class={ components.ButtonVariants(components.ButtonPrimary, components.ButtonMd) }>
+						Explorar produtos
+					</a>
+				</div>
+			} else {
+				@components.Table(components.Props{}) {
+					@components.TableHeader(components.Props{}) {
+						@components.TableRow(components.Props{}) {
+							@th("Pedido")
+							@th("Status")
+							@th("Total")
+							@th("Data")
+						}
+					}
+					@components.TableBody(components.Props{}) {
+						for _, o := range orders {
+							@components.TableRow(components.Props{}) {
+								@components.TableCell(components.Props{}) {
+									<a href={ orderHref(o) } class="font-mono text-primary">{ o.ID.String()[:8] }</a>
+								}
+								@components.TableCell(components.Props{}) {
+									@components.Badge(components.BadgeProps{Variant: ui.BadgeVariant(o.StatusTone())}) {
+										{ o.StatusLabel() }
+									}
+								}
+								@components.TableCell(components.Props{}) {
+									{ wholeReais(o.TotalCents) }
+								}
+								@components.TableCell(components.Props{}) {
+									{ format.DateTimeBR(o.CreatedAt) }
+								}
+							}
+						}
+					}
+				}
+			}
+		</div>
+	}
+}
+
+templ myOrdersPage(p store.MyOrdersPage) {
+	@components.Container(components.ContainerProps{}) {
+		<h1 class="text-2xl font-bold">Meus Pedidos</h1>
+		<p class="text-sm text-muted-foreground">
+			Acompanhe o status dos seus pedidos.
+		</p>
+		@myOrdersList(p)
+	}
+}
+
+// pagerLink pages the list in place (htmx) with a full-page fallback.
+templ pagerLink(page int64, label string) {
+	<a
+		href={ templ.SafeURL(ordersPageURL("/conta/pedidos", page)) }
+		hx-get={ ordersPageURL("/conta/pedidos/lista", page) }
+		hx-target="#my-orders"
+		hx-swap="outerHTML"
+		hx-push-url={ ordersPageURL("/conta/pedidos", page) }
+		class={ components.ButtonVariants(components.ButtonGhost, components.ButtonMd) }
+	>
+		{ label }
+	</a>
+}
+
+// myOrdersList is the /conta/pedidos/lista fragment.
+templ myOrdersList(p store.MyOrdersPage) {
+	<div id="my-orders" class="flex flex-col gap-6">
+		if len(p.Orders) == 0 {
+			<div class="rounded-xl border border-border bg-background p-12 text-center shadow-sm">
+				<p class="text-sm text-muted-foreground">Você ainda não fez nenhum pedido.</p>
+				<a href="/produtos" class={ components.ButtonVariants(components.ButtonPrimary, components.ButtonMd) }>
+					Explorar produtos
+				</a>
+			</div>
+		} else {
+			<div class="overflow-hidden rounded-xl border border-border bg-background shadow-sm">
+				@components.Table(components.Props{}) {
+					@components.TableHeader(components.Props{}) {
+						@components.TableRow(components.Props{}) {
+							@th("Pedido")
+							@th("Status")
+							@th("Andamento")
+							@th("Rastreio")
+							@th("Total")
+							@th("Data")
+						}
+					}
+					@components.TableBody(components.Props{}) {
+						for _, o := range p.Orders {
+							@components.TableRow(components.Props{}) {
+								@components.TableCell(components.Props{}) {
+									<a href={ orderHref(o) } class="font-mono text-primary">{ o.ID.String()[:8] }</a>
+								}
+								@components.TableCell(components.Props{}) {
+									<div class="flex flex-wrap items-center gap-2">
+										@components.Badge(components.BadgeProps{Variant: ui.BadgeVariant(o.StatusTone())}) {
+											{ o.StatusLabel() }
+										}
+										if p.Reviewable[o.ID] {
+											<a href={ orderHref(o) } class="text-xs text-primary hover:underline">Avaliar</a>
+										}
+									</div>
+								}
+								@components.TableCell(components.Props{}) {
+									@ui.ProgressBar(o.Status)
+								}
+								@components.TableCell(components.Props{}) {
+									@ui.TrackingLine(store.OrderProgress{Status: o.Status, Carrier: o.Carrier, TrackingCode: o.TrackingCode})
+								}
+								@components.TableCell(components.Props{}) {
+									{ wholeReais(o.TotalCents) }
+								}
+								@components.TableCell(components.Props{}) {
+									<span class="text-muted-foreground">{ format.DateTimeBR(o.CreatedAt) }</span>
+								}
+							}
+						}
+					}
+				}
+			</div>
+			if p.Pager.Show() {
+				@components.Pagination(components.Props{}) {
+					@components.PaginationContent(components.Props{}) {
+						if p.Pager.HasPrev() {
+							@components.PaginationItem(components.Props{}) {
+								@pagerLink(p.Pager.Page-1, "Anterior")
+							}
+						}
+						@components.PaginationItem(components.Props{}) {
+							<span class="px-3 text-sm text-muted-foreground">{ p.Pager.Label() }</span>
+						}
+						if p.Pager.HasNext() {
+							@components.PaginationItem(components.Props{}) {
+								@pagerLink(p.Pager.Page+1, "Próxima")
+							}
+						}
+					}
+				}
+			}
+		}
+	</div>
+}
+
+func addressTitle(a store.SavedAddress) string {
+	if a.Label == "" {
+		return a.RecipientName
+	}
+	return a.Label
+}
+
+func (v addressesView) value(pick func(store.SavedAddress) string) string {
+	if v.Editing == nil {
+		return ""
+	}
+	return pick(*v.Editing)
+}
+
+func (v addressesView) state() string {
+	if v.Editing == nil {
+		return "SE"
+	}
+	return v.Editing.State
+}
+
+func (v addressesView) formTitle() string {
+	if v.Editing != nil {
+		return "Editar endereço"
+	}
+	return "Novo endereço"
+}
+
+func addrInput(id, name string, extra templ.Attributes, value string) templ.Attributes {
+	a := templ.Attributes{"id": id, "name": name}
+	for k, val := range extra {
+		a[k] = val
+	}
+	if value != "" {
+		a["value"] = value
+	}
+	return a
+}
+
+templ addrField(id, label string, attrs templ.Attributes) {
+	@components.Field(components.FieldProps{}) {
+		@components.FieldLabel(components.LabelProps{For: id}) {
+			{ label }
+		}
+		@components.Input(components.InputProps{Attrs: attrs})
+	}
+}
+
+templ addressesPage(v addressesView) {
+	@components.Container(components.ContainerProps{}) {
+		<div class="flex flex-wrap items-center justify-between gap-3">
+			<div>
+				<h1 class="text-2xl font-bold">Meus Endereços</h1>
+				<p class="text-sm text-muted-foreground">
+					Endereços salvos aparecem no checkout para preencher a entrega.
+				</p>
+			</div>
+			<a href="/conta/pedidos" class={ components.ButtonVariants(components.ButtonGhost, components.ButtonMd) }>
+				Meus pedidos
+			</a>
+		</div>
+		if len(v.Saved) == 0 {
+			<div class="rounded-xl border border-border bg-background p-12 text-center shadow-sm">
+				<p class="text-sm text-muted-foreground">Você ainda não salvou nenhum endereço.</p>
+			</div>
+		} else {
+			<div class="grid gap-4 @md/page:grid-cols-2">
+				for _, a := range v.Saved {
+					@components.Card(components.Props{}) {
+						@components.CardHeader(components.Props{}) {
+							<div class="flex items-center gap-2">
+								@components.CardTitle(components.Props{}) {
+									{ addressTitle(a) }
+								}
+								if a.IsDefault {
+									@components.Badge(components.BadgeProps{Variant: components.BadgePrimary}) {
+										Padrão
+									}
+								}
+							</div>
+						}
+						@components.CardContent(components.Props{}) {
+							<p class="text-sm">{ a.RecipientName }</p>
+							<p class="text-sm text-muted-foreground">{ a.OneLine() }</p>
+							<p class="text-sm text-muted-foreground">WhatsApp: { a.Phone }</p>
+						}
+						@components.CardFooter(components.Props{}) {
+							<div class="flex flex-wrap items-center gap-2">
+								<a href={ templ.SafeURL("/conta/enderecos?editar=" + a.ID.String()) } class={ components.ButtonVariants(components.ButtonOutline, components.ButtonSm) }>
+									Editar
+								</a>
+								if !a.IsDefault {
+									<form method="post" action="/conta/enderecos/padrao">
+										<input type="hidden" name="id" value={ a.ID.String() }/>
+										@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Size: components.ButtonSm, Attrs: components.Attr("type", "submit")}) {
+											Tornar padrão
+										}
+									</form>
+								}
+								<form method="post" action="/conta/enderecos/remover">
+									<input type="hidden" name="id" value={ a.ID.String() }/>
+									@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Size: components.ButtonSm, Attrs: components.Attr("type", "submit", "onclick", "return confirm('Remover este endereço?')")}) {
+										Remover
+									}
+								</form>
+							</div>
+						}
+					}
+				}
+			</div>
+		}
+		if v.showForm() {
+			@components.Card(components.Props{}) {
+				@components.CardHeader(components.Props{}) {
+					@components.CardTitle(components.Props{}) {
+						{ v.formTitle() }
+					}
+				}
+				@components.CardContent(components.Props{}) {
+					<form method="post" action="/conta/enderecos/salvar" class="grid gap-4 @sm/page:grid-cols-2">
+						if v.Editing != nil {
+							<input type="hidden" name="id" value={ v.Editing.ID.String() }/>
+						} else {
+							<input type="hidden" name="id" value=""/>
+						}
+						@addrField("label", "Apelido (opcional)", addrInput("label", "label", templ.Attributes{"placeholder": "Casa, Trabalho…", "maxlength": "40"}, v.value(func(a store.SavedAddress) string { return a.Label })))
+						@addrField("recipient_name", "Nome de quem recebe", addrInput("recipient_name", "recipient_name", templ.Attributes{"autocomplete": "name", "required": true}, v.value(func(a store.SavedAddress) string { return a.RecipientName })))
+						@addrField("phone", "WhatsApp", addrInput("phone", "phone", templ.Attributes{"inputmode": "tel", "autocomplete": "tel", "placeholder": "79999816511", "required": true}, v.value(func(a store.SavedAddress) string { return a.Phone })))
+						@addrField("zip", "CEP", addrInput("zip", "zip_code", templ.Attributes{"placeholder": "49000-000", "autocomplete": "postal-code", "required": true}, v.value(store.SavedAddress.FormattedZip)))
+						<div class="@sm/page:col-span-2">
+							@addrField("street", "Rua", addrInput("street", "street", templ.Attributes{"required": true}, v.value(func(a store.SavedAddress) string { return a.Street })))
+						</div>
+						@addrField("number", "Número", addrInput("number", "number", templ.Attributes{"required": true}, v.value(func(a store.SavedAddress) string { return a.Number })))
+						@addrField("complement", "Complemento", addrInput("complement", "complement", nil, v.value(func(a store.SavedAddress) string { return a.Complement })))
+						@addrField("neighborhood", "Bairro", addrInput("neighborhood", "neighborhood", templ.Attributes{"required": true}, v.value(func(a store.SavedAddress) string { return a.Neighborhood })))
+						@addrField("city", "Cidade", addrInput("city", "city", templ.Attributes{"required": true}, v.value(func(a store.SavedAddress) string { return a.City })))
+						@components.Field(components.FieldProps{}) {
+							@components.FieldLabel(components.LabelProps{For: "state"}) {
+								Estado
+							}
+							@components.Select(components.InputProps{Attrs: templ.Attributes{"id": "state", "name": "state"}}) {
+								for _, uf := range store.BrazilianStates {
+									<option value={ uf } selected?={ v.state() == uf }>{ uf }</option>
+								}
+							}
+						}
+						<div class="flex items-center gap-2 self-end">
+							@components.Checkbox(components.Props{Attrs: defaultCheckbox(v.Editing != nil && v.Editing.IsDefault)})
+							@components.Label(components.LabelProps{For: "is_default"}) {
+								Usar como padrão
+							}
+						</div>
+						<div class="flex flex-wrap gap-2 @sm/page:col-span-2">
+							@components.Button(components.ButtonProps{Attrs: components.Attr("type", "submit")}) {
+								Salvar endereço
+							}
+							if v.Editing != nil {
+								<a href="/conta/enderecos" class={ components.ButtonVariants(components.ButtonGhost, components.ButtonMd) }>
+									Cancelar
+								</a>
+							}
+						</div>
+					</form>
+				}
+			}
+		} else {
+			<p class="text-sm text-muted-foreground">
+				Você atingiu o limite de { strconv.Itoa(store.MaxAddressesPerUser) } endereços. Remova um para adicionar outro.
+			</p>
+		}
+	}
+}
+
+func defaultCheckbox(checked bool) templ.Attributes {
+	a := templ.Attributes{"id": "is_default", "name": "is_default", "value": "1"}
+	if checked {
+		a["checked"] = true
+	}
+	return a
+}

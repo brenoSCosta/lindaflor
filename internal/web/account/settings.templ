@@ -1,0 +1,480 @@
+package account
+
+import (
+	"github.com/wellington-vell/lindaflor/internal/auth"
+	"github.com/wellington-vell/lindaflor/internal/web/checkout/ui"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+	"github.com/wellington-vell/lindaflor/web/static"
+)
+
+templ cardHead(title, description string) {
+	@components.CardHeader(components.Props{}) {
+		@components.CardTitle(components.Props{}) {
+			{ title }
+		}
+		if description != "" {
+			@components.CardDescription(components.Props{}) {
+				{ description }
+			}
+		}
+	}
+}
+
+templ tabTrigger(active, tab, label string) {
+	@components.TabsTrigger(templ.SafeURL(tabURL(tab)), active == tab, components.Props{Attrs: tabAttrs(tab)}) {
+		{ label }
+	}
+}
+
+templ settingsPage(v settingsView) {
+	@components.Container(components.ContainerProps{}) {
+		<h1 class="text-2xl font-bold">Configurações</h1>
+		<p class="text-sm text-muted-foreground">
+			Gerencie seu perfil, conta, sessões, segurança, contas vinculadas e exclusão de conta.
+		</p>
+		@components.Tabs(components.Props{Attrs: templ.Attributes{"x-data": "{ tab: '" + v.Tab + "' }"}}) {
+			@components.TabsList(components.Props{Class: "max-w-full flex-wrap"}) {
+				@tabTrigger(v.Tab, "profile", "Perfil")
+				@tabTrigger(v.Tab, "account", "Conta")
+				@tabTrigger(v.Tab, "sessions", "Sessões")
+				@tabTrigger(v.Tab, "security", "Segurança")
+				@tabTrigger(v.Tab, "linked-accounts", "Contas vinculadas")
+				@tabTrigger(v.Tab, "danger", "Zona de perigo")
+			}
+			@components.TabsContent(components.Props{}) {
+				<div { panelAttrs(v.Tab, "profile")... }>
+					@profileTab(v)
+				</div>
+				<div { panelAttrs(v.Tab, "account")... }>
+					@accountTab(v.User.Email, v.Factors)
+				</div>
+				<div { panelAttrs(v.Tab, "sessions")... }>
+					@sessionsTab(v.Sessions)
+				</div>
+				<div { panelAttrs(v.Tab, "security")... }>
+					@securityTab(v.User.TwoFactorEnabled, v.Pending, v.Factors)
+				</div>
+				<div { panelAttrs(v.Tab, "linked-accounts")... }>
+					@linkedAccountsTab(v)
+				</div>
+				<div { panelAttrs(v.Tab, "danger")... }>
+					@dangerTab()
+				</div>
+			}
+		}
+		<script src={ static.URL("js/avatar-cropper.js") } defer></script>
+	}
+}
+
+// stepUpFields: password and/or authenticator code for actions that need
+// a fresh proof (nothing for OAuth-only accounts without 2FA).
+templ stepUpFields(prefix string, f auth.StepUpFactors) {
+	if f.Password {
+		@components.Field(components.FieldProps{}) {
+			@components.FieldLabel(components.LabelProps{For: prefix + "-password"}) {
+				Senha atual
+			}
+			@components.Input(components.InputProps{Attrs: templ.Attributes{"id": prefix + "-password", "name": "password", "type": "password", "autocomplete": "current-password"}})
+		}
+	}
+	if f.TOTP {
+		@components.Field(components.FieldProps{}) {
+			@components.FieldLabel(components.LabelProps{For: prefix + "-code"}) {
+				{ codeLabel(f) }
+			}
+			@components.Input(components.InputProps{Attrs: templ.Attributes{"id": prefix + "-code", "name": "code", "type": "text", "inputmode": "numeric", "maxlength": "6", "autocomplete": "one-time-code"}})
+		}
+	}
+}
+
+templ submit(label string, variant components.ButtonVariant, size components.ButtonSize, class string, alpine bool) {
+	if alpine {
+		@components.Button(components.ButtonProps{Variant: variant, Size: size, Class: class, Attrs: ui.SubmitAttrs()}) {
+			{ label }
+		}
+	} else {
+		@components.Button(components.ButtonProps{Variant: variant, Size: size, Class: class, Attrs: components.Attr("type", "submit")}) {
+			{ label }
+		}
+	}
+}
+
+templ profileTab(v settingsView) {
+	@components.Card(components.Props{}) {
+		@cardHead("Perfil", "Seu nome e avatar.")
+		@components.CardContent(components.Props{}) {
+			<div class="flex items-center gap-4">
+				@components.Avatar(components.AvatarProps{Size: components.AvatarLg}) {
+					if v.AvatarURL != "" {
+						@components.AvatarImage(v.AvatarURL, "", components.Props{})
+					}
+					@components.AvatarFallback(components.Props{}) {
+						{ initials(v.User.Name) }
+					}
+				}
+				<div>
+					<p class="font-semibold">{ v.User.Name }</p>
+					<p class="text-sm text-muted-foreground">{ v.User.Email }</p>
+					<div class="mt-1 flex items-center gap-2">
+						@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Size: components.ButtonSm, Attrs: components.Attr("type", "button", "id", "avatar-cropper-open")}) {
+							Alterar foto
+						}
+						if v.HasAvatar {
+							<form { settingsForm("profile", "Removendo foto…", "")... }>
+								<input type="hidden" name="action" value="remove_avatar"/>
+								@submit("Remover", components.ButtonOutline, components.ButtonSm, "w-fit", false)
+							</form>
+						}
+					</div>
+				</div>
+			</div>
+			<form class="mt-6 flex flex-col gap-4" { settingsForm("profile", "Salvando…", profileData(v.User.Name))... }>
+				<input type="hidden" name="action" value="update_profile"/>
+				@ui.Field(ui.TextField{ID: "name", Name: "name", Type: "text", Label: "Nome de exibição", Autocomplete: "name", Value: v.User.Name, Model: "name"})
+				@submit("Salvar alterações", components.ButtonPrimary, components.ButtonMd, "w-fit", true)
+			</form>
+			@avatarCropperDialog()
+		}
+	}
+}
+
+templ avatarCropperDialog() {
+	@components.Dialog(components.OverlayProps{Attrs: templ.Attributes{"id": "avatar-cropper-dialog", "data-avatar-cropper": "", "aria-labelledby": "avatar-cropper-title"}}) {
+		@components.DialogContent(components.Props{}) {
+			@components.DialogHeader(components.Props{}) {
+				@components.DialogTitle(components.Props{Attrs: components.Attr("id", "avatar-cropper-title")}) {
+					Alterar avatar
+				}
+				@components.DialogDescription(components.Props{}) {
+					Selecione uma imagem e ajuste o recorte circular.
+				}
+			}
+			<p id="avatar-cropper-error" class="hidden text-sm text-destructive" role="alert"></p>
+			<button
+				type="button"
+				id="avatar-cropper-drop"
+				class="mx-auto flex size-64 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-border bg-foreground/5 px-4 text-center text-sm text-foreground hover:bg-foreground/10"
+			>
+				Clique ou arraste uma imagem
+			</button>
+			<div
+				id="avatar-cropper-stage"
+				class="relative mx-auto hidden size-64 touch-none cursor-grab overflow-hidden rounded-lg bg-foreground/5 select-none"
+			>
+				<img
+					id="avatar-cropper-image"
+					alt=""
+					draggable="false"
+					class="pointer-events-none absolute top-0 left-0 max-w-none select-none"
+				/>
+				<div class="pointer-events-none absolute inset-0 rounded-full shadow-[0_0_0_999px_#00000080] ring-2 ring-white/90"></div>
+			</div>
+			<p class="text-center text-xs text-muted-foreground">JPG, PNG ou WebP · 2 MB</p>
+			<div id="avatar-cropper-controls" class="hidden items-center gap-2">
+				@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Size: components.ButtonIcon, Attrs: components.Attr("type", "button", "id", "avatar-cropper-zoom-out", "aria-label", "Diminuir zoom")}) {
+					@components.Icon("minus", "")
+				}
+				<input
+					id="avatar-cropper-zoom"
+					type="range"
+					min="1"
+					max="5"
+					step="0.1"
+					value="1"
+					aria-label="Zoom"
+					class="h-2 min-w-0 flex-1 cursor-pointer accent-primary"
+				/>
+				@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Size: components.ButtonIcon, Attrs: components.Attr("type", "button", "id", "avatar-cropper-zoom-in", "aria-label", "Aumentar zoom")}) {
+					@components.Icon("plus", "")
+				}
+				@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Size: components.ButtonIcon, Attrs: components.Attr("type", "button", "id", "avatar-cropper-reset", "aria-label", "Redefinir recorte")}) {
+					@components.Icon("rotate-ccw", "")
+				}
+			</div>
+			<input
+				id="avatar-cropper-file"
+				type="file"
+				accept="image/jpeg,image/png,image/webp"
+				class="sr-only"
+			/>
+			@components.DialogFooter(components.Props{}) {
+				@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Size: components.ButtonSm, Attrs: components.Attr("type", "button", "id", "avatar-cropper-choose")}) {
+					Escolher outra imagem
+				}
+				@components.Button(components.ButtonProps{Size: components.ButtonSm, Attrs: templ.Attributes{"type": "button", "id": "avatar-cropper-apply", "disabled": true}}) {
+					Aplicar
+				}
+			}
+		}
+	}
+}
+
+templ accountTab(email string, f auth.StepUpFactors) {
+	@components.Card(components.Props{}) {
+		@components.CardHeader(components.Props{}) {
+			@components.CardTitle(components.Props{}) {
+				Conta
+			}
+			@components.CardDescription(components.Props{}) {
+				<span>
+					E-mail atual:
+					<strong>{ email }</strong>
+				</span>
+			}
+		}
+		@components.CardContent(components.Props{}) {
+			<form class="flex flex-col gap-4" { settingsForm("account", "Atualizando e-mail…", emailData())... }>
+				<input type="hidden" name="action" value="change_email"/>
+				<h3 class="text-sm font-medium">Alterar e-mail</h3>
+				@ui.Field(ui.TextField{ID: "new_email", Name: "new_email", Type: "email", Label: "Novo e-mail", Autocomplete: "email", Model: "newEmail"})
+				@stepUpFields("change_email", f)
+				@submit("Atualizar e-mail", components.ButtonPrimary, components.ButtonMd, "w-fit", true)
+			</form>
+			@components.Separator(false, components.Props{Class: "my-5"})
+			<form class="flex flex-col gap-4" { settingsForm("account", "Atualizando senha…", passwordData())... }>
+				<input type="hidden" name="action" value="change_password"/>
+				<h3 class="text-sm font-medium">Alterar senha</h3>
+				@ui.Field(ui.TextField{ID: "current_password", Name: "current_password", Type: "password", Label: "Senha atual", Autocomplete: "current-password", Model: "currentPassword"})
+				@ui.Field(ui.TextField{ID: "new_password", Name: "new_password", Type: "password", Label: "Nova senha", Autocomplete: "new-password", Model: "newPassword", Extra: templ.Attributes{"maxlength": "128"}})
+				@ui.Field(ui.TextField{ID: "confirm_password", Name: "confirm_password", Type: "password", Label: "Confirmar nova senha", Autocomplete: "new-password", Model: "confirmPassword"})
+				<div class="flex items-center gap-2">
+					@components.Checkbox(components.Props{Attrs: templ.Attributes{"id": "revoke_other_sessions", "name": "revoke_other_sessions", "value": "false"}})
+					<label for="revoke_other_sessions" class="text-sm text-muted-foreground">
+						Manter outros dispositivos conectados
+					</label>
+				</div>
+				@submit("Atualizar senha", components.ButtonPrimary, components.ButtonMd, "w-fit", true)
+			</form>
+		}
+	}
+}
+
+templ sessionsTab(sessions []auth.ListedSession) {
+	@components.Card(components.Props{}) {
+		@cardHead("Sessões ativas", "Dispositivos atualmente conectados à sua conta.")
+		@components.CardContent(components.Props{}) {
+			<div class="flex flex-col gap-3">
+				if len(sessions) > 1 {
+					<form method="post" action={ templ.SafeURL(tabURL("sessions")) }>
+						<input type="hidden" name="action" value="revoke_other_sessions"/>
+						@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Size: components.ButtonSm, Class: "w-fit", Attrs: templ.Attributes{"type": "submit", "hx-post": "/settings/revoke-other-sessions", "hx-swap": "none", "data-toast-loading": "Encerrando outras sessões…"}}) {
+							Sair de todos os outros dispositivos
+						}
+					</form>
+				}
+				for _, s := range sessions {
+					<div class="flex items-center justify-between rounded-lg border border-border p-4">
+						<div>
+							<p class="text-sm font-medium">
+								{ orDash(s.UserAgent, "Dispositivo desconhecido") }
+								if s.Current {
+									@components.Badge(components.BadgeProps{Variant: components.BadgeSecondary, Class: "ml-2"}) {
+										Este dispositivo
+									}
+								}
+							</p>
+							<p class="mt-1 text-xs text-muted-foreground">
+								{ orDash(s.IPAddress, "—") }
+							</p>
+						</div>
+						if !s.Current {
+							<form method="post" action={ templ.SafeURL(tabURL("sessions")) }>
+								<input type="hidden" name="action" value="revoke_session"/>
+								<input type="hidden" name="session_id" value={ s.ID.String() }/>
+								@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Size: components.ButtonSm, Attrs: templ.Attributes{"type": "submit", "hx-post": "/settings/revoke-session", "hx-swap": "none", "data-toast-loading": "Revogando…"}}) {
+									Revogar
+								}
+							</form>
+						}
+					</div>
+				}
+			</div>
+		}
+	}
+}
+
+// codeForm is the "confirm 2FA" form (6-digit code from the app).
+templ codeForm(id string) {
+	<form class="flex flex-col gap-4" { settingsForm("security", "", codeData())... }>
+		<input type="hidden" name="action" value="confirm_2fa"/>
+		@ui.Field(ui.TextField{ID: id, Name: "code", Type: "text", Label: "Código de 6 dígitos", Autocomplete: "one-time-code", Model: "code", Extra: templ.Attributes{"inputmode": "numeric", "maxlength": "6"}})
+		@submit("Confirmar 2FA", components.ButtonPrimary, components.ButtonMd, "w-fit", true)
+	</form>
+}
+
+// rotateForm re-posts the enrollment (new secret, one-time QR page).
+templ rotateForm(f auth.StepUpFactors) {
+	<form method="post" action="/settings/two-factor" class="flex flex-col gap-4">
+		@stepUpFields("rotate", f)
+		@submit("Gerar novo QR", components.ButtonOutline, components.ButtonSm, "w-fit", false)
+	</form>
+}
+
+templ securityTab(enabled, pending bool, f auth.StepUpFactors) {
+	@components.Card(components.Props{}) {
+		@cardHead("Segurança", "Adicione uma etapa extra ao login usando um aplicativo autenticador.")
+		@components.CardContent(components.Props{}) {
+			if !enabled && pending {
+				// Confirm-only: secret/QR live on /settings/two-factor (one-time
+				// flash). Re-posting the enrollment rotates the secret.
+				<div class="flex flex-col gap-4">
+					<p class="text-sm text-muted-foreground">
+						Cadastro da 2FA iniciado. Confirme com um código de 6 dígitos do aplicativo autenticador. Se não tiver o QR, gere um novo segredo.
+					</p>
+					@codeForm("code")
+					@rotateForm(f)
+				</div>
+			} else {
+				<div class="flex items-center justify-between rounded-lg border border-border p-4">
+					<div>
+						<p class="text-sm font-medium">Autenticação de dois fatores</p>
+						<p class="mt-1 text-xs text-muted-foreground">
+							if enabled {
+								A 2FA está ativada.
+							} else {
+								A 2FA está desativada.
+							}
+						</p>
+					</div>
+					if enabled {
+						<form class="flex items-end gap-2" { settingsForm("security", "", "", "novalidate", "")... }>
+							<input type="hidden" name="action" value="disable_2fa"/>
+							@stepUpFields("disable", f)
+							@submit("Desativar 2FA", components.ButtonOutline, components.ButtonSm, "", false)
+						</form>
+					} else {
+						<form method="post" action="/settings/two-factor" class="flex items-end gap-2">
+							@stepUpFields("enable", f)
+							@submit("Ativar 2FA", components.ButtonPrimary, components.ButtonSm, "", false)
+						</form>
+					}
+				</div>
+			}
+		}
+	}
+}
+
+templ linkedAccountsTab(v settingsView) {
+	@components.Card(components.Props{}) {
+		@cardHead("Contas vinculadas", "Métodos de login vinculados à sua conta.")
+		@components.CardContent(components.Props{}) {
+			<div class="flex flex-col gap-3">
+				for _, a := range v.Accounts {
+					<div class="flex items-center justify-between rounded-lg border border-border p-4">
+						<div>
+							<p class="text-sm font-medium">{ providerLabel(a.ProviderID) }</p>
+							<p class="mt-1 text-xs text-muted-foreground">{ accountSubtitle(a, v.User.Email) }</p>
+						</div>
+						if a.ProviderID != auth.CredentialProviderID {
+							<form { settingsForm("linked-accounts", "Desconectando…", "")... }>
+								<input type="hidden" name="action" value="unlink"/>
+								<input type="hidden" name="provider_id" value={ a.ProviderID }/>
+								<input type="hidden" name="account_id" value={ a.AccountID }/>
+								@stepUpFields("unlink-"+a.ID.String(), v.Factors)
+								@submit("Desconectar", components.ButtonOutline, components.ButtonSm, "", false)
+							</form>
+						}
+					</div>
+				}
+				if !v.HasGoogle {
+					<div class="flex items-center justify-between rounded-lg border border-border p-4">
+						<div>
+							<p class="text-sm font-medium">Google</p>
+							<p class="mt-1 text-xs text-muted-foreground">
+								Não conectado
+							</p>
+						</div>
+						// Plain POST: the answer leaves the site (Google consent).
+						<form method="post" action={ templ.SafeURL(tabURL("linked-accounts")) }>
+							<input type="hidden" name="action" value="link_google"/>
+							@stepUpFields("link_google", v.Factors)
+							@submit("Conectar", components.ButtonOutline, components.ButtonSm, "", false)
+						</form>
+					</div>
+				}
+			</div>
+		}
+	}
+}
+
+templ dangerTab() {
+	@components.Card(components.Props{}) {
+		@cardHead("Zona de perigo", "Exclua permanentemente sua conta e todos os dados associados. Isso não pode ser desfeito. Por segurança, confirme seu e-mail e sua senha atual (ou o código do autenticador, se você usa 2FA).")
+		@components.CardContent(components.Props{}) {
+			<form class="flex flex-col gap-4" { settingsForm("danger", "Excluindo conta…", deleteData())... }>
+				<input type="hidden" name="action" value="delete_user"/>
+				@ui.Field(ui.TextField{ID: "confirm_email", Name: "confirm_email", Type: "email", Label: "Seu e-mail", Autocomplete: "off", Model: "confirmEmail"})
+				@components.Field(components.FieldProps{}) {
+					@components.FieldLabel(components.LabelProps{For: "delete_password"}) {
+						Senha atual
+					}
+					@components.Input(components.InputProps{Attrs: templ.Attributes{"id": "delete_password", "name": "password", "type": "password", "autocomplete": "current-password"}})
+				}
+				@components.Field(components.FieldProps{}) {
+					@components.FieldLabel(components.LabelProps{For: "delete_code"}) {
+						Código do autenticador (se você usa 2FA)
+					}
+					@components.Input(components.InputProps{Attrs: templ.Attributes{"id": "delete_code", "name": "code", "type": "text", "inputmode": "numeric", "autocomplete": "one-time-code"}})
+				}
+				@submit("Excluir conta", components.ButtonDestructive, components.ButtonMd, "w-fit", true)
+			</form>
+		}
+	}
+}
+
+templ twoFactorSetupPage(v twoFactorView) {
+	@components.Container(components.ContainerProps{}) {
+		<h1 class="text-2xl font-bold">Ativar autenticação de dois fatores</h1>
+		@components.Card(components.Props{}) {
+			@cardHead("Aplicativo autenticador", "Escaneie o QR, guarde os códigos de recuperação e confirme com um código de 6 dígitos. O segredo é exibido só nesta página, uma vez.")
+			@components.CardContent(components.Props{}) {
+				if v.Enabled {
+					<div class="flex flex-col gap-3">
+						<p class="text-sm text-muted-foreground">A 2FA já está ativada.</p>
+						<a href={ templ.SafeURL(tabURL("security")) } class="text-sm underline">Voltar às configurações</a>
+					</div>
+				} else if v.Flash != nil {
+					<div class="flex flex-col gap-4">
+						<p class="text-sm text-muted-foreground">
+							Escaneie o código no app autenticador ou digite o segredo manualmente, depois confirme com um código de 6 dígitos.
+						</p>
+						if v.QR != "" {
+							<div class="flex flex-col items-center gap-2">
+								<div class="rounded-lg border border-border bg-white p-3">
+									<img src={ v.QR } alt="QR code para aplicativo autenticador" width="192" height="192" class="size-48"/>
+								</div>
+							</div>
+						}
+						<div class="flex flex-col gap-2">
+							<p class="text-sm font-medium">Códigos de recuperação</p>
+							<p class="text-xs text-muted-foreground">
+								Guarde estes códigos em um lugar seguro. Cada um funciona uma vez se você perder o autenticador.
+							</p>
+							<ul class="grid grid-cols-2 gap-1 font-mono text-sm">
+								for _, c := range v.Flash.BackupCodes {
+									<li>{ c }</li>
+								}
+							</ul>
+						</div>
+						@codeForm("setup-code")
+					</div>
+				} else if v.Pending {
+					<div class="flex flex-col gap-4">
+						<p class="text-sm text-muted-foreground">
+							O segredo já foi exibido. Confirme com um código do aplicativo, ou gere um novo QR se você o perdeu.
+						</p>
+						@codeForm("setup-code")
+						@rotateForm(v.Factors)
+					</div>
+				} else {
+					<div class="flex flex-col gap-3">
+						<p class="text-sm text-muted-foreground">
+							Nenhum cadastro de 2FA em andamento.
+						</p>
+						<a href={ templ.SafeURL(tabURL("security")) } class="text-sm underline">Voltar às configurações</a>
+					</div>
+				}
+			}
+		}
+	}
+}

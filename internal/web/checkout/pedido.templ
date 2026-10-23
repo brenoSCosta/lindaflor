@@ -1,0 +1,453 @@
+package checkout
+
+import (
+	"strings"
+
+	"github.com/google/uuid"
+
+	"github.com/wellington-vell/lindaflor/internal/payments"
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/checkout/ui"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+	"github.com/wellington-vell/lindaflor/internal/web/format"
+)
+
+templ trackPage() {
+	@components.Container(components.ContainerProps{Variant: components.ContainerNarrow, Class: "py-24 text-center"}) {
+		<h1 class="text-4xl font-bold tracking-tight">Acompanhe seu pedido</h1>
+		<p class="mt-4 text-muted-foreground">
+			Enviamos o link do pedido para o seu e-mail. Verifique sua caixa de entrada.
+		</p>
+		<a href="/produtos" class={ components.ButtonVariants(components.ButtonPrimary, components.ButtonLg) }>
+			Ver catálogo
+		</a>
+	}
+}
+
+// orderNotFound is the answer to unknown orders and denied viewers (same
+// page either way). withCatalog adds the "Voltar ao catálogo" link.
+templ orderNotFound(withCatalog bool) {
+	@components.Container(components.ContainerProps{Variant: components.ContainerNarrow, Class: "py-24 text-center"}) {
+		<h1 class="text-4xl font-bold tracking-tight">Pedido não encontrado</h1>
+		if withCatalog {
+			<a href="/produtos" class={ components.ButtonVariants(components.ButtonPrimary, components.ButtonLg) }>
+				Voltar ao catálogo
+			</a>
+		}
+	}
+}
+
+func statusProcURL(id uuid.UUID, token string) string {
+	u := "/pedido/status-proc?order_id=" + id.String()
+	if token != "" {
+		u += "&access_token=" + urlQueryEscape(token)
+	}
+	return u
+}
+
+// statusPoller re-checks a pending order's status every 10s (htmx). The
+// server answers with a fresh poller while still pending, an inert one
+// for unknown orders, and HX-Refresh once the status changed.
+templ statusPoller(id uuid.UUID, token string, active bool) {
+	if active {
+		<div
+			id="order-status-poll"
+			class="hidden"
+			hx-get={ statusProcURL(id, token) }
+			hx-trigger={ statusPollInterval }
+			hx-swap="outerHTML"
+			hx-status:4xx="swap:none"
+			aria-hidden="true"
+		></div>
+	} else {
+		<div id="order-status-poll" class="hidden" aria-hidden="true"></div>
+	}
+}
+
+templ cardHeading(title string) {
+	@components.CardHeader(components.Props{}) {
+		@components.CardTitle(components.Props{}) {
+			{ title }
+		}
+	}
+}
+
+templ totalRow(label, value string) {
+	<div class="flex justify-between">
+		<span class="text-muted-foreground">{ label }</span>
+		<span>{ value }</span>
+	</div>
+}
+
+templ orderPage(v orderView) {
+	{{ o := v.Order }}
+	@components.Container(components.ContainerProps{Variant: components.ContainerNarrow}) {
+		<p class="text-xs uppercase tracking-widest text-muted-foreground">Pedido #{ o.ID.String()[:8] }</p>
+		<div class="flex flex-wrap items-center gap-3">
+			<h1 class="text-5xl font-bold tracking-tight">{ o.StatusLabel() }</h1>
+			if v.Pending {
+				<form method="get" action={ templ.SafeURL("/pedido/" + o.ID.String()) }>
+					if v.Token != "" {
+						<input type="hidden" name="t" value={ v.Token }/>
+					}
+					<button
+						type="submit"
+						class="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-muted-foreground hover:bg-foreground/5"
+						hx-get={ statusProcURL(o.ID, v.Token) }
+						hx-target="#order-status-poll"
+						hx-swap="outerHTML"
+						hx-status:4xx="swap:none"
+					>
+						Atualizar status
+					</button>
+				</form>
+			}
+		</div>
+		if v.Pending {
+			@statusPoller(o.ID, v.Token, true)
+		}
+		<p class="text-muted-foreground">
+			Enviamos as instruções para { o.GuestEmail }
+		</p>
+		if v.Pending {
+			@pixCard(v)
+		}
+		@components.Card(components.Props{}) {
+			@cardHeading("Acompanhamento")
+			@components.CardContent(components.Props{}) {
+				if o.Status == "cancelled" || o.Status == "refunded" {
+					<p class="text-sm text-muted-foreground">
+						Pedido { strings.ToLower(o.StatusLabel()) }.
+					</p>
+				}
+				@ui.OrderTimeline(o.Progress)
+			}
+		}
+		@returnSection(o.ID, v.Token, v.Returns)
+		if v.Pending {
+			<form method="post" action={ templ.SafeURL("/pedido/" + o.ID.String() + "/cancelar") } class="flex justify-end">
+				<input type="hidden" name="t" value={ v.Token }/>
+				<button
+					type="submit"
+					class={ components.ButtonVariants(components.ButtonOutline, components.ButtonMd) }
+					onclick="return confirm('Cancelar este pedido? A reserva dos itens será liberada.')"
+				>
+					Cancelar pedido
+				</button>
+			</form>
+		}
+		@components.Card(components.Props{}) {
+			@cardHeading("Itens")
+			@components.CardContent(components.Props{}) {
+				@components.Table(components.Props{}) {
+					@components.TableHeader(components.Props{}) {
+						@components.TableRow(components.Props{}) {
+							@components.TableHead(components.Props{}) {
+								Produto
+							}
+							@components.TableHead(components.Props{}) {
+								Variação
+							}
+							@components.TableHead(components.Props{}) {
+								Qtd.
+							}
+							@components.TableHead(components.Props{}) {
+								Preço
+							}
+						}
+					}
+					@components.TableBody(components.Props{}) {
+						for _, item := range o.Items {
+							@components.TableRow(components.Props{}) {
+								@components.TableCell(components.Props{}) {
+									{ item.ProductName }
+								}
+								@components.TableCell(components.Props{}) {
+									{ item.VariantLabel }
+								}
+								@components.TableCell(components.Props{}) {
+									{ itoa(int(item.Quantity)) }
+								}
+								@components.TableCell(components.Props{}) {
+									{ price(item.LineTotalCents()) }
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		@reviewLinks(v.Reviewable)
+		@components.Card(components.Props{}) {
+			@cardHeading("Totais")
+			@components.CardContent(components.Props{}) {
+				<div class="flex flex-col gap-2 text-sm">
+					@totalRow("Subtotal", price(o.SubtotalCents))
+					if o.ShippingCents == 0 {
+						@totalRow("Frete", "Grátis")
+					} else {
+						@totalRow("Frete", price(o.ShippingCents))
+					}
+					if o.DiscountCents > 0 {
+						if code := o.Meta.Coupon(); code != "" {
+							@totalRow("Desconto ("+code+")", "-"+price(o.DiscountCents))
+						} else {
+							@totalRow("Desconto", "-"+price(o.DiscountCents))
+						}
+					}
+					if o.PixDiscountCents > 0 {
+						@totalRow("Desconto PIX", "-"+price(o.PixDiscountCents))
+					}
+					@components.Separator(false, components.Props{Class: "my-1"})
+					<div class="flex justify-between text-base font-medium">
+						<span>Total</span>
+						<span class="text-primary">{ price(o.TotalCents) }</span>
+					</div>
+				</div>
+			}
+		}
+		if addr := o.Address.Display(); addr != "" {
+			@components.Card(components.Props{}) {
+				@cardHeading("Endereço de entrega")
+				@components.CardContent(components.Props{}) {
+					<p class="text-sm text-muted-foreground">{ addr }</p>
+					<p class="text-sm text-muted-foreground">Pedido criado em { o.CreatedAt }</p>
+				}
+			}
+		}
+	}
+}
+
+templ pixCard(v orderView) {
+	@components.Card(components.Props{}) {
+		@cardHeading("Pague com PIX")
+		@components.CardContent(components.Props{}) {
+			<ol class="list-decimal space-y-2 pl-5 text-sm text-muted-foreground">
+				<li>Copie o código PIX abaixo</li>
+				<li>
+					Pague exatamente
+					<strong class="font-medium text-foreground">{ price(v.Order.TotalCents) }</strong>
+				</li>
+				if v.MercadoPago {
+					<li>A confirmação é automática: depois de pagar, toque em Atualizar status</li>
+				} else {
+					<li>Avise a loja no WhatsApp para confirmarmos o pagamento</li>
+				}
+			</ol>
+			@components.Separator(false, components.Props{Class: "my-3"})
+			if v.Expires != "" {
+				<p class="text-sm text-muted-foreground">
+					O código PIX e a reserva de estoque valem até { v.Expires }.
+				</p>
+			} else {
+				<p class="text-sm text-muted-foreground">
+					A reserva de estoque é válida por 48 horas após a criação do pedido.
+				</p>
+			}
+			if v.QRImage != "" {
+				<img src={ v.QRImage } alt="QR Code PIX" class="mx-auto my-3 h-56 w-56 rounded-lg border border-border"/>
+			}
+			if v.PixCode != "" {
+				<div class="space-y-2" x-data="{ copied: false }">
+					<p class="text-sm text-muted-foreground">PIX copia e cola:</p>
+					<code class="block overflow-x-auto rounded-lg border border-border bg-background p-3 text-xs">
+						{ v.PixCode }
+					</code>
+					<button
+						type="button"
+						class="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-foreground/5"
+						data-code={ v.PixCode }
+						x-on:click="navigator.clipboard.writeText($el.dataset.code); copied = true"
+						x-text="copied ? 'Copiado!' : 'Copiar código PIX'"
+					>
+						Copiar código PIX
+					</button>
+					if v.TicketURL != "" {
+						<a href={ templ.URL(v.TicketURL) } target="_blank" rel="noreferrer" class="block text-sm underline">
+							Abrir pagamento no Mercado Pago
+						</a>
+					}
+				</div>
+			} else if v.MercadoPago {
+				<p class="text-sm text-destructive">
+					{ payments.UnavailableMessage } Atualize a página para gerar o código PIX.
+				</p>
+			} else {
+				<p class="text-sm text-destructive">
+					Instruções de pagamento indisponíveis. Fale conosco no WhatsApp.
+				</p>
+			}
+		}
+		@components.CardFooter(components.Props{}) {
+			if v.WhatsappURL != "" {
+				<a href={ templ.URL(v.WhatsappURL) } target="_blank" rel="noreferrer" class={ components.ButtonVariants(components.ButtonPrimary, components.ButtonLg) }>
+					Avise no WhatsApp
+				</a>
+			}
+		}
+	}
+}
+
+// reviewLinks: received products the signed-in buyer has not reviewed.
+templ reviewLinks(products []store.ReviewableProduct) {
+	if len(products) > 0 {
+		@components.Card(components.Props{}) {
+			@components.CardHeader(components.Props{}) {
+				@components.CardTitle(components.Props{}) {
+					Avalie suas compras
+				}
+				@components.CardDescription(components.Props{}) {
+					Conte para outras clientes o que achou.
+				}
+			}
+			@components.CardContent(components.Props{}) {
+				<ul class="divide-y divide-border">
+					for _, p := range products {
+						<li class="flex items-center justify-between gap-4 py-2">
+							<span class="text-sm">{ p.Name }</span>
+							<a href={ templ.SafeURL("/produtos/" + p.Slug + "#avaliar") } class={ components.ButtonVariants(components.ButtonOutline, components.ButtonSm) }>
+								Avaliar
+							</a>
+						</li>
+					}
+				</ul>
+			}
+		}
+	}
+}
+
+// returnSection is the "Trocas e devoluções" card of the order page.
+templ returnSection(orderID uuid.UUID, token string, info store.OrderReturns) {
+	if info.Visible {
+		@components.Card(components.Props{}) {
+			@cardHeading("Trocas e devoluções")
+			@components.CardContent(components.Props{}) {
+				<div class="flex flex-col gap-3 text-sm">
+					for _, req := range info.Requests {
+						@requestLine(req)
+					}
+					if info.CanOpen() {
+						if until, ok := info.ReturnDeadline(); ok {
+							<p class="text-muted-foreground">
+								Troca fácil: você pode pedir troca ou devolução até { format.DateTimeBR(until) }.
+							</p>
+						}
+						<a href={ templ.SafeURL(returnFormURL(orderID, token)) } class={ components.ButtonVariants(components.ButtonOutline, components.ButtonMd) }>
+							Solicitar troca ou devolução
+						</a>
+					} else if info.Blocked != nil {
+						<p class="text-muted-foreground">{ *info.Blocked }</p>
+					}
+				</div>
+			}
+		}
+	}
+}
+
+templ requestLine(r store.ReturnSummary) {
+	<div class="rounded-lg border border-border p-3">
+		<p class="font-medium">
+			{ r.KindLabel() } · { r.StatusLabel() }
+		</p>
+		<p class="text-xs text-muted-foreground">Solicitada em { format.DateTimeBR(r.CreatedAt) }</p>
+		if r.Instructions != nil && r.Status == "approved" {
+			<p class="mt-2 whitespace-pre-line">{ *r.Instructions }</p>
+		}
+		if r.RejectionReason != nil {
+			<p class="mt-2 text-muted-foreground">Motivo: { *r.RejectionReason }</p>
+		}
+		if r.RefundCents != nil {
+			<p class="mt-2">Reembolso: { price(*r.RefundCents) }</p>
+		}
+	</div>
+}
+
+templ returnPage(v returnView) {
+	@components.Container(components.ContainerProps{Variant: components.ContainerNarrow}) {
+		<p class="text-xs uppercase tracking-widest text-muted-foreground">Pedido #{ store.OrderCode(v.OrderID) }</p>
+		<h1 class="text-4xl font-bold tracking-tight">Troca ou devolução</h1>
+		<p class="text-sm text-muted-foreground">
+			A peça deve estar sem uso, com etiquetas e na embalagem original.
+			<a href="/trocas-devolucoes" class="text-primary hover:underline">Ver política de trocas</a>
+		</p>
+		if v.canOpen() {
+			<form method="post" action={ templ.SafeURL("/pedido/" + v.OrderID.String() + "/troca") } class="flex flex-col gap-4">
+				<input type="hidden" name="t" value={ v.Token }/>
+				@components.Card(components.Props{}) {
+					@cardHeading("Itens")
+					@components.CardContent(components.Props{}) {
+						<div class="flex flex-col gap-3">
+							for _, item := range v.Items {
+								{{ field := "qty_" + item.OrderItemID.String() }}
+								<div class="flex items-center justify-between gap-3 text-sm">
+									@components.Label(components.LabelProps{For: field}) {
+										{ item.ProductName } ({ item.VariantLabel })
+									}
+									<div class="w-24">
+										@components.Select(components.InputProps{Attrs: templ.Attributes{"id": field, "name": field}}) {
+											for n := range int(item.Returnable) + 1 {
+												<option value={ itoa(n) }>{ itoa(n) }</option>
+											}
+										}
+									</div>
+								</div>
+							}
+						</div>
+					}
+				}
+				@components.Card(components.Props{}) {
+					@cardHeading("Solicitação")
+					@components.CardContent(components.Props{}) {
+						<div class="flex flex-col gap-3">
+							<div class="flex flex-col gap-1.5">
+								@components.Label(components.LabelProps{For: "kind"}) {
+									Tipo
+								}
+								@components.Select(components.InputProps{Attrs: templ.Attributes{"id": "kind", "name": "kind", "required": true}}) {
+									for _, k := range v.Info.OpenKinds {
+										<option value={ string(k.Kind) }>
+											{ k.Kind.Label() } (até { format.DateTimeBR(k.Deadline) })
+										</option>
+									}
+								}
+							</div>
+							<div class="flex flex-col gap-1.5">
+								@components.Label(components.LabelProps{For: "desired_size"}) {
+									Tamanho desejado (para troca)
+								}
+								@components.Input(components.InputProps{Attrs: templ.Attributes{
+									"id": "desired_size", "name": "desired_size", "maxlength": itoa(store.ReturnSizeMaxChars),
+									"placeholder": "Ex.: M", "autocomplete": "off",
+								}})
+							</div>
+							<div class="flex flex-col gap-1.5">
+								@components.Label(components.LabelProps{For: "reason"}) {
+									Motivo
+								}
+								@components.Textarea(components.InputProps{Attrs: templ.Attributes{
+									"id": "reason", "name": "reason", "required": true, "maxlength": itoa(store.ReturnReasonMaxChars),
+									"placeholder": "Conte o que aconteceu (tamanho, defeito, arrependimento...)",
+								}}, "")
+							</div>
+						</div>
+					}
+				}
+				<div class="flex flex-wrap justify-end gap-3">
+					<a href={ templ.SafeURL(orderURL(v.OrderID, v.Token)) } class={ components.ButtonVariants(components.ButtonGhost, components.ButtonMd) }>Voltar ao pedido</a>
+					<button type="submit" class={ components.ButtonVariants(components.ButtonPrimary, components.ButtonMd) }>
+						Enviar solicitação
+					</button>
+				</div>
+			</form>
+		} else {
+			<p class="text-sm text-muted-foreground">
+				if v.blocked() == "" {
+					Este pedido não pode receber uma solicitação de troca ou devolução.
+				} else {
+					{ v.blocked() }
+				}
+			</p>
+			<a href={ templ.SafeURL(orderURL(v.OrderID, v.Token)) } class={ components.ButtonVariants(components.ButtonOutline, components.ButtonMd) }>Voltar ao pedido</a>
+		}
+	}
+}
