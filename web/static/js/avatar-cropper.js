@@ -42,6 +42,10 @@
     ) {
       return;
     }
+    // Idempotent: the script may run again when htmx swaps the settings
+    // page in (scripts inside swapped content run); bind each dialog once.
+    if (dialog.dataset.cropperBound) return;
+    dialog.dataset.cropperBound = "1";
 
     var objectUrl = null;
     var loaded = false;

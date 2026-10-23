@@ -1,0 +1,192 @@
+package checkout
+
+import (
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/checkout/ui"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+)
+
+templ emptyCartPage() {
+	@components.Container(components.ContainerProps{Variant: components.ContainerNarrow}) {
+		<h1 class="text-4xl font-bold tracking-tight">Seu carrinho está vazio</h1>
+		<p class="text-muted-foreground">
+			Adicione peças ao carrinho antes de finalizar a compra.
+		</p>
+		<a href="/produtos" class={ components.ButtonVariants(components.ButtonPrimary, components.ButtonLg) }>
+			Ver catálogo
+		</a>
+	}
+}
+
+templ cardTitle(title string) {
+	@components.CardHeader(components.Props{}) {
+		@components.CardTitle(components.Props{}) {
+			{ title }
+		}
+	}
+}
+
+templ checkoutPage(v checkoutView) {
+	{{ f := v.fields() }}
+	@components.Container(components.ContainerProps{Variant: components.ContainerWide}) {
+		<h1 class="text-4xl font-bold tracking-tight @md/page:text-5xl">Checkout</h1>
+		if v.Error != "" {
+			@components.Alert(components.AlertProps{Variant: components.AlertDestructive}) {
+				@components.AlertTitle(components.Props{}) {
+					{ v.Error }
+				}
+			}
+		}
+		if !v.Sum.PixAvailable {
+			@components.Alert(components.AlertProps{Variant: components.AlertDestructive}) {
+				@components.AlertTitle(components.Props{}) {
+					{ pixUnavailableMessage() }
+				}
+			}
+		}
+		<form method="post" action="/checkout" class="grid gap-4 @lg/page:grid-cols-[1.2fr_0.8fr]" novalidate x-data={ v.xData() }>
+			// Honeypot: off-screen (not display:none, which bots skip) and out
+			// of the tab order; only bots fill it.
+			<div class="absolute -left-[9999px] h-px w-px overflow-hidden" aria-hidden="true">
+				<label for="checkout-website">Não preencha este campo</label>
+				<input id="checkout-website" type="text" name={ store.HoneypotField } value="" tabindex="-1" autocomplete="off"/>
+			</div>
+			<div class="flex flex-col gap-4">
+				@components.Card(components.Props{}) {
+					@cardTitle("Contato")
+					@components.CardContent(components.Props{}) {
+						@ui.Field(f["email"])
+					}
+				}
+				@components.Card(components.Props{}) {
+					@cardTitle("Endereço de entrega")
+					@components.CardContent(components.Props{}) {
+						if len(v.Sum.SavedAddresses) > 0 {
+							<div class="flex flex-wrap items-center gap-2">
+								<span class="text-sm text-muted-foreground">Endereços salvos:</span>
+								for _, saved := range v.Sum.SavedAddresses {
+									<a href={ savedAddressHref(saved) } class={ components.ButtonVariants(v.savedVariant(saved.ID), components.ButtonSm) }>
+										{ saved.Title() }
+									</a>
+								}
+							</div>
+						}
+						<div class="grid gap-4 @sm/page:grid-cols-2">
+							<div class="@sm/page:col-span-2">
+								@ui.Field(f["name"])
+							</div>
+							<div class="@sm/page:col-span-2">
+								@ui.Field(f["phone"])
+							</div>
+							<div class="@sm/page:col-span-2">
+								@ui.Field(f["street"])
+							</div>
+							@ui.Field(f["number"])
+							@ui.Field(f["complement"])
+							@ui.Field(f["neighborhood"])
+							@ui.Field(f["city"])
+							@components.Field(components.FieldProps{}) {
+								@components.FieldLabel(components.LabelProps{For: "state"}) {
+									Estado
+								}
+								@components.Select(components.InputProps{Attrs: templ.Attributes{"id": "state", "name": "state"}}) {
+									for _, uf := range store.BrazilianStates {
+										<option value={ uf } selected?={ v.State == uf }>{ uf }</option>
+									}
+								}
+							}
+							@ui.Field(f["zip"])
+							if v.Sum.CanSaveAddress {
+								<div class="flex items-center gap-2 @sm/page:col-span-2">
+									@components.Checkbox(components.Props{Attrs: saveAddressAttrs(v.SaveChecked)})
+									@components.Label(components.LabelProps{For: "save_address"}) {
+										Salvar este endereço
+									}
+								</div>
+							}
+						</div>
+					}
+				}
+				@components.Card(components.Props{}) {
+					@cardTitle("Observações")
+					@components.CardContent(components.Props{}) {
+						@components.Textarea(components.InputProps{Attrs: templ.Attributes{"id": "notes", "name": "notes", "rows": "3", "maxlength": "500"}}, v.Notes)
+					}
+				}
+			</div>
+			<aside class="h-fit">
+				@components.Card(components.Props{}) {
+					@cardTitle("Resumo")
+					@components.CardContent(components.Props{}) {
+						<div class="flex flex-col gap-3 text-sm">
+							for _, item := range v.Sum.Items {
+								<div class="flex justify-between gap-4 text-muted-foreground">
+									<span>{ item.ProductName } × { itoa(int(item.Quantity)) }</span>
+									<span>{ price(item.LineTotalCents()) }</span>
+								</div>
+							}
+						</div>
+						@components.Separator(false, components.Props{Class: "my-1"})
+						<div class="flex flex-col gap-2 text-sm">
+							<div class="flex justify-between">
+								<span class="text-muted-foreground">Subtotal</span>
+								<span>{ price(v.Sum.SubtotalCents) }</span>
+							</div>
+							<div class="flex justify-between">
+								<span class="text-muted-foreground">Frete</span>
+								if v.Sum.FreeShipping {
+									<span>Grátis</span>
+								} else {
+									<span>{ price(v.Sum.ShippingCents) }</span>
+								}
+							</div>
+							if v.Sum.CouponDiscount > 0 {
+								<div class="flex justify-between">
+									<span class="text-muted-foreground">Desconto</span>
+									<span>-{ price(v.Sum.CouponDiscount) }</span>
+								</div>
+							}
+							if v.Sum.PixDiscountCents > 0 {
+								<div class="flex justify-between">
+									<span class="text-muted-foreground">Desconto PIX ({ itoa(v.Sum.Settings.PixDiscountPercent) }%)</span>
+									<span>-{ price(v.Sum.PixDiscountCents) }</span>
+								</div>
+							}
+							<div class="flex justify-between pt-2 text-base font-medium">
+								<span>Total</span>
+								<span class="text-primary">{ price(v.Sum.TotalCents) }</span>
+							</div>
+						</div>
+						@components.Field(components.FieldProps{}) {
+							@components.FieldLabel(components.LabelProps{For: "coupon"}) {
+								Cupom
+							}
+							<div class="flex items-center gap-2">
+								@components.Input(components.InputProps{Class: "min-w-0 flex-1", Attrs: templ.Attributes{"id": "coupon", "name": "coupon_code", "placeholder": "CUPOM10", "value": v.Sum.CouponCode}})
+								@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Attrs: templ.Attributes{"type": "submit", "name": "intent", "value": "apply", "formnovalidate": "formnovalidate"}}) {
+									Aplicar
+								}
+							</div>
+							if v.Sum.CouponError != "" {
+								@components.FieldError(v.Sum.CouponError, components.Props{})
+							}
+						}
+						if v.CouponApplied != "" {
+							<p class="text-sm text-muted-foreground">
+								Cupom { v.CouponApplied } aplicado.
+							</p>
+						}
+					}
+					@components.CardFooter(components.Props{}) {
+						@components.Button(components.ButtonProps{Size: components.ButtonLg, Class: "w-full", Blocked: v.blocked(), Attrs: ui.SubmitAttrs("name", "intent", "value", "pay")}) {
+							Pagar com PIX
+						}
+					}
+				}
+				<p class="mt-4 text-xs text-muted-foreground">
+					Pagamento via PIX. Após confirmar, você verá o QR Code na próxima tela.
+				</p>
+			</aside>
+		</form>
+	}
+}

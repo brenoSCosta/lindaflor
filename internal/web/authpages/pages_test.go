@@ -555,20 +555,5 @@ func TestProdLogoutExpiresHardenedCookies(t *testing.T) {
 	}
 }
 
-// --- /settings tests that live with wave2-E (src/app/settings.rs) ---
-
-func TestSettingsPortedByWave2E(t *testing.T) {
-	for _, name := range []string{
-		"settings_change_password_parity_with_api_default (tests/auth_sessions.rs)",
-		"settings_revoke_other_sessions_action (tests/auth_sessions.rs)",
-		"html_change_email_requires_step_up_before_revoking_sessions (tests/auth_hardening.rs)",
-		"impersonation HTML settings refusal (tests/auth_hardening.rs)",
-		"settings_setup_page_leaks_no_secret (tests/auth_two_factor.rs)",
-		"html_enable_shows_secret_once_on_setup_page (tests/auth_two_factor.rs)",
-		"html_disable_2fa_with_password_turns_it_off (tests/auth_two_factor.rs)",
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Skip("TODO(wave2-E): /settings is ported with the account pages; auth exposes the building blocks (VerifyStepUp, ChangePassword, RequestChangeEmail, EnableTwoFactor, DisableTwoFactor, RevokeOtherSessions)")
-		})
-	}
-}
+// The /settings HTML tests (tests/auth_sessions.rs, auth_hardening.rs,
+// auth_two_factor.rs) live with the settings page in internal/web/account.
