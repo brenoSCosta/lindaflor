@@ -3,7 +3,8 @@
 //
 // - Loads https://challenges.cloudflare.com/turnstile/v0/api.js once
 //   (render=explicit, async) the first time a widget is on the page.
-// - Renders every widget explicitly with turnstile.render, on load and
+// - Renders every widget explicitly with turnstile.render (size from
+//   data-size, else fitted to the container), on load and
 //   after htmx swaps (`htmx:after:swap`, `htmx:after:settle`), and drops
 //   widgets whose element left the DOM.
 // - Resets the widgets of a form after its htmx request finishes: a token
@@ -34,7 +35,10 @@
         sitekey: el.getAttribute("data-sitekey"),
         theme: el.getAttribute("data-theme") || "auto",
         language: el.getAttribute("data-language") || "auto",
-        size: el.getAttribute("data-size") || "normal",
+        // "flexible" fills the form (min 300px); narrower forms (the
+        // max-w-xs login card) get the 150px "compact" widget instead
+        // of overflowing.
+        size: el.getAttribute("data-size") || (el.clientWidth >= 300 ? "flexible" : "compact"),
       });
       if (id !== undefined && id !== null) {
         el.setAttribute("data-turnstile-id", id);
