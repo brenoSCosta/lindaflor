@@ -26,7 +26,7 @@ set -euo pipefail
 
 log() { printf '[backup] %s\n' "$*" >&2; }
 
-# Read KEY, falling back to the file named by KEY_FILE (mirrors src/config.rs).
+# Read KEY, falling back to the file named by KEY_FILE (mirrors internal/config.ReadEnvOrFile).
 load_secret() {
   local key="$1" file_key="${1}_FILE"
   if [ -z "${!key:-}" ] && [ -n "${!file_key:-}" ]; then
