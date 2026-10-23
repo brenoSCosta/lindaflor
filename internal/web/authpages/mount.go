@@ -28,29 +28,29 @@ type pages struct {
 // Mount registers the auth pages.
 func Mount(r chi.Router, d *app.Deps) {
 	p := &pages{d: d, svc: auth.NewService(d.Cfg, d.Pool, d.Valkey, d.Storage)}
-	mut := ratelimit.MutationsOnly
+	// HTML form twins of the auth API share the API scopes
+	// (ratelimit.FormRateLimits); /login and /signup check their budget in
+	// the handler so the failure is a toast, not a bare 429.
+	form := func(path string) func(http.Handler) http.Handler { return formLimit(path) }
 
 	r.Get("/login", p.loginPage)
 	r.Post("/login", p.signinPost)
 	r.Post("/signup", p.signupPost)
-	r.With(mut(ratelimit.ScopeSignIn, ratelimit.DefaultSignInPerMin)).Post("/login/google", p.loginGoogle)
+	r.With(form("/login/google")).Post("/login/google", p.loginGoogle)
 
-	twoFactor := mut(ratelimit.ScopeTOTP, ratelimit.DefaultTOTPPerMin)
 	r.Get("/two-factor", p.twoFactorPage)
-	r.With(twoFactor).Post("/two-factor", p.twoFactorPost)
+	r.With(form("/two-factor")).Post("/two-factor", p.twoFactorPost)
 
-	reset := mut(ratelimit.ScopePasswordReset, ratelimit.DefaultPasswordResetPerMin)
 	r.Get("/forgot-password", p.forgotPage)
-	r.With(reset).Post("/forgot-password", p.forgotPost)
+	r.With(form("/forgot-password")).Post("/forgot-password", p.forgotPost)
 	r.Get("/forgot-password/sent", p.forgotSent)
 	r.Get("/reset-password", p.resetPage)
-	r.With(reset).Post("/reset-password", p.resetPost)
+	r.With(form("/reset-password")).Post("/reset-password", p.resetPost)
 
-	verify := mut(ratelimit.ScopeVerifyEmail, ratelimit.DefaultVerifyEmailPerMin)
 	r.Get("/verify-email", p.verifyEmailPage)
-	r.With(verify).Post("/verify-email/resend", p.verifyEmailResend)
+	r.With(form("/verify-email/resend")).Post("/verify-email/resend", p.verifyEmailResend)
 	r.Get("/check-email", p.checkEmailPage)
-	r.With(verify).Post("/check-email/resend", p.checkEmailResend)
+	r.With(form("/check-email/resend")).Post("/check-email/resend", p.checkEmailResend)
 
 	r.Get("/confirmar-email", p.confirmEmailPage)
 	r.Post("/confirmar-email", p.confirmEmailPost)
@@ -59,6 +59,17 @@ func Mount(r chi.Router, d *app.Deps) {
 
 	r.Post("/logout", p.logout)
 	r.Post("/stop-impersonating", p.stopImpersonating)
+}
+
+// formLimit is the MutationsOnly budget registered for path in
+// ratelimit.FormRateLimits (a missing entry is a programming error).
+func formLimit(path string) func(http.Handler) http.Handler {
+	for _, f := range ratelimit.FormRateLimits {
+		if f.Path == path {
+			return ratelimit.MutationsOnly(f.Scope, f.DefaultPerMin)
+		}
+	}
+	panic("authpages: no ratelimit.FormRateLimits entry for " + path)
 }
 
 // formValue parses the form (413 on oversize) and returns a getter.

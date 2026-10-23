@@ -1,9 +1,10 @@
-// Package payments: PIX charges through Mercado Pago (with circuit breaker
-// and retries) or the static PIX BR Code fallback, plus the MP webhook.
+// Package payments: PIX charges through Mercado Pago (circuit breaker,
+// retries, signed webhook) or the static PIX BR Code fallback (see
+// internal/payments/pix). Port of src/payments/**.
 //
-// Wave 0 defines the Provider contract and the static provider.
-// TODO(wave1-B): Mercado Pago client, circuit breaker, signature manifest,
-// webhook handler, static PIX BR Code generation.
+// Checkout, the order page, the webhook, the admin order page and the
+// expiry sweeper talk only to Provider and Service; order state changes
+// go through the OrderTransitioner (agent C's order FSM).
 package payments
 
 import (
@@ -39,7 +40,7 @@ const (
 	StatusApproved
 	StatusFailed   // rejected | cancelled | expired
 	StatusRefunded // refunded | charged_back
-	StatusOther
+	StatusOther    // in_process, in_mediation, authorized, …: no transition
 )
 
 // StatusFromMercadoPago maps a raw MP status.
@@ -79,8 +80,9 @@ type PaymentInfo struct {
 
 // Errors.
 var (
-	ErrUnavailable  = errors.New(UnavailableMessage) // circuit open
-	ErrNotSupported = errors.New("Operação indisponível para este meio de pagamento.")
+	// ErrUnavailable: circuit breaker open, failed fast without calling the PSP.
+	ErrUnavailable  = errors.New(UnavailableMessage)
+	ErrNotSupported = errors.New("Operação indisponível para este meio de pagamento.") //nolint:staticcheck // user-facing pt-BR copy
 )
 
 // TransientError is a 5xx/timeout/connection failure after retries.
@@ -98,6 +100,11 @@ func (e *RejectedError) Error() string {
 	return fmt.Sprintf("O Mercado Pago recusou a operação (HTTP %d).", e.Status)
 }
 
+// DecodeError is a 2xx with a body we could not understand.
+type DecodeError struct{ Msg string }
+
+func (e *DecodeError) Error() string { return "Resposta inválida do Mercado Pago." }
+
 // IsTransient reports errors worth retrying later.
 func IsTransient(err error) bool {
 	var te *TransientError
@@ -107,11 +114,19 @@ func IsTransient(err error) bool {
 // Provider is the payment strategy for new orders.
 type Provider interface {
 	Kind() config.ProviderKind
-	// AcceptingCharges is false while the circuit breaker is open.
+	// AcceptingCharges is false while the circuit breaker is open: checkout
+	// fails fast with UnavailableMessage instead of creating an order that
+	// cannot get a charge.
 	AcceptingCharges() bool
 	CreateCharge(ctx context.Context, c NewCharge) (Charge, error)
 	FetchStatus(ctx context.Context, paymentID int64) (PaymentInfo, error)
 	Refund(ctx context.Context, paymentID int64) error
+}
+
+// WebhookVerifier is implemented by providers that receive signed webhooks
+// (Mercado Pago).
+type WebhookVerifier interface {
+	WebhookSecret() string
 }
 
 // StaticPix is the manual-confirmation provider: orders show a locally
@@ -137,6 +152,16 @@ func (StaticPix) FetchStatus(context.Context, int64) (PaymentInfo, error) {
 // Refund implements Provider.
 func (StaticPix) Refund(context.Context, int64) error { return ErrNotSupported }
 
-// FromConfig builds the configured provider.
-// TODO(wave1-B): return the Mercado Pago client for ProviderMercadoPago.
-func FromConfig(_ config.PaymentConfig) Provider { return StaticPix{} }
+// FromConfig builds the configured provider: the Mercado Pago client when
+// selected and configured, else StaticPix.
+func FromConfig(cfg config.PaymentConfig) Provider {
+	if cfg.Kind == config.ProviderMercadoPago && cfg.MercadoPago != nil {
+		return NewMercadoPago(*cfg.MercadoPago)
+	}
+	return StaticPix{}
+}
+
+// IsMercadoPago reports a Mercado Pago provider.
+func IsMercadoPago(p Provider) bool {
+	return p != nil && p.Kind() == config.ProviderMercadoPago
+}

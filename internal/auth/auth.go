@@ -9,8 +9,7 @@
 // internal/web/authapi (/api/auth/*) and internal/web/authpages (HTML).
 //
 // Extension points for other packages: RegisterLoginHook (guest-cart merge
-// on login), RateAllow (in-handler rate-limit budget), MailSender (auth
-// mail rendering).
+// on login) and RateAllow (in-handler rate-limit budget, ratelimit.Check).
 package auth
 
 import (
@@ -27,6 +26,7 @@ import (
 	"github.com/wellington-vell/lindaflor/internal/config"
 	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 	"github.com/wellington-vell/lindaflor/internal/httpx"
+	"github.com/wellington-vell/lindaflor/internal/logging"
 	"github.com/wellington-vell/lindaflor/internal/valkey"
 )
 
@@ -131,6 +131,13 @@ func Middleware(d MiddlewareDeps) func(http.Handler) http.Handler {
 				slog.ErrorContext(r.Context(), "auth: load session", "error", err)
 			}
 			if u != nil {
+				role := ""
+				if u.Role != nil {
+					role = *u.Role
+				}
+				logging.SetRequestUser(r.Context(), logging.RequestUser{
+					UserID: u.ID.String(), SessionID: s.ID.String(), Role: role,
+				})
 				r = r.WithContext(WithUser(r.Context(), u, s))
 			}
 			next.ServeHTTP(w, r)

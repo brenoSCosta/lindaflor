@@ -27,14 +27,6 @@ const (
 	OAuthStateTTL       = 10 * time.Minute
 )
 
-// Mail landing pages for each one-time link.
-const (
-	VerifyEmailPath   = "/verify-email"
-	ResetPasswordPath = "/reset-password"
-	ChangeEmailPath   = "/confirmar-email"
-	DeleteAccountPath = "/excluir-conta"
-)
-
 // RandomToken is 32 random bytes, hex encoded (one-time tokens, OAuth
 // state, PKCE verifiers).
 func RandomToken() string {

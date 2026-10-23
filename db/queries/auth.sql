@@ -253,21 +253,3 @@ SELECT id FROM users WHERE email = $1 FOR UPDATE;
 
 -- name: AuthPromoteAdmin :exec
 UPDATE users SET role = 'admin', email_verified = true, updated_at = now() WHERE id = $1;
-
--- ---------------------------------------------------------------------------
--- Mail glue (auth kinds only; the outbox itself is internal/mail)
--- ---------------------------------------------------------------------------
-
--- name: AuthFirstPurchaseCoupon :one
-SELECT first_purchase_coupon_code FROM store_settings WHERE id;
-
--- name: AuthEnqueueMailThrottled :execrows
-INSERT INTO email_outbox (id, kind, to_address, subject, html_body, text_body)
-SELECT sqlc.arg(id)::uuid, sqlc.arg(kind)::text, sqlc.arg(to_address)::text,
-       sqlc.arg(subject)::text, sqlc.arg(html_body)::text, sqlc.arg(text_body)::text
-WHERE (
-    SELECT count(*) FROM email_outbox
-    WHERE lower(to_address) = lower(sqlc.arg(to_address)::text)
-      AND kind = ANY (sqlc.arg(kinds)::text[])
-      AND created_at > now() - make_interval(secs => sqlc.arg(window_secs)::double precision)
-) < sqlc.arg(max_per_window)::bigint;

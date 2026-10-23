@@ -20,6 +20,7 @@ import (
 	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 	"github.com/wellington-vell/lindaflor/internal/jobs"
 	"github.com/wellington-vell/lindaflor/internal/logging"
+	"github.com/wellington-vell/lindaflor/internal/mail"
 	"github.com/wellington-vell/lindaflor/internal/payments"
 	"github.com/wellington-vell/lindaflor/internal/storage"
 	"github.com/wellington-vell/lindaflor/internal/valkey"
@@ -58,10 +59,11 @@ func run() error {
 	}
 	defer func() { _ = vk.Close() }()
 
-	var store storage.Store = storage.Unavailable{}
-	if cfg.S3 != nil {
-		// TODO(wave1-B): S3 store + EnsureBucket (warn on failure).
-		logger.Warn("S3 configured but the S3 store is not implemented yet; object storage unavailable")
+	store := storage.FromConfig(ctx, cfg.S3)
+
+	mailer, err := mail.FromConfig(cfg.Mail, cfg.AppEnv == "production")
+	if err != nil {
+		return fmt.Errorf("mail: %w", err)
 	}
 
 	pay := payments.FromConfig(cfg.Payments)
@@ -69,7 +71,7 @@ func run() error {
 
 	deps := &app.Deps{
 		Cfg: cfg, Pool: pool, Q: sqlc.New(pool), Valkey: vk,
-		Storage: store, Payments: pay, Logger: logger,
+		Mailer: mailer, Storage: store, Payments: pay, Logger: logger,
 	}
 	handler, err := web.NewRouter(deps)
 	if err != nil {

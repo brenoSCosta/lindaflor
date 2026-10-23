@@ -6,6 +6,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/wellington-vell/lindaflor/internal/httpx"
+	"github.com/wellington-vell/lindaflor/internal/ratelimit"
 )
 
 // LoginHook runs right after a regular (non-impersonated) session starts on
@@ -59,10 +62,7 @@ func runLoginHooks(w http.ResponseWriter, r *http.Request, pool *pgxpool.Pool, u
 // whether the request is within it. It backs the in-handler checks Rust
 // did with check_ip_rate: step-up re-authentication (auth:step-up) and
 // the HTML /login and /signup forms (which answer with a toast instead of
-// a bare 429). Wave 0 has no limiter, so the default allows everything;
-// the platform package (internal/ratelimit) replaces it when it lands:
-//
-//	auth.RateAllow = func(r *http.Request, scope string, def uint32) bool {
-//		return ratelimit.Allow(scope, httpx.ClientIP(r), config.RateLimitFor(scope, def))
-//	}
-var RateAllow = func(_ *http.Request, _ string, _ uint32) bool { return true }
+// a bare 429). Tests may swap it.
+var RateAllow = func(r *http.Request, scope string, defaultPerMin uint32) bool {
+	return ratelimit.Check(scope, httpx.ClientIP(r), defaultPerMin)
+}

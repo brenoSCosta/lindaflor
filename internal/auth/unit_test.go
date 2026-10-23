@@ -548,18 +548,3 @@ func TestRequireGuards(t *testing.T) {
 		t.Fatalf("admin: %d", rec.Code)
 	}
 }
-
-func TestMailTemplates(t *testing.T) {
-	m := DefaultMailRenderer{}.PasswordReset("Mail User", TokenLink("", ResetPasswordPath, "abc"))
-	if !strings.Contains(m.Subject, "Redefinição de senha") || !strings.Contains(m.Text, "Olá, Mail User!") ||
-		!strings.Contains(m.HTML, "http://localhost:4200/reset-password?token=abc") {
-		t.Fatalf("%+v", m)
-	}
-	v := DefaultMailRenderer{}.VerifyEmail("<b>", "https://x/verify-email?token=t", "BEMVINDA")
-	if strings.Contains(v.HTML, "<b>") || !strings.Contains(v.Text, "cupom BEMVINDA") {
-		t.Fatal("verify mail must escape and advertise the coupon")
-	}
-	if g := greeting("  "); g != "Olá!" {
-		t.Fatal(g)
-	}
-}

@@ -349,48 +349,6 @@ func (q *Queries) AuthEmailTakenByOther(ctx context.Context, arg AuthEmailTakenB
 	return column_1, err
 }
 
-const authEnqueueMailThrottled = `-- name: AuthEnqueueMailThrottled :execrows
-INSERT INTO email_outbox (id, kind, to_address, subject, html_body, text_body)
-SELECT $1::uuid, $2::text, $3::text,
-       $4::text, $5::text, $6::text
-WHERE (
-    SELECT count(*) FROM email_outbox
-    WHERE lower(to_address) = lower($3::text)
-      AND kind = ANY ($7::text[])
-      AND created_at > now() - make_interval(secs => $8::double precision)
-) < $9::bigint
-`
-
-type AuthEnqueueMailThrottledParams struct {
-	ID           uuid.UUID `json:"id"`
-	Kind         string    `json:"kind"`
-	ToAddress    string    `json:"to_address"`
-	Subject      string    `json:"subject"`
-	HtmlBody     string    `json:"html_body"`
-	TextBody     string    `json:"text_body"`
-	Kinds        []string  `json:"kinds"`
-	WindowSecs   float64   `json:"window_secs"`
-	MaxPerWindow int64     `json:"max_per_window"`
-}
-
-func (q *Queries) AuthEnqueueMailThrottled(ctx context.Context, arg AuthEnqueueMailThrottledParams) (int64, error) {
-	result, err := q.db.Exec(ctx, authEnqueueMailThrottled,
-		arg.ID,
-		arg.Kind,
-		arg.ToAddress,
-		arg.Subject,
-		arg.HtmlBody,
-		arg.TextBody,
-		arg.Kinds,
-		arg.WindowSecs,
-		arg.MaxPerWindow,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const authFillUserImage = `-- name: AuthFillUserImage :exec
 UPDATE users SET image = COALESCE(image, $2), updated_at = now() WHERE id = $1
 `
@@ -449,21 +407,6 @@ func (q *Queries) AuthFindVerification(ctx context.Context, arg AuthFindVerifica
 	var i AuthFindVerificationRow
 	err := row.Scan(&i.ID, &i.Identifier)
 	return i, err
-}
-
-const authFirstPurchaseCoupon = `-- name: AuthFirstPurchaseCoupon :one
-
-SELECT first_purchase_coupon_code FROM store_settings WHERE id
-`
-
-// ---------------------------------------------------------------------------
-// Mail glue (auth kinds only; the outbox itself is internal/mail)
-// ---------------------------------------------------------------------------
-func (q *Queries) AuthFirstPurchaseCoupon(ctx context.Context) (*string, error) {
-	row := q.db.QueryRow(ctx, authFirstPurchaseCoupon)
-	var first_purchase_coupon_code *string
-	err := row.Scan(&first_purchase_coupon_code)
-	return first_purchase_coupon_code, err
 }
 
 const authHasUnverifiedTwoFactor = `-- name: AuthHasUnverifiedTwoFactor :one
