@@ -2,43 +2,22 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
-	"fmt"
 	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"golang.org/x/crypto/argon2"
 
+	"github.com/wellington-vell/lindaflor/internal/auth"
 	"github.com/wellington-vell/lindaflor/internal/config"
 )
 
 // credentialProviderID is accounts.provider_id for email/password.
-const credentialProviderID = "credential"
+const credentialProviderID = auth.CredentialProviderID
 
-// hashPassword is an argon2id PHC string with the Rust defaults
-// (m=19456 KiB, t=2, p=1, 16-byte salt, 32-byte hash), verifiable by the
-// auth package.
-// TODO(wave3): switch to auth.HashPassword once wave1-A lands.
-func hashPassword(password string) (string, error) {
-	const (
-		memory  = 19456
-		time    = 2
-		threads = 1
-		keyLen  = 32
-	)
-	salt := make([]byte, 16)
-	if _, err := rand.Read(salt); err != nil {
-		return "", err
-	}
-	key := argon2.IDKey([]byte(password), salt, time, memory, threads, keyLen)
-	enc := base64.RawStdEncoding
-	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s", argon2.Version, memory, time, threads,
-		enc.EncodeToString(salt), enc.EncodeToString(key)), nil
-}
+// hashPassword is auth's argon2id PHC hash (m=19456, t=2, p=1).
+func hashPassword(password string) (string, error) { return auth.HashPassword(password) }
 
 func seedAdmin(ctx context.Context, pool *pgxpool.Pool, admin config.SeedAdmin) error {
 	var existing uuid.UUID
