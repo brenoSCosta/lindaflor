@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net"
@@ -31,6 +32,12 @@ import (
 const shutdownTimeout = 30 * time.Second
 
 func main() {
+	healthcheck := flag.Bool("healthcheck", false,
+		"probe GET /api/health on 127.0.0.1:$PORT and exit 0 (healthy) or 1 (container HEALTHCHECK; the runtime image has no curl)")
+	flag.Parse()
+	if *healthcheck {
+		os.Exit(probeHealth())
+	}
 	if err := run(); err != nil {
 		slog.Error("server exited", "error", err)
 		os.Exit(1)
@@ -116,4 +123,37 @@ func run() error {
 	cancelJobs()
 	jobsDone.Wait()
 	return err
+}
+
+// probeHealth is the container liveness probe: a GET of /api/health on the
+// loopback interface, using PORT like the server does.
+func probeHealth() int {
+	port := 4200
+	if raw := os.Getenv("PORT"); raw != "" {
+		p, err := strconv.ParseUint(raw, 10, 16)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "healthcheck: invalid PORT")
+			return 1
+		}
+		port = int(p)
+	}
+	url := "http://" + net.JoinHostPort("127.0.0.1", strconv.Itoa(port)) + "/api/health"
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil) //nolint:gosec // fixed loopback URL
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "healthcheck:", err)
+		return 1
+	}
+	res, err := http.DefaultClient.Do(req) //nolint:gosec // fixed loopback URL
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "healthcheck:", err)
+		return 1
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		fmt.Fprintln(os.Stderr, "healthcheck: status", res.StatusCode)
+		return 1
+	}
+	return 0
 }
