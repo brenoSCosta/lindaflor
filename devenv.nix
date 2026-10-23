@@ -1,41 +1,44 @@
 {
   pkgs,
   lib,
+  config,
   ...
 }:
 
+let
+  # Go 1.27.3 (same toolchain as flake.nix).
+  go = pkgs.go_1_27;
+  generatedFiles = [
+    "^web/static/vendor/"
+    "^web/static/css/app\\.css$"
+    "^internal/db/sqlc/"
+    "_templ\\.go$"
+  ];
+in
 {
-  packages = [
-    pkgs.clang
-    pkgs.mold
-    pkgs.openssl
-    pkgs.pgweb
-    pkgs.pkg-config
-    pkgs.sqlx-cli
-    pkgs.valkey
-    # Runtime libs for postgresql_embedded (theseus) binaries.
-    pkgs.krb5
-    pkgs.lz4
-    pkgs.zstd
-    pkgs.libxml2
-    pkgs.zlib
+  packages = with pkgs; [
+    templ
+    sqlc
+    goose
+    golangci-lint
+    gofumpt
+    gotools
+    gopls
+    air
+    tailwindcss_4
+    pgweb
+    valkey
+    nixfmt
+    gnumake
   ];
 
-  env.PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig";
-  # postgresql_embedded downloads glibc-linked PG binaries that need these at runtime.
-  env.LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
-    pkgs.krb5
-    pkgs.lz4
-    pkgs.zstd
-    pkgs.libxml2
-    pkgs.openssl
-    pkgs.zlib
-  ];
-  # Ad-hoc cargo and rust-analyzer read .sqlx/ instead of opening a connection per query.
-  # `devenv up` overrides this and rewrites the cache. See scripts.cargo-with-sqlx.
-  env.SQLX_OFFLINE = "true";
+  languages.go = {
+    enable = true;
+    package = go;
+  };
 
-  env.DATABASE_URL = "postgres://postgres:postgres@127.0.0.1:4201/topcoat";
+  env.GOTOOLCHAIN = "local";
+  env.DATABASE_URL = "postgres://postgres:postgres@127.0.0.1:4201/lindaflor?sslmode=disable";
   env.PGPORT = lib.mkForce "4201";
   env.VALKEY_URL = "redis://127.0.0.1:4202";
   env.S3_ENDPOINT = "http://127.0.0.1:4203";
@@ -52,39 +55,39 @@
   env.LOG_SAMPLE_RATE = "1";
   env.LOG_SLOW_THRESHOLD_MS = "1000";
 
-  languages.rust = {
-    enable = true;
-    channel = "stable";
-    version = "1.98.1";
-    components = [
-      "rustc"
-      "cargo"
-      "clippy"
-      "rustfmt"
-      "rust-analyzer"
-      "rust-src"
-    ];
-  };
-
   git-hooks.hooks = {
     check-yaml.enable = true;
     check-merge-conflicts.enable = true;
-    end-of-file-fixer.enable = true;
-    trim-trailing-whitespace.enable = true;
+    # Vendored and generated files are committed byte-for-byte.
+    end-of-file-fixer = {
+      enable = true;
+      excludes = generatedFiles;
+    };
+    trim-trailing-whitespace = {
+      enable = true;
+      excludes = generatedFiles;
+    };
     nixfmt.enable = true;
 
-    rustfmt = {
+    go-fmt = {
       enable = true;
-      name = "cargo fmt";
-      entry = "cargo fmt --check";
-      files = "\\.rs$";
+      name = "gofumpt + goimports (golangci-lint fmt)";
+      entry = "golangci-lint fmt --diff";
+      files = "\\.go$";
       pass_filenames = false;
     };
-    cargo-clippy = {
+    templ-fmt = {
       enable = true;
-      name = "cargo clippy";
-      entry = "cargo-with-sqlx cargo clippy --all-targets";
-      files = "\\.rs$";
+      name = "templ fmt";
+      entry = "templ fmt -fail .";
+      files = "\\.templ$";
+      pass_filenames = false;
+    };
+    golangci-lint = {
+      enable = true;
+      name = "golangci-lint";
+      entry = "golangci-lint run ./...";
+      files = "\\.(go|templ)$";
       pass_filenames = false;
     };
   };
@@ -96,7 +99,7 @@
     port = 4201;
     initialDatabases = [
       {
-        name = "topcoat";
+        name = "lindaflor";
         user = "postgres";
         pass = "postgres";
       }
@@ -122,198 +125,100 @@
     exec start-postgres
   '';
 
-   processes.valkey = {
-    exec = ''
-      # Valkey rewrites its cmdline to "valkey-server *:4202", so match the port.
-      for pid in $(pgrep -x valkey-server || true); do
-        cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" || true)
-        case "$cmd" in
-          *4202*)
-            echo "Stopping leftover Valkey (pid $pid) on port 4202"
-            kill "$pid" || true
-            ;;
-        esac
-      done
-      for _ in $(seq 1 50); do
-        if ! { ss -H -ltn 'sport = :4202' 2>/dev/null || true; } | grep -q .; then
-          break
-        fi
-        sleep 0.1
-      done
-      mkdir -p "''${DEVENV_STATE:-.devenv/state}/valkey"
-      exec valkey-server --bind 127.0.0.1 --port 4202 \
-        --dir "''${DEVENV_STATE:-.devenv/state}/valkey" \
-        --appendonly yes --appendfsync everysec \
-        --save 900 1 --save 300 10 --save 60 10000
-    '';
-  };
-
-  processes.rustfs = {
-    exec = ''
-      mkdir -p "''${DEVENV_STATE:-.devenv/state}/rustfs"
-      # The image runs as user rustfs and must be able to write the bind mount.
-      chmod 777 "''${DEVENV_STATE:-.devenv/state}/rustfs"
-      # A leftover container with this name (for example from a previous run) blocks docker run.
-      docker rm -f lindaflor-rustfs >/dev/null 2>&1 || true
-      exec docker run --rm --name lindaflor-rustfs \
-        -p 127.0.0.1:4203:9000 \
-        -p 127.0.0.1:4204:9001 \
-        -v "''${DEVENV_STATE:-.devenv/state}/rustfs:/data" \
-        -e RUSTFS_ACCESS_KEY=rustfsadmin \
-        -e RUSTFS_SECRET_KEY=rustfsadmin \
-        -e RUSTFS_ADDRESS=:9000 \
-        -e RUSTFS_CONSOLE_ADDRESS=:9001 \
-        -e RUSTFS_CONSOLE_ENABLE=true \
-        rustfs/rustfs:latest /data
-    '';
-  };
-
-  processes.db-studio = {
-    exec = ''
-      echo "Waiting for Postgres (db-studio)..."
-      for _ in $(seq 1 50); do
-        if pg_isready -h 127.0.0.1 -p "''${PGPORT:-4201}" -U postgres -d topcoat -t 1 >/dev/null 2>&1; then
-          break
-        fi
-        sleep 0.2
-      done
-      echo "Postgres ready, starting pgweb..."
-      exec pgweb --bind 127.0.0.1 --listen 4205 --skip-open --url "$DATABASE_URL"
-    '';
-  };
-
-  processes.server = {
-    exec = ''
-      export PATH="''${DEVENV_ROOT}/.devenv/state/cargo-install/bin:''${PATH}"
-
-      # sqlx::query! needs live schema at compile time — migrate before topcoat builds.
-      echo "Waiting for Postgres..."
-      for _ in $(seq 1 50); do
-        if pg_isready -h 127.0.0.1 -p "''${PGPORT:-4201}" -U postgres -d topcoat -t 1 >/dev/null 2>&1; then
-          break
-        fi
-        sleep 0.2
-      done
-      echo "Postgres ready, running migrations and starting dev server (compiling can take a few minutes)..."
-      exec dev
-    '';
-  };
-
-  # Compile against the live schema and rewrite .sqlx/ for rust-analyzer.
-  scripts.dev.exec = ''
-    set -euo pipefail
-    export PATH="''${DEVENV_ROOT}/.devenv/state/cargo-install/bin:''${PATH}"
-    echo "Applying migrations..."
-    if ! migrate_log=$(sqlx migrate run 2>&1); then
-      printf '%s\n' "$migrate_log"
-      exit 1
-    fi
-    if [ -n "$migrate_log" ]; then
-      printf '%s\n' "$migrate_log"
-    fi
-    # rustc skips query macros when no Rust file changed, so a new migration
-    # would leave .sqlx/ describing the old schema.
-    if printf '%s\n' "$migrate_log" | grep -q '^Applied '; then
-      touch src/lib.rs
-    fi
-    mkdir -p "''${DEVENV_ROOT}/.sqlx"
-    export SQLX_OFFLINE=false
-    export SQLX_OFFLINE_DIR="''${DEVENV_ROOT}/.sqlx"
-    echo "Migrations done, starting topcoat dev (compiling, this can take a few minutes)..."
-    exec topcoat dev --bin lindaflor
+  processes.valkey.exec = ''
+    # Valkey rewrites its cmdline to "valkey-server *:4202", so match the port.
+    for pid in $(pgrep -x valkey-server || true); do
+      cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" || true)
+      case "$cmd" in
+        *4202*)
+          echo "Stopping leftover Valkey (pid $pid) on port 4202"
+          kill "$pid" || true
+          ;;
+      esac
+    done
+    for _ in $(seq 1 50); do
+      if ! { ss -H -ltn 'sport = :4202' 2>/dev/null || true; } | grep -q .; then
+        break
+      fi
+      sleep 0.1
+    done
+    mkdir -p "''${DEVENV_STATE:-.devenv/state}/valkey"
+    exec valkey-server --bind 127.0.0.1 --port 4202 \
+      --dir "''${DEVENV_STATE:-.devenv/state}/valkey" \
+      --appendonly yes --appendfsync everysec \
+      --save 900 1 --save 300 10 --save 60 10000
   '';
 
-  # Postgres up: migrate, compile online, refresh .sqlx/. Postgres down: use the cache.
-  scripts.cargo-with-sqlx.exec = ''
-    set -euo pipefail
-    cache="''${DEVENV_ROOT}/.sqlx"
-    mkdir -p "$cache"
-    if PGCONNECT_TIMEOUT=2 psql "$DATABASE_URL" -c 'SELECT 1' >/dev/null 2>&1; then
-      if ! migrate_log=$(sqlx migrate run 2>&1); then
-        printf '%s\n' "$migrate_log"
-        exit 1
-      fi
-      if [ -n "$migrate_log" ]; then
-        printf '%s\n' "$migrate_log"
-      fi
-      if printf '%s\n' "$migrate_log" | grep -q '^Applied '; then
-        touch src/lib.rs
-      fi
-      export SQLX_OFFLINE=false
-      export SQLX_OFFLINE_DIR="$cache"
-    else
-      export SQLX_OFFLINE=true
-    fi
-    exec "$@"
+  processes.rustfs.exec = ''
+    mkdir -p "''${DEVENV_STATE:-.devenv/state}/rustfs"
+    # The image runs as user rustfs and must be able to write the bind mount.
+    chmod 777 "''${DEVENV_STATE:-.devenv/state}/rustfs"
+    docker rm -f lindaflor-rustfs >/dev/null 2>&1 || true
+    exec docker run --rm --name lindaflor-rustfs \
+      -p 127.0.0.1:4203:9000 \
+      -p 127.0.0.1:4204:9001 \
+      -v "''${DEVENV_STATE:-.devenv/state}/rustfs:/data" \
+      -e RUSTFS_ACCESS_KEY=rustfsadmin \
+      -e RUSTFS_SECRET_KEY=rustfsadmin \
+      -e RUSTFS_ADDRESS=:9000 \
+      -e RUSTFS_CONSOLE_ADDRESS=:9001 \
+      -e RUSTFS_CONSOLE_ENABLE=true \
+      rustfs/rustfs:latest /data
   '';
 
-  scripts.build.exec = ''
-    export PATH="''${DEVENV_ROOT}/.devenv/state/cargo-install/bin:''${PATH}"
-    cargo-with-sqlx cargo build --bin lindaflor
-    topcoat asset bundle --bin lindaflor
+  processes.db-studio.exec = ''
+    for _ in $(seq 1 50); do
+      pg_isready -h 127.0.0.1 -p "''${PGPORT:-4201}" -U postgres -d lindaflor -t 1 >/dev/null 2>&1 && break
+      sleep 0.2
+    done
+    exec pgweb --bind 127.0.0.1 --listen 4205 --skip-open --url "$DATABASE_URL"
   '';
 
-  scripts.format = {
-    exec = "cargo fmt";
-    description = "Format Rust sources";
+  processes.server.exec = ''
+    echo "Waiting for Postgres..."
+    for _ in $(seq 1 50); do
+      pg_isready -h 127.0.0.1 -p "''${PGPORT:-4201}" -U postgres -d lindaflor -t 1 >/dev/null 2>&1 && break
+      sleep 0.2
+    done
+    exec dev
+  '';
+
+  # templ + sqlc + tailwind (generated code is committed; CI checks drift).
+  scripts.generate = {
+    exec = "make generate";
+    description = "Generate templ, sqlc and Tailwind outputs";
+  };
+
+  # Live reload; the server applies migrations on boot in development.
+  scripts.dev = {
+    exec = "air";
+    description = "Run the app with live reload (air)";
   };
 
   scripts.lint = {
-    exec = "cargo-with-sqlx cargo clippy --all-targets";
-    description = "Lint with clippy";
+    exec = "make lint";
+    description = "golangci-lint + sqlc vet + templ fmt check";
+  };
+
+  scripts.fmt = {
+    exec = "make fmt";
+    description = "Format Go (gofumpt + goimports) and templ";
   };
 
   scripts.test = {
-    exec = "cargo-with-sqlx cargo test";
-    description = "Run tests (embedded Postgres)";
+    exec = ''go test "''${@:-./...}"'';
+    description = "Run tests (nix Postgres + miniredis)";
   };
 
   scripts.migrate = {
-    exec = "sqlx migrate run";
-    description = "Apply SQLx migrations";
+    exec = "make migrate";
+    description = "Apply goose migrations to $DATABASE_URL";
   };
 
-  scripts.prepare-sqlx = {
-    exec = ''
-      set -euo pipefail
-      if ! migrate_log=$(sqlx migrate run 2>&1); then
-        printf '%s\n' "$migrate_log"
-        exit 1
-      fi
-      if [ -n "$migrate_log" ]; then
-        printf '%s\n' "$migrate_log"
-      fi
-      if printf '%s\n' "$migrate_log" | grep -q '^Applied '; then
-        touch src/lib.rs
-      fi
-      # Offline mode is the default. Preparing the cache has to reach Postgres.
-      SQLX_OFFLINE=false cargo sqlx prepare -- --all-targets
-    '';
-    description = "Regenerate the sqlx offline query cache";
+  scripts.seed = {
+    exec = "make seed";
+    description = "Seed the development database";
   };
-
-  scripts.clean = {
-    exec = "cargo clean";
-    description = "Clean Cargo build artifacts";
-  };
-
-  scripts.ports.exec = ''
-    echo ""
-    echo "┌─────────────────────────────────────────────────────────┐"
-    echo "│  topcoat full stack running                             │"
-    echo "├─────────────────────────────────────────────────────────┤"
-    echo "│  PostgreSQL: localhost:''${PGPORT:-4201}                │"
-    echo "│  Valkey:     localhost:4202                             │"
-    echo "│  RustFS S3:  localhost:4203                             │"
-    echo "│  RustFS console: http://127.0.0.1:4204                  │"
-    echo "│  App:        http://localhost:4200                      │"
-    echo "│  Scalar:     http://localhost:4200/api/docs             │"
-    echo "│  Swagger:    http://localhost:4200/api/swagger          │"
-    echo "│  OpenAPI:    http://localhost:4200/api/openapi.json     │"
-    echo "│  DB Studio:  http://127.0.0.1:4205                      │"
-    echo "└─────────────────────────────────────────────────────────┘"
-    echo ""
-  '';
 
   scripts.db-reset.exec = ''
     set -euo pipefail
@@ -326,29 +231,22 @@
     else
       echo "No Postgres state directory found at $state_dir"
     fi
-    echo "Done. Run 'devenv up' (server process runs sqlx migrate before build)."
+    echo "Done. Run 'devenv up' (the server migrates on boot in development)."
   '';
 
-  scripts.seed.exec = ''
-    cargo-with-sqlx cargo run --bin seed
+  scripts.ports.exec = ''
+    echo ""
+    echo "  PostgreSQL:     localhost:''${PGPORT:-4201} (db lindaflor)"
+    echo "  Valkey:         localhost:4202"
+    echo "  RustFS S3:      localhost:4203 (console http://127.0.0.1:4204)"
+    echo "  DB Studio:      http://127.0.0.1:4205"
+    echo "  App:            http://localhost:4200"
+    echo ""
   '';
 
   enterShell = ''
-    export PATH="''${DEVENV_ROOT}/.devenv/state/cargo-install/bin:''${PATH}"
-    echo "lindaflor devenv"
-    echo "  rustc: $(rustc --version 2>/dev/null || echo unavailable)"
-    echo "  Start stack: devenv up"
-    echo "  App only:   devenv shell dev"
-    echo "  Build:      devenv shell build"
-    echo "  Clean:      devenv shell clean"
-    echo "  Format:     devenv shell format"
-    echo "  Lint:       devenv shell lint"
-    echo "  Test:       devenv shell test"
-    echo "  Migrate:    devenv shell migrate"
-    echo "  SQLx cache: devenv shell prepare-sqlx"
-    echo "  Seed database: devenv shell seed"
-    echo "  Show ports: devenv shell ports"
-    echo "  Reset DB:   devenv shell db-reset"
-    echo "  DB Studio: http://127.0.0.1:4205 (via devenv up)"
+    echo "lindaflor devenv ($(go version))"
+    echo "  devenv up            start postgres/valkey/rustfs/pgweb + app (air)"
+    echo "  generate | dev | lint | fmt | test | migrate | seed | db-reset | ports"
   '';
 }

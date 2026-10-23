@@ -1,0 +1,22 @@
+# Live reload for `make dev` / `devenv shell dev`.
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  pre_cmd = ["templ generate", "tailwindcss -i web/styles/input.css -o web/static/css/app.css --minify"]
+  cmd = "go build -o ./tmp/server ./cmd/server"
+  entrypoint = ["./tmp/server"]
+  include_ext = ["go", "templ", "sql", "css", "js"]
+  exclude_dir = ["tmp", "bin", "target", "src", "crates", ".devenv", ".direnv", "node_modules", "web/static/vendor"]
+  exclude_regex = ["_templ\\.go$", "_test\\.go$", "web/static/css/app\\.css$"]
+  exclude_unchanged = true
+  delay = 300
+  kill_delay = "2s"
+  send_interrupt = true
+  stop_on_error = true
+
+[log]
+  time = false
+
+[misc]
+  clean_on_exit = true

@@ -5,7 +5,17 @@
 !.dockerignore
 !.github
 !.sqlx
+!.golangci.yml
+!.air.toml
 dump.rdb
 node_modules/
 backups/
 secrets/
+# Go
+/bin/
+/tmp/
+*.test
+*.out
+coverage.*
+# The generated code (*_templ.go, internal/db/sqlc, web/static/css/app.css)
+# is committed so `go build` works without tools; CI checks for drift.

@@ -1,0 +1,55 @@
+# Go migration CI (branch migration-golang). Everything runs inside the
+# nix dev shell so CI uses the exact toolchain (go 1.27.3, templ, sqlc,
+# golangci-lint v2, tailwindcss 4, postgres 17).
+name: ci-go
+
+on:
+  push:
+    branches: [migration-golang]
+  pull_request:
+    branches: [migration-golang]
+
+concurrency:
+  group: ci-go-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            accept-flake-config = true
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-${{ runner.os }}-
+
+      - name: Toolchain
+        run: nix develop -c bash -c 'go version && templ version && sqlc version && golangci-lint version'
+
+      - name: Generated code is current (templ, sqlc, tailwind)
+        run: nix develop -c make drift
+
+      - name: Lint (golangci-lint, sqlc vet, templ fmt)
+        run: nix develop -c make lint
+
+      - name: Vet + build
+        run: nix develop -c bash -c 'go vet ./... && go build ./...'
+
+      - name: Test (race; Postgres from the nix shell)
+        run: nix develop -c go test -race ./...
+
+      - name: Nix package builds (vendorHash current)
+        run: nix build .#default

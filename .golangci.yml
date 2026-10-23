@@ -1,0 +1,80 @@
+# golangci-lint v2. Run: `make lint` (or `golangci-lint run ./...`);
+# format: `make fmt` (`golangci-lint fmt` + `templ fmt`).
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - revive
+    - gosec
+    - bodyclose
+    - sqlclosecheck
+    - errorlint
+    - contextcheck
+    - unused
+    - ineffassign
+  settings:
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: dot-imports
+        - name: error-return
+        - name: error-naming
+        - name: errorf
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: unexported-return
+        - name: unreachable-code
+        - name: var-declaration
+        - name: var-naming
+    gosec:
+      excludes:
+        - G104 # duplicated by errcheck
+    staticcheck:
+      checks:
+        - all
+        - -ST1000 # package comments on every file
+        - -ST1003 # initialisms (sqlc/templ naming)
+        - -ST1005 # pt-BR user-facing error strings may be capitalized
+  exclusions:
+    generated: strict
+    presets:
+      - comments
+      - std-error-handling
+    paths:
+      - internal/db/sqlc
+      - ".*_templ\\.go$"
+    rules:
+      - path: _test\.go
+        linters:
+          - gosec
+          - bodyclose
+          - contextcheck
+          - errcheck
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/wellington-vell/lindaflor
+  exclusions:
+    generated: strict
+    paths:
+      - internal/db/sqlc
+      - ".*_templ\\.go$"
