@@ -9,7 +9,9 @@ import (
 
 // CSPProduction is the enforcing Content-Security-Policy. Every script is
 // self-hosted under /static (htmx, Alpine), so no third-party origin is
-// listed. 'unsafe-eval' is required by Alpine's standard build and htmx
+// listed (the one exception, Cloudflare Turnstile, uses
+// CSPProductionTurnstile, only when a site key is configured).
+// 'unsafe-eval' is required by Alpine's standard build and htmx
 // hx-on/trigger filters (both compile expressions with new Function).
 // img-src allows http: so local object storage (RustFS on :4203) can serve
 // images; production S3 must be https (mixed content is blocked anyway).
@@ -18,6 +20,18 @@ const CSPProduction = "default-src 'self'; script-src 'self' 'unsafe-inline' 'un
 // CSPDevelopment additionally allows any local port (live-reload tools)
 // and the CDNs used by the dev-only API docs (Scalar/Swagger).
 const CSPDevelopment = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:* http://localhost:* https://cdn.jsdelivr.net https://unpkg.com; style-src 'self' 'unsafe-inline' http://127.0.0.1:* http://localhost:* https://cdn.jsdelivr.net https://unpkg.com; img-src 'self' data: blob: http: https:; font-src 'self' data: https://cdn.jsdelivr.net https://unpkg.com; connect-src 'self' ws: wss: http://127.0.0.1:* http://localhost:*; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+
+// TurnstileOrigin serves the Cloudflare Turnstile script, its challenge
+// iframe and the requests the widget makes.
+const TurnstileOrigin = "https://challenges.cloudflare.com"
+
+// CSPProductionTurnstile is CSPProduction plus TurnstileOrigin in
+// script-src, connect-src and a frame-src directive (used only when a
+// Turnstile site key is configured).
+const CSPProductionTurnstile = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http: https:; font-src 'self' data:; connect-src 'self' ws: wss: https://challenges.cloudflare.com; frame-src 'self' https://challenges.cloudflare.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+
+// CSPDevelopmentTurnstile is CSPDevelopment with the same Turnstile additions.
+const CSPDevelopmentTurnstile = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:* http://localhost:* https://cdn.jsdelivr.net https://unpkg.com https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' http://127.0.0.1:* http://localhost:* https://cdn.jsdelivr.net https://unpkg.com; img-src 'self' data: blob: http: https:; font-src 'self' data: https://cdn.jsdelivr.net https://unpkg.com; connect-src 'self' ws: wss: http://127.0.0.1:* http://localhost:* https://challenges.cloudflare.com; frame-src 'self' https://challenges.cloudflare.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 
 // HSTSValue is the production Strict-Transport-Security (two years).
 const HSTSValue = "max-age=63072000; includeSubDomains"
@@ -35,10 +49,19 @@ func DevCSPForEnv(env string) bool {
 // HSTSEnabledForEnv: HSTS everywhere except local/test environments.
 func HSTSEnabledForEnv(env string) bool { return !DevCSPForEnv(env) }
 
-// CSPForEnv picks the CSP value for an APP_ENV.
-func CSPForEnv(env string) string {
-	if DevCSPForEnv(env) {
+// CSPForEnv picks the CSP value for an APP_ENV (no Turnstile).
+func CSPForEnv(env string) string { return CSPFor(env, false) }
+
+// CSPFor picks the CSP value for an APP_ENV; turnstile adds the
+// Cloudflare Turnstile origin (see CSPProductionTurnstile).
+func CSPFor(env string, turnstile bool) string {
+	switch dev := DevCSPForEnv(env); {
+	case dev && turnstile:
+		return CSPDevelopmentTurnstile
+	case dev:
 		return CSPDevelopment
+	case turnstile:
+		return CSPProductionTurnstile
 	}
 	return CSPProduction
 }
@@ -47,7 +70,13 @@ func CSPForEnv(env string) string {
 // (outside dev/test) HSTS on every response, before the handler runs, so
 // errors, 404s and 429s carry them too.
 func SecurityHeaders(appEnv string) func(http.Handler) http.Handler {
-	csp := CSPForEnv(appEnv)
+	return SecurityHeadersWith(appEnv, false)
+}
+
+// SecurityHeadersWith is SecurityHeaders with the Turnstile CSP variant
+// when turnstile is true (a site key is configured).
+func SecurityHeadersWith(appEnv string, turnstile bool) func(http.Handler) http.Handler {
+	csp := CSPFor(appEnv, turnstile)
 	hsts := HSTSEnabledForEnv(appEnv)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,18 @@
+package components
+
+// Turnstile is the Cloudflare Turnstile widget for a protected form
+// (sign-up, password reset, checkout, newsletter, avise-me). It renders
+// nothing when siteKey is "" (CAPTCHA not configured). Place it inside the
+// <form>: the widget adds the hidden cf-turnstile-response input.
+//
+// web/static/js/turnstile.js (loaded by the layout) injects Cloudflare's
+// api.js once (render=explicit) when a widget is on the page, renders each
+// widget with turnstile.render — also after htmx swaps — and resets the
+// widget after an htmx submit (tokens are single-use). The script is not
+// rendered here because htmx re-executes <script> tags in swapped content,
+// which would load api.js again.
+templ Turnstile(siteKey string) {
+	if siteKey != "" {
+		<div class="cf-turnstile min-h-[65px]" data-sitekey={ siteKey } data-theme="auto" data-language="pt-br"></div>
+	}
+}

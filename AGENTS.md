@@ -74,7 +74,10 @@ and ideally `make docker-smoke`.
   variables in the README table and `docker-compose.prod.yml`.
 - **Security defaults**: same-origin only (cross-origin protection, no
   CORS), `__Host-` cookies in production, CSP `'self'` (vendor JS lives in
-  `web/static/vendor/`, no CDNs), per-route body limits and rate limits.
+  `web/static/vendor/`, no CDNs; the only third-party origin is Cloudflare
+  Turnstile, added only when its keys are configured), per-route body
+  limits and rate limits. Abuse-prone public forms use `internal/captcha`
+  (see `docs/GO_MIGRATION.md` → CAPTCHA).
 - **Formatting/lint**: gofumpt + goimports (`make fmt`), golangci-lint v2
   config in `.golangci.yml`; `//nolint` needs a specific linter and reason.
 - **Tests**: next to the code (`*_test.go`). DB/HTTP tests use

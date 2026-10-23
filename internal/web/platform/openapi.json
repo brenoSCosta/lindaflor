@@ -766,6 +766,24 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "CAPTCHA_FAILED: missing or invalid Turnstile token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
           }
         }
       }
@@ -1020,6 +1038,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SessionPayload"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "CAPTCHA_FAILED: missing or invalid Turnstile token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
                 }
               }
             }
@@ -2006,6 +2042,13 @@
               "string",
               "null"
             ]
+          },
+          "captchaToken": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cloudflare Turnstile token (required when TURNSTILE_ENFORCE=1; the x-captcha-response header also works)"
           }
         }
       },
@@ -2182,6 +2225,13 @@
           },
           "password": {
             "type": "string"
+          },
+          "captchaToken": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cloudflare Turnstile token (required when TURNSTILE_ENFORCE=1; the x-captcha-response header also works)"
           }
         }
       },

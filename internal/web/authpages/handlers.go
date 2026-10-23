@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/wellington-vell/lindaflor/internal/auth"
+	"github.com/wellington-vell/lindaflor/internal/captcha"
 	"github.com/wellington-vell/lindaflor/internal/httpx"
 	"github.com/wellington-vell/lindaflor/internal/httpx/toast"
 	"github.com/wellington-vell/lindaflor/internal/ratelimit"
@@ -81,6 +82,7 @@ func (p *pages) loginPage(w http.ResponseWriter, r *http.Request) {
 		Next:         q.Get("next"),
 	}
 	d.CallbackURL = safeNext(d.InviteID, d.Next)
+	d.SiteKey = p.d.Captcha.SiteKey()
 	if d.Signup {
 		head(r, "Criar conta")
 	} else {
@@ -128,6 +130,10 @@ func (p *pages) signupPost(w http.ResponseWriter, r *http.Request) {
 	back := loginURL("signup", name, email, inviteID, next)
 	if !auth.RateAllow(r, ratelimit.ScopeSignUp, ratelimit.DefaultSignUpPerMin) {
 		errorRedirect(w, r, msgTooMany, back)
+		return
+	}
+	if !p.d.Captcha.CheckForm(r) {
+		errorRedirect(w, r, captcha.Message, back)
 		return
 	}
 	if _, _, err := p.svc.SignUpEmail(w, r, name, email, password, true); err != nil {
@@ -202,7 +208,7 @@ func (p *pages) twoFactorPost(w http.ResponseWriter, r *http.Request) {
 
 func (p *pages) forgotPage(w http.ResponseWriter, r *http.Request) {
 	head(r, "Esqueceu a senha")
-	render.Page(w, r, p.d, forgotPage())
+	render.Page(w, r, p.d, forgotPage(p.d.Captcha.SiteKey()))
 }
 
 func (p *pages) forgotSent(w http.ResponseWriter, r *http.Request) {
@@ -213,6 +219,10 @@ func (p *pages) forgotSent(w http.ResponseWriter, r *http.Request) {
 func (p *pages) forgotPost(w http.ResponseWriter, r *http.Request) {
 	get, ok := formValue(w, r)
 	if !ok {
+		return
+	}
+	if !p.d.Captcha.CheckForm(r) {
+		errorRedirect(w, r, captcha.Message, "/forgot-password")
 		return
 	}
 	// Silent either way (anti-enumeration).

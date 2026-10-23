@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/wellington-vell/lindaflor/internal/app"
+	"github.com/wellington-vell/lindaflor/internal/captcha"
 	"github.com/wellington-vell/lindaflor/internal/config"
 	"github.com/wellington-vell/lindaflor/internal/db"
 	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
@@ -82,8 +83,9 @@ func run() error {
 	deps := &app.Deps{
 		Cfg: cfg, Pool: pool, Q: sqlc.New(pool), Valkey: vk,
 		Mailer: mailer, Storage: objects, Payments: pay, Logger: logger,
-		Orders: store.OrderFSM{Pool: pool},
+		Orders: store.OrderFSM{Pool: pool}, Captcha: captcha.New(cfg.Captcha, nil),
 	}
+	logger.Info("captcha", "turnstile", cfg.Captcha.Configured(), "enforced", deps.Captcha.Enforced())
 	store.SetLinks(mail.LinksFromConfig(cfg))
 	handler, err := web.NewRouter(deps)
 	if err != nil {

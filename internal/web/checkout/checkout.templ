@@ -178,9 +178,12 @@ templ checkoutPage(v checkoutView) {
 						}
 					}
 					@components.CardFooter(components.Props{}) {
-						@components.Button(components.ButtonProps{Size: components.ButtonLg, Class: "w-full", Blocked: v.blocked(), Attrs: ui.SubmitAttrs("name", "intent", "value", "pay")}) {
-							Pagar com PIX
-						}
+						<div class="flex w-full flex-col gap-3">
+							@components.Turnstile(v.SiteKey)
+							@components.Button(components.ButtonProps{Size: components.ButtonLg, Class: "w-full", Blocked: v.blocked(), Attrs: ui.SubmitAttrs("name", "intent", "value", "pay")}) {
+								Pagar com PIX
+							}
+						</div>
 					}
 				}
 				<p class="mt-4 text-xs text-muted-foreground">

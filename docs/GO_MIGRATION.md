@@ -55,6 +55,7 @@ internal/
   config           every env var (KEY or KEY_FILE), Load() validates production
   db               pgxpool Open/Migrate/RequireSchemaCurrent, WithTx, EscapeLike; sqlc/ generated
   valkey           go-redis client + in-process fallback; lockouts, TOTP reuse, pending-2FA binding, enroll flash
+  captcha          Cloudflare Turnstile siteverify (policy below), wired via Deps.Captcha
   httpx            middleware (request id, client IP, recover, security headers, body limit, origin), redirects, htmx helpers
   httpx/toast      flash toasts (cookie for full pages, X-Toast header for htmx)
   auth             argon2id, sessions, one-time tokens, TOTP/backup codes, step-up, Google OAuth (PKCE), middleware
@@ -86,6 +87,7 @@ type Deps struct {
 	Cfg *config.Config; Pool *pgxpool.Pool; Q *sqlc.Queries; Valkey *valkey.Client
 	Mailer mail.Mailer; Storage storage.Store; Payments payments.Provider
 	Orders payments.OrderTransitioner /* store.OrderFSM */; Logger *slog.Logger; Shell ShellLoader
+	Captcha *captcha.Verifier /* Turnstile; NewRouter defaults it from Cfg.Captcha */
 }
 // every feature package
 func Mount(r chi.Router, d *app.Deps)
@@ -142,7 +144,14 @@ func Start(ctx, d *app.Deps) *sync.WaitGroup               // server shutdown wa
 func Connect(ctx, url) (*Client, error); NewWithRedis(*redis.Client); NewFallbackOnly()
 (c).RecordAuthFail/AuthFailCount/IsAuthLockedOut/ClearAuthFails, RecordAuthEmailFail/…EmailLockedOut/ClearAuthEmailFails,
 TotpReserve, RecordTotpFail, IsTotpLockedOut, PendingAttempt(s), PendingClear, PendingBindEager, PendingCheckBinding,
-TotpEnrollmentFlashPut/Take; IPUAHash, PendingTokenHash, TotpReuseKey; VerifyCaptchaToken(required, token)
+TotpEnrollmentFlashPut/Take; IPUAHash, PendingTokenHash, TotpReuseKey
+
+// internal/captcha (Cloudflare Turnstile siteverify; nil or unconfigured = no-op)
+func New(config.CaptchaConfig, *http.Client) *Verifier // built by NewRouter into Deps.Captcha when nil
+(v).Enabled() / Enforced() / SiteKey() /* "" = no widget */; (v).Verify(ctx, token, remoteIP) (ok bool, err error)
+(v).CheckForm(r) /* parsed form: cf-turnstile-response, else x-captcha-response */; (v).Check(r, captcha.Token(r, body.CaptchaToken))
+captcha.FormField, JSONField ("captchaToken"), Header, ErrorCode ("CAPTCHA_FAILED"), Message (pt-BR copy)
+components.Turnstile(siteKey) // widget div inside the <form>; web/static/js/turnstile.js loads api.js and renders it
 
 // internal/httpx
 RequestID, ClientIPMiddleware(TrustedProxies), Recover, SecurityHeaders(env), OriginProtection(appOrigin),
@@ -213,6 +222,26 @@ concatenation of partial classes). After changing classes run `make css`.
 
 **SEO.** Call `seo.SetHead(r.Context(), seo.New("Título").WithDescription(…).WithCanonical("/x"))`
 before `render.Page`. Private paths (`seo.IsPrivatePath`) are always noindex.
+
+**CAPTCHA (Cloudflare Turnstile).** `internal/captcha` POSTs `secret`,
+`response` and `remoteip` to siteverify (5s timeout). Policy: with
+`TURNSTILE_SITE_KEY` + `TURNSTILE_SECRET_KEY` (or `_FILE`) set, the widget
+renders, the CSP adds `https://challenges.cloudflare.com` (script-src,
+connect-src, frame-src; `httpx.CSPFor(env, true)`) and tokens are verified.
+`TURNSTILE_ENFORCE=1` rejects a missing, invalid or unverifiable token
+(Cloudflare unreachable included); without it failures are logged and the
+request passes (an unreachable Cloudflare is a warning). Not configured →
+no-op, CSP byte-identical. Wired on POST `/signup`,
+`/api/auth/sign-up/email`, `/forgot-password`,
+`/api/auth/request-password-reset`, `/checkout` (`intent=pay` only),
+`/newsletter` and `/avise-me`; never on `/login` (lockouts cover it).
+Failures: pt-BR toast + redirect back (or the 422 checkout re-render),
+`400 {"code":"CAPTCHA_FAILED"}` on the JSON API. A new protected form:
+`@components.Turnstile(d.Captcha.SiteKey())` inside the `<form>` and
+`if !d.Captcha.CheckForm(r) { … captcha.Message … }` in the handler. Tests:
+`f := testutil.NewFakeTurnstile(t)` + `Options{Mutate: f.WithTurnstile(true)}`,
+token `testutil.TurnstilePass`. `TURNSTILE_VERIFY_URL` overrides siteverify
+in dev/test only.
 
 **htmx 4.** Read `docs/htmx4-notes.md` (inheritance is explicit, 4xx swap,
 `<hx-partial>`, new event names, never 303 an htmx request).
@@ -299,6 +328,10 @@ defaults). These differences were chosen on purpose; don't "fix" them back.
   29 sqlx migrations; it does not upgrade a Rust-era database.
 - **Dashboard order statuses** are shown with pt-BR labels
   (`Aguardando pagamento`, `Pago`, …), not raw enum values.
+- **CAPTCHA is real.** Rust only had a fail-open stub
+  (`VerifyCaptchaToken` accepted any non-blank token and nothing called
+  it). Go verifies Turnstile tokens with siteverify on sign-up, password
+  reset, checkout, newsletter and avise-me (see Conventions → CAPTCHA).
 - **Small additions**: a favicon (`web/static/img/favicon.svg`, also at
   `/favicon.ico`); the 2FA setup page shows the base32 secret under the QR
   for manual entry.

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/wellington-vell/lindaflor/internal/auth"
+	"github.com/wellington-vell/lindaflor/internal/captcha"
 	"github.com/wellington-vell/lindaflor/internal/httpx"
 	"github.com/wellington-vell/lindaflor/internal/ratelimit"
 	"github.com/wellington-vell/lindaflor/internal/seo"
@@ -120,6 +121,8 @@ func (h *handlers) checkoutPage(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			checkoutError = msg
+		case !h.d.Captcha.CheckForm(r):
+			checkoutError = captcha.Message
 		case !ratelimit.CheckWindow(ratelimit.ScopeCheckoutOrder, httpx.ClientIP(r),
 			ratelimit.DefaultCheckoutOrdersPerWindow, ratelimit.CheckoutOrderWindow):
 			checkoutError = store.CheckoutRateLimitedMessage
@@ -144,6 +147,7 @@ func (h *handlers) checkoutPage(w http.ResponseWriter, r *http.Request) {
 	if u, ok := auth.CurrentUser(ctx); ok && posted == nil {
 		data.Email = u.Email // signed-in buyers start with their account e-mail
 	}
+	data.SiteKey = h.d.Captcha.SiteKey()
 	status := http.StatusOK
 	if checkoutError != "" {
 		status = http.StatusUnprocessableEntity
@@ -173,6 +177,7 @@ type checkoutView struct {
 	Notes         string
 	SaveChecked   bool
 	CouponApplied string // code of the applied coupon ("" when none)
+	SiteKey       string // Turnstile on the pay button ("" = off)
 }
 
 func newCheckoutView(sum *store.CheckoutSummary, posted *store.CheckoutInput, checkoutError string) checkoutView {

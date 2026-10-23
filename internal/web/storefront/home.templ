@@ -161,7 +161,7 @@ templ homePage(d homeData) {
 				<h2 class="font-serif text-3xl leading-tight text-foreground">Novidades e promoções no seu e-mail</h2>
 				<p class="text-sm text-muted-foreground">Lançamentos, reposições e cupons exclusivos. Cancele quando quiser.</p>
 			</div>
-			@NewsletterForm()
+			@NewsletterForm(d.SiteKey)
 		</div>
 	</section>
 	<section id="sobre" data-reveal class="mx-auto grid max-w-7xl scroll-mt-28 items-center gap-10 px-4 py-24 md:grid-cols-2 md:px-8">

@@ -10,12 +10,13 @@ import (
 	"github.com/wellington-vell/lindaflor/internal/auth"
 )
 
-// POST /api/auth/request-password-reset {email, redirectTo?} → {status}.
-// Always succeeds (anti-enumeration).
+// POST /api/auth/request-password-reset {email, redirectTo?, captchaToken?}
+// → {status}. Always succeeds (anti-enumeration) once the CAPTCHA passes.
 func (a *api) requestPasswordReset(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Email      *string `json:"email"`
-		RedirectTo string  `json:"redirectTo"`
+		Email        *string `json:"email"`
+		RedirectTo   string  `json:"redirectTo"`
+		CaptchaToken string  `json:"captchaToken"`
 	}
 	if err := decode(r, &body); err != nil {
 		writeError(w, r, err)
@@ -23,6 +24,9 @@ func (a *api) requestPasswordReset(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Email == nil {
 		writeError(w, r, auth.ErrEmailRequired)
+		return
+	}
+	if !a.captchaOK(w, r, body.CaptchaToken) {
 		return
 	}
 	if err := a.svc.RequestPasswordReset(r.Context(), *body.Email, body.RedirectTo); err != nil {

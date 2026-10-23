@@ -150,9 +150,6 @@ func TestKeysAndHashes(t *testing.T) {
 	if len(IPUAHash("1.1.1.1", "ua")) != 32 || IPUAHash("a", "b") == IPUAHash("ab", "") {
 		t.Fatal("ip/ua hash must separate fields")
 	}
-	if !VerifyCaptchaToken(false, "") || VerifyCaptchaToken(true, " ") || !VerifyCaptchaToken(true, "tok") {
-		t.Fatal("captcha gate")
-	}
 }
 
 func TestFallbackExpiry(t *testing.T) {

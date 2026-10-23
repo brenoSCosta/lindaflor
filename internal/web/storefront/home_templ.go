@@ -428,7 +428,7 @@ func homePage(d homeData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = NewsletterForm().Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = NewsletterForm(d.SiteKey).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

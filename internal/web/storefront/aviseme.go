@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/wellington-vell/lindaflor/internal/captcha"
 	"github.com/wellington-vell/lindaflor/internal/httpx"
 	"github.com/wellington-vell/lindaflor/internal/httpx/toast"
 	"github.com/wellington-vell/lindaflor/internal/ratelimit"
@@ -46,6 +47,11 @@ func (h *handlers) stockAlertSubscribe(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(r.PostForm.Get(store.HoneypotField)) != "" {
 		slog.InfoContext(ctx, "stock alert honeypot tripped; dropped")
 		toast.Set(w, r, toast.Success(store.StockAlertSubscribedMessage))
+		toast.Redirect(w, r, back)
+		return
+	}
+	if !h.d.Captcha.CheckForm(r) {
+		toast.Set(w, r, toast.Error(captcha.Message))
 		toast.Redirect(w, r, back)
 		return
 	}

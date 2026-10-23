@@ -60,6 +60,7 @@ type loginData struct {
 	InviteID     string
 	Next         string
 	CallbackURL  string
+	SiteKey      string // Turnstile widget on the sign-up form ("" = off)
 }
 
 func (d loginData) title() string {
@@ -118,6 +119,7 @@ templ signupForm(d loginData) {
 		@alpineField(textField{ID: "name", Name: "name", Type: "text", Label: "Nome", Placeholder: "Nome", Autocomplete: "name", Value: d.DefaultName, Model: "name"})
 		@alpineField(textField{ID: "email", Name: "email", Type: "email", Label: "E-mail", Placeholder: "E-mail", Autocomplete: "email", Value: d.DefaultEmail, Model: "email"})
 		@alpineField(textField{ID: "password", Name: "password", Type: "password", Label: "Senha", Placeholder: "Senha", Autocomplete: "new-password", Model: "password", Extra: templ.Attributes{"maxlength": "128"}})
+		@components.Turnstile(d.SiteKey)
 		@components.Button(components.ButtonProps{Class: "w-full", Attrs: submitAttrs()}) {
 			Continuar com e-mail
 		}
@@ -226,12 +228,13 @@ templ twoFactorPage(backup bool) {
 // ---------------------------------------------------------------------------
 // /forgot-password (+ /sent), /reset-password
 // ---------------------------------------------------------------------------
-templ forgotPage() {
+templ forgotPage(siteKey string) {
 	@brandShell() {
 		@cardHeader("Esqueceu a senha", "Informe seu e-mail e enviaremos um link para redefinir sua senha.")
 		@components.CardContent(components.Props{}) {
 			<form method="post" action="/forgot-password" class="flex flex-col gap-4" novalidate x-data={ forgotData }>
 				@alpineField(textField{ID: "email", Name: "email", Type: "email", Label: "E-mail", Autocomplete: "email", Model: "email"})
+				@components.Turnstile(siteKey)
 				@components.Button(components.ButtonProps{Attrs: submitAttrs()}) {
 					Enviar link
 				}

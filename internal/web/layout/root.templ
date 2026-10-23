@@ -78,6 +78,7 @@ templ Root(p Page) {
 			<script src={ static.URL("vendor/alpine-focus.min.js") } defer></script>
 			<script src={ static.URL("vendor/alpine.min.js") } defer></script>
 			<script src={ static.URL("js/toast.js") } defer></script>
+			<script src={ static.URL("js/turnstile.js") } defer></script>
 		</head>
 		<body>
 			if p.Shell.Impersonating && p.Shell.User != nil {

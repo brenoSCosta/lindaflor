@@ -15,6 +15,7 @@ type homeData struct {
 	Settings    store.StoreSettings
 	Cards       CardCtx
 	WhatsappURL string
+	SiteKey     string // Turnstile site key for the newsletter form ("" = off)
 }
 
 func (h *handlers) home(w http.ResponseWriter, r *http.Request) {
@@ -33,7 +34,7 @@ func (h *handlers) home(w http.ResponseWriter, r *http.Request) {
 		serverError(w, r, "load hero slides", err)
 		return
 	}
-	data := homeData{Slides: slides, Sections: sections, Settings: settings, Cards: h.cardCtx(r, settings)}
+	data := homeData{Slides: slides, Sections: sections, Settings: settings, Cards: h.cardCtx(r, settings), SiteKey: h.d.Captcha.SiteKey()}
 	if n := settings.WhatsappNumberTrimmed(); n != "" {
 		data.WhatsappURL = store.WhatsappLink(n, "Olá! Quero saber mais sobre as peças da Linda Flor.")
 	}

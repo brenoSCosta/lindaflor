@@ -554,27 +554,3 @@ func (c *Client) PendingCheckBinding(ctx context.Context, token string, userID u
 	}
 	return BindingMismatch
 }
-
-// ---------------------------------------------------------------------------
-// CAPTCHA gate (config only; siteverify is a documented follow-up)
-// ---------------------------------------------------------------------------
-
-var warnCaptchaOnce sync.Once
-
-// VerifyCaptchaToken fails open until the Turnstile siteverify integration
-// lands: when the gate is not required it returns true; when required, a
-// non-blank token is accepted (logged once) and a blank one rejected.
-// Same as the Rust app; real siteverify (POST challenges.cloudflare.com,
-// 5s timeout) is a follow-up before relying on TURNSTILE_ENFORCE.
-func VerifyCaptchaToken(required bool, token string) bool {
-	if !required {
-		return true
-	}
-	if strings.TrimSpace(token) != "" {
-		warnCaptchaOnce.Do(func() {
-			slog.Warn("TURNSTILE_ENFORCE=1 but server-side siteverify is not implemented; accepting token presence only")
-		})
-		return true
-	}
-	return false
-}
