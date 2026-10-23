@@ -325,7 +325,7 @@ func TestAdminPagesRender(t *testing.T) {
 		"/admin/trocas":        {"Trocas e devoluções", "Em aberto", "Nenhuma solicitação encontrada."},
 		"/admin/estoque":       {"Saldo por depósito.", "Saldo por Depósito", "Depósitos"},
 		"/admin/configuracoes": {"Configurações da loja", "PIX (chave fixa)", "Salvar configurações"},
-		"/admin/cupons":        {"Novo cupom", "Nenhum cupom cadastrado.", "Criar cupom"},
+		"/admin/cupons":        {"Novo cupom", "Nenhum cupom cadastrado.", "Criar cupom", `action="/admin/cupons/create"`, `hx-post="/admin/cupons/create"`, `data-toast-loading="Criando cupom…"`},
 		"/admin/avaliacoes":    {"Avaliações", "pendentes de moderação", "Nenhuma avaliação ainda"},
 		"/admin/banners":       {"Banners da home", "Nenhum banner cadastrado ainda.", "Criar banner"},
 		"/admin/newsletter":    {"Newsletter", "Nenhum inscritor ainda", "Exportar CSV (ativas)"},
