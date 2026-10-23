@@ -23,6 +23,7 @@ import (
 	"github.com/wellington-vell/lindaflor/internal/mail"
 	"github.com/wellington-vell/lindaflor/internal/payments"
 	"github.com/wellington-vell/lindaflor/internal/storage"
+	"github.com/wellington-vell/lindaflor/internal/store"
 	"github.com/wellington-vell/lindaflor/internal/valkey"
 	"github.com/wellington-vell/lindaflor/internal/web"
 )
@@ -59,7 +60,7 @@ func run() error {
 	}
 	defer func() { _ = vk.Close() }()
 
-	store := storage.FromConfig(ctx, cfg.S3)
+	objects := storage.FromConfig(ctx, cfg.S3)
 
 	mailer, err := mail.FromConfig(cfg.Mail, cfg.AppEnv == "production")
 	if err != nil {
@@ -71,8 +72,10 @@ func run() error {
 
 	deps := &app.Deps{
 		Cfg: cfg, Pool: pool, Q: sqlc.New(pool), Valkey: vk,
-		Mailer: mailer, Storage: store, Payments: pay, Logger: logger,
+		Mailer: mailer, Storage: objects, Payments: pay, Logger: logger,
+		Orders: store.OrderFSM{Pool: pool},
 	}
+	store.SetLinks(mail.LinksFromConfig(cfg))
 	handler, err := web.NewRouter(deps)
 	if err != nil {
 		return err
