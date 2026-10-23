@@ -1,0 +1,12 @@
+{
+  "name": "lindaflor-e2e",
+  "private": true,
+  "type": "module",
+  "description": "End-to-end suite for lindaflor against real services (see README.md). Not part of go test.",
+  "scripts": {
+    "e2e": "./stack.sh"
+  },
+  "devDependencies": {
+    "playwright": "1.59.1"
+  }
+}

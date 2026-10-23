@@ -81,6 +81,7 @@ All targets expect the dev shell (`devenv shell` or `nix develop`).
 | `make backup` | `scripts/backup.sh manual` → `./backups/*.dump` |
 | `make docker` | Build `lindaflor:dev` (runtime) and `lindaflor-migrate:dev` |
 | `make docker-smoke` | Build both images and boot them against throwaway Postgres + Valkey |
+| `make e2e` | Playwright suite against a throwaway stack (Postgres, Valkey, S3, Mailpit, fake Mercado Pago, TLS proxy) — see [`e2e/README.md`](e2e/README.md). Not part of `go test` |
 
 devenv also exposes `generate`, `dev`, `lint`, `fmt`, `test`, `migrate`,
 `seed`, `db-reset` (wipes the local Postgres state) and `ports` as shell

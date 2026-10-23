@@ -11,7 +11,7 @@ CSS_OUT    := web/static/css/app.css
 IMAGE      ?= lindaflor
 IMAGE_TAG  ?= dev
 
-.PHONY: generate templ sqlc css build test test-race lint lint-infra vuln fmt fmt-check vet dev run migrate migrate-status backup seed create-admin db-reset tidy drift docker docker-runtime docker-migrate docker-smoke clean
+.PHONY: generate templ sqlc css build test test-race lint lint-infra vuln fmt fmt-check vet dev run migrate migrate-status backup seed create-admin db-reset tidy drift docker docker-runtime docker-migrate docker-smoke e2e clean
 
 ## generate: templ + sqlc + tailwind (outputs are committed)
 generate: templ sqlc css
@@ -105,6 +105,12 @@ docker-migrate:
 ## docker-smoke: boot both images against throwaway Postgres + Valkey
 docker-smoke: docker
 	scripts/docker-smoke.sh $(IMAGE):$(IMAGE_TAG) $(IMAGE)-migrate:$(IMAGE_TAG)
+
+## e2e: Playwright suite against a throwaway stack (postgres, valkey, versitygw S3,
+## mailpit, fake Mercado Pago, caddy TLS) — not part of go test. FLOWS="admin jobs" runs a subset.
+E2E_NIX_PKGS := nixpkgs\#mailpit nixpkgs\#versitygw nixpkgs\#caddy nixpkgs\#nodejs nixpkgs\#playwright-test
+e2e:
+	nix shell $(E2E_NIX_PKGS) --command e2e/stack.sh $(FLOWS)
 
 clean:
 	rm -rf $(BIN) tmp
