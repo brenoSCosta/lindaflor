@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/wellington-vell/lindaflor/internal/ratelimit"
 )
 
 // Cart (src/app/store/cart.rs): guest/user carts keyed by a bearer token
@@ -749,17 +751,23 @@ func SetCartCoupon(ctx context.Context, q DBTX, cartID uuid.UUID, code string) e
 // exhausted.
 const CouponRateLimitedMessage = "Muitas tentativas. Aguarde um momento e tente novamente."
 
+// CheckCouponCartRate consumes one cell of the per-cart coupon budget
+// (ratelimit scope coupon:cart keyed by cart id), on top of the per-IP
+// coupon:apply layer: slows code guessing spread across IPs reusing a cart.
+func CheckCouponCartRate(cartID uuid.UUID) bool {
+	return ratelimit.Check(ratelimit.ScopeCouponCart, cartID.String(), ratelimit.DefaultCouponCartPerMin)
+}
+
 // ApplyCartCoupon is the cart-sheet coupon form (/carrinho/cupom): an
-// empty code clears the coupon; otherwise allow (the per-cart rate budget,
-// ratelimit scope coupon:cart keyed by cart id; nil = unlimited) is
-// consumed and the code validated against the hydrated subtotal. Returns
-// "" when applied/cleared, else the inline message to show.
-func ApplyCartCoupon(ctx context.Context, pool *pgxpool.Pool, cartID uuid.UUID, userID *uuid.UUID, rawCode string, allow func() bool) (string, error) {
+// empty code clears the coupon; otherwise the per-cart budget is consumed
+// and the code validated against the hydrated subtotal. Returns "" when
+// applied/cleared, else the inline message to show.
+func ApplyCartCoupon(ctx context.Context, pool *pgxpool.Pool, cartID uuid.UUID, userID *uuid.UUID, rawCode string) (string, error) {
 	code := truncateRunes(trimSpace(rawCode), 64)
 	if code == "" {
 		return "", SetCartCoupon(ctx, pool, cartID, "")
 	}
-	if allow != nil && !allow() {
+	if !CheckCouponCartRate(cartID) {
 		return CouponRateLimitedMessage, nil
 	}
 	h, err := HydrateCart(ctx, pool, cartID)
