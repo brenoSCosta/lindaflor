@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/wellington-vell/lindaflor/internal/captcha"
 	"github.com/wellington-vell/lindaflor/internal/httpx"
 	"github.com/wellington-vell/lindaflor/internal/httpx/toast"
 	"github.com/wellington-vell/lindaflor/internal/ratelimit"
@@ -20,6 +21,11 @@ func (h *handlers) newsletterSubscribe(w http.ResponseWriter, r *http.Request) {
 	home := func() { toast.Redirect(w, r, "/") }
 	if !ratelimit.Check(store.ScopeNewsletter, httpx.ClientIP(r), store.NewsletterPerMin) {
 		toast.Set(w, r, toast.Error("Muitas tentativas. Tente novamente em alguns minutos."))
+		home()
+		return
+	}
+	if !h.d.Captcha.CheckForm(r) {
+		toast.Set(w, r, toast.Error(captcha.Message))
 		home()
 		return
 	}

@@ -31,6 +31,7 @@ type productView struct {
 	Added        bool
 	AddError     string
 	AlertEmail   string
+	SiteKey      string // Turnstile on the avise-me form ("" = off)
 }
 
 func (v productView) selectedAvailable() int32 {
@@ -138,6 +139,7 @@ func (h *handlers) productPage(w http.ResponseWriter, r *http.Request) {
 		v.WhatsappURL = store.WhatsappLink(n, msg)
 	}
 	v.Cards = h.cardCtx(r, settings)
+	v.SiteKey = h.d.Captcha.SiteKey()
 	if u, ok := auth.CurrentUser(ctx); ok {
 		v.AlertEmail = u.Email
 	}

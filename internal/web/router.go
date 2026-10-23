@@ -11,6 +11,7 @@ import (
 
 	"github.com/wellington-vell/lindaflor/internal/app"
 	"github.com/wellington-vell/lindaflor/internal/auth"
+	"github.com/wellington-vell/lindaflor/internal/captcha"
 	"github.com/wellington-vell/lindaflor/internal/httpx"
 	"github.com/wellington-vell/lindaflor/internal/httpx/toast"
 	"github.com/wellington-vell/lindaflor/internal/logging"
@@ -37,6 +38,9 @@ func NewRouter(d *app.Deps) (http.Handler, error) {
 	if d.Shell == nil {
 		d.Shell = storefront.ShellLoader(d)
 	}
+	if d.Captcha == nil {
+		d.Captcha = captcha.New(d.Cfg.Captcha, nil)
+	}
 	proxies, err := httpx.NewTrustedProxies(d.Cfg.TrustedProxyHops, d.Cfg.TrustedProxyNets)
 	if err != nil {
 		return nil, err
@@ -52,7 +56,7 @@ func NewRouter(d *app.Deps) (http.Handler, error) {
 		httpx.ClientIPMiddleware(proxies),
 		logging.Middleware(d.Logger),
 		httpx.Recover,
-		httpx.SecurityHeaders(d.Cfg.AppEnv),
+		httpx.SecurityHeadersWith(d.Cfg.AppEnv, d.Captcha.Enabled()),
 		metrics.Middleware,
 		origin,
 		httpx.GlobalBodyLimit(httpx.DefaultBodyLimit),

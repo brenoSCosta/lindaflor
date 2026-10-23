@@ -17,12 +17,14 @@ func str(p *string) string {
 	return *p
 }
 
-// POST /api/auth/sign-up/email {name, email, password} → {user, session}.
+// POST /api/auth/sign-up/email {name, email, password, captchaToken?} →
+// {user, session}; 400 CAPTCHA_FAILED when Turnstile rejects the token.
 func (a *api) signUpEmail(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name     *string `json:"name"`
-		Email    *string `json:"email"`
-		Password *string `json:"password"`
+		Name         *string `json:"name"`
+		Email        *string `json:"email"`
+		Password     *string `json:"password"`
+		CaptchaToken string  `json:"captchaToken"`
 	}
 	if err := decode(r, &body); err != nil {
 		writeError(w, r, err)
@@ -30,6 +32,9 @@ func (a *api) signUpEmail(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Name == nil || body.Email == nil || body.Password == nil {
 		writeError(w, r, auth.BadRequest("name, email and password are required"))
+		return
+	}
+	if !a.captchaOK(w, r, body.CaptchaToken) {
 		return
 	}
 	u, s, err := a.svc.SignUpEmail(w, r, *body.Name, *body.Email, *body.Password, false)

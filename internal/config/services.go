@@ -298,24 +298,68 @@ func GoogleOAuthTestBaseURL() string {
 	return strings.TrimRight(strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_TEST_BASE_URL")), "/")
 }
 
-// CaptchaConfig is the Turnstile gate (TURNSTILE_SITE_KEY,
-// TURNSTILE_SECRET_KEY, TURNSTILE_ENFORCE=1|true).
+// TurnstileVerifyURL is Cloudflare's siteverify endpoint.
+const TurnstileVerifyURL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+
+// ErrTurnstileEnforcedWithoutKeys: TURNSTILE_ENFORCE=1 without a site key
+// and secret would reject every protected form (production boot fails).
+var ErrTurnstileEnforcedWithoutKeys = errors.New("TURNSTILE_ENFORCE=1 requires TURNSTILE_SITE_KEY and TURNSTILE_SECRET_KEY (or TURNSTILE_SECRET_KEY_FILE)")
+
+// CaptchaConfig is the Cloudflare Turnstile setup: TURNSTILE_SITE_KEY,
+// TURNSTILE_SECRET_KEY (+ _FILE), TURNSTILE_ENFORCE=1|true and, in
+// dev/test only, TURNSTILE_VERIFY_URL (a siteverify stub for tests).
 type CaptchaConfig struct {
-	SiteKey          string
-	SecretConfigured bool
-	Enforced         bool
+	SiteKey  string
+	Secret   string
+	Enforced bool
+	// VerifyURL is the siteverify endpoint ("" = TurnstileVerifyURL).
+	VerifyURL string
 }
 
-// Required reports whether a CAPTCHA token must be presented.
-func (c CaptchaConfig) Required() bool { return c.Enforced && c.SecretConfigured }
+// Configured reports whether both keys are set: the widget renders and
+// tokens are verified. Otherwise the CAPTCHA is a no-op.
+func (c CaptchaConfig) Configured() bool { return c.SiteKey != "" && c.Secret != "" }
 
-// CaptchaFromEnv reads the Turnstile variables (plain env, like Rust).
+// WidgetSiteKey is the site key to render, "" when not configured.
+func (c CaptchaConfig) WidgetSiteKey() string {
+	if !c.Configured() {
+		return ""
+	}
+	return c.SiteKey
+}
+
+// String redacts the secret.
+func (c CaptchaConfig) String() string {
+	return fmt.Sprintf("CaptchaConfig{SiteKey:%s Secret:*** Enforced:%t VerifyURL:%s}", c.SiteKey, c.Enforced, c.VerifyURL)
+}
+
+// GoString keeps %#v redacted too.
+func (c CaptchaConfig) GoString() string { return c.String() }
+
+// Validate fails when enforcement is on without both keys. Load calls it
+// in production only; elsewhere an unconfigured CAPTCHA is a no-op.
+func (c CaptchaConfig) Validate() error {
+	if c.Enforced && !c.Configured() {
+		return ErrTurnstileEnforcedWithoutKeys
+	}
+	return nil
+}
+
+// CaptchaFromEnv reads the Turnstile variables. TURNSTILE_VERIFY_URL is
+// honored only when APP_ENV is development/dev/test (like
+// GOOGLE_OAUTH_TEST_BASE_URL).
 func CaptchaFromEnv() CaptchaConfig {
-	enforce := os.Getenv("TURNSTILE_ENFORCE")
+	verifyURL := TurnstileVerifyURL
+	if IsDevEnv(AppEnv()) {
+		if u := strings.TrimSpace(os.Getenv("TURNSTILE_VERIFY_URL")); u != "" {
+			verifyURL = u
+		}
+	}
 	return CaptchaConfig{
-		SiteKey:          strings.TrimSpace(os.Getenv("TURNSTILE_SITE_KEY")),
-		SecretConfigured: strings.TrimSpace(os.Getenv("TURNSTILE_SECRET_KEY")) != "",
-		Enforced:         enforce == "1" || strings.EqualFold(enforce, "true"),
+		SiteKey:   strings.TrimSpace(envNonEmpty("TURNSTILE_SITE_KEY")),
+		Secret:    strings.TrimSpace(envNonEmpty("TURNSTILE_SECRET_KEY")),
+		Enforced:  EnvFlag("TURNSTILE_ENFORCE"),
+		VerifyURL: verifyURL,
 	}
 }
 

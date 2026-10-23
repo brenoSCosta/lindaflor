@@ -74,9 +74,15 @@ x-app-env: &app-env
   # GOOGLE_CLIENT_SECRET_FILE also work if you mount them as secrets.
   GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
   GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-  # Cloudflare Turnstile on sign-up/sign-in (optional).
+  # Cloudflare Turnstile (optional) on sign-up, password reset, checkout,
+  # newsletter and avise-me. Needs both keys; TURNSTILE_ENFORCE=1 rejects
+  # missing/invalid tokens (boot fails if a key is missing). The secret can
+  # be a file instead: create ./secrets/turnstile_secret_key, uncomment the
+  # `turnstile_secret_key` entries under web.secrets and the top-level
+  # secrets, and set TURNSTILE_SECRET_KEY_FILE=/run/secrets/turnstile_secret_key.
   TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
   TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY:-}
+  TURNSTILE_SECRET_KEY_FILE: ${TURNSTILE_SECRET_KEY_FILE:-}
   TURNSTILE_ENFORCE: ${TURNSTILE_ENFORCE:-}
   # JSON logs to stdout; LOG_SAMPLE_RATE samples successful requests.
   LOG_SAMPLE_RATE: ${LOG_SAMPLE_RATE:-1}
@@ -100,6 +106,7 @@ services:
       - token_pepper
       - totp_encryption_key
       - metrics_token
+      # - turnstile_secret_key   # optional, see TURNSTILE_SECRET_KEY_FILE
     # Publish on loopback only; the TLS reverse proxy is the public edge.
     ports:
       - "127.0.0.1:${LINDAFLOR_HTTP_PORT:-4200}:4200"
@@ -256,6 +263,8 @@ secrets:
     file: ./secrets/totp_encryption_key
   metrics_token:
     file: ./secrets/metrics_token
+  # turnstile_secret_key:          # optional Cloudflare Turnstile secret
+  #   file: ./secrets/turnstile_secret_key
 
 volumes:
   pgdata:

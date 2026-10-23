@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/wellington-vell/lindaflor/internal/captcha"
 	"github.com/wellington-vell/lindaflor/internal/config"
 	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 	"github.com/wellington-vell/lindaflor/internal/mail"
@@ -37,4 +38,7 @@ type Deps struct {
 	Orders payments.OrderTransitioner
 	Logger *slog.Logger
 	Shell  ShellLoader
+	// Captcha verifies Turnstile tokens on the abuse-prone forms (nil or
+	// unconfigured = no-op; NewRouter builds it from Cfg.Captcha).
+	Captcha *captcha.Verifier
 }

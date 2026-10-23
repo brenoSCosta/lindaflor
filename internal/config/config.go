@@ -185,6 +185,9 @@ func loadCore() (*Config, error) {
 		if p := TokenPepper(); p == "" || p == DevTokenPepper {
 			return nil, ErrMissingTokenPepper
 		}
+		if err := CaptchaFromEnv().Validate(); err != nil {
+			return nil, err
+		}
 	}
 	host := os.Getenv("HOST")
 	if host == "" {

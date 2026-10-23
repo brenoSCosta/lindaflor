@@ -4,7 +4,7 @@ import "github.com/wellington-vell/lindaflor/internal/web/components"
 
 // stockAlertForm is the "Avise-me quando chegar" card for a sold-out
 // variant (src/app/avise_me.rs stock_alert_form).
-templ stockAlertForm(variantID string, email string) {
+templ stockAlertForm(variantID, email, siteKey string) {
 	@components.Card(components.Props{}) {
 		@components.CardHeader(components.Props{}) {
 			@components.CardTitle(components.Props{}) {
@@ -34,6 +34,7 @@ templ stockAlertForm(variantID string, email string) {
 						"value":        email,
 					}})
 				</div>
+				@components.Turnstile(siteKey)
 				@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Size: components.ButtonLg, Class: "w-full", Attrs: templ.Attributes{"type": "submit"}}) {
 					Avise-me quando chegar
 				}
@@ -110,8 +111,9 @@ templ unsubscribeView(v emailLinkView) {
 	}
 }
 
-// NewsletterForm is src/app/store/newsletter_form.rs (POST /newsletter).
-templ NewsletterForm() {
+// NewsletterForm is src/app/store/newsletter_form.rs (POST /newsletter);
+// siteKey is the Turnstile site key (d.Captcha.SiteKey(), "" = off).
+templ NewsletterForm(siteKey string) {
 	<form action="/newsletter" method="POST" class="space-y-4">
 		<div class="space-y-2">
 			@components.Label(components.LabelProps{For: "email"}) {
@@ -125,6 +127,7 @@ templ NewsletterForm() {
 			}
 			@components.Input(components.InputProps{Attrs: templ.Attributes{"type": "text", "name": "name", "id": "name", "placeholder": "Seu nome"}})
 		</div>
+		@components.Turnstile(siteKey)
 		@components.Button(components.ButtonProps{Attrs: templ.Attributes{"type": "submit"}}) {
 			Inscrever
 		}

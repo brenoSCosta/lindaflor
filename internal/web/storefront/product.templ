@@ -288,7 +288,7 @@ templ productPageView(v productView) {
 					}
 				}
 				if v.selectedAvailable() == 0 && v.Selected != nil {
-					@stockAlertForm(v.Selected.ID.String(), v.AlertEmail)
+					@stockAlertForm(v.Selected.ID.String(), v.AlertEmail, v.SiteKey)
 				}
 				@components.Separator(false, components.Props{Class: "my-4"})
 				@components.Accordion(components.Props{}) {

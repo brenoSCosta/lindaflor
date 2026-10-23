@@ -184,9 +184,21 @@ messages locally run [mailpit](https://mailpit.axllent.org/)
 | Variable | Default / notes |
 | --- | --- |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google sign-in (PKCE). Unset disables it |
-| `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` / `TURNSTILE_ENFORCE` | Cloudflare Turnstile on auth forms; enforced only with `TURNSTILE_ENFORCE=1` and a secret |
+| `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET_KEY` (or `_FILE`) | Cloudflare Turnstile on sign-up, password reset (page + `/api/auth/*`), checkout (`intent=pay`), newsletter and avise-me. Both set: the widget renders, the CSP allows `https://challenges.cloudflare.com` and tokens are checked with siteverify (5s timeout). Unset: no-op. Sign-in has no CAPTCHA (lockouts) |
+| `TURNSTILE_ENFORCE` | `1`: missing, invalid or unverifiable tokens are rejected (also when Cloudflare is unreachable); production refuses to boot without both keys. Off: report-only (failures logged, requests pass) |
+| `TURNSTILE_VERIFY_URL` | siteverify endpoint override for tests; honored only when `APP_ENV` is development/dev/test |
 | `PASSWORD_MIN_LEN` / `PASSWORD_MAX_LEN` / `PASSWORD_MIN_ZXCVBN_SCORE` | `8` / `128` / `3` |
 | `RATE_LIMIT_<SCOPE>_PER_MIN` | Per-scope override, e.g. `RATE_LIMIT_AUTH_SIGN_IN_PER_MIN` (scope `:`/`-` → `_`, uppercased) |
+
+Turnstile locally: Cloudflare publishes test keys. Site key
+`1x00000000000000000000AA` with secret `1x0000000000000000000000000000000AA`
+always passes; secret `2x0000000000000000000000000000000AA` always fails. Set
+them with `TURNSTILE_ENFORCE=1` to exercise the widget end to end (needs
+network access to `challenges.cloudflare.com`). Forms post the widget's
+`cf-turnstile-response` field; JSON bodies take `captchaToken` (or the
+`x-captcha-response` header); failures are a pt-BR toast / 422, or
+`400 {"code":"CAPTCHA_FAILED"}` on the JSON API. The Go tests use a fake
+siteverify server (`testutil.NewFakeTurnstile`) and never hit the network.
 
 ### Jobs & logging
 

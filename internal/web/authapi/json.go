@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/wellington-vell/lindaflor/internal/auth"
+	"github.com/wellington-vell/lindaflor/internal/captcha"
 	"github.com/wellington-vell/lindaflor/internal/httpx"
 )
 
@@ -46,6 +47,17 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		w.Header().Set("Retry-After", "60")
 	}
 	writeJSON(w, status, errorBody{Code: auth.CodeOf(err), Message: err.Error()})
+}
+
+// captchaOK checks the Turnstile token (the captchaToken body field, else
+// the x-captcha-response header); a failure is answered with 400
+// {code: CAPTCHA_FAILED}.
+func (a *api) captchaOK(w http.ResponseWriter, r *http.Request, bodyToken string) bool {
+	if a.d.Captcha.Check(r, captcha.Token(r, bodyToken)) {
+		return true
+	}
+	writeJSON(w, http.StatusBadRequest, errorBody{Code: captcha.ErrorCode, Message: captcha.Message})
+	return false
 }
 
 var errInvalidBody = auth.BadRequest("invalid JSON body")

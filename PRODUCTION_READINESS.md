@@ -26,6 +26,8 @@
 > - The checkout service split + `thiserror` (`1003a65`).
 > - `p2-polish` (`0026`): Google tokens no longer stored, prod CSP without CDNs, escaped `ILIKE`, per-recipient auth-mail cap, tracking in the shipped email.
 >
+> Go app update: checkout create-order now has a per-IP window rate limit and Cloudflare Turnstile (`internal/captcha`, siteverify) together with sign-up, password reset, newsletter and avise-me.
+>
 > Still open: checkout create-order rate limit/CAPTCHA, PITR/S3 versioning/restore drill, S3/Google retry, Grafana stack and the remaining §5 items. See also `CODEBASE-REVIEW-CC.md` → Status.
 
 ---
@@ -93,7 +95,7 @@ Reset / verify / 2FA-pending / OAuth-state / change-email / delete tokens in `ve
   - Valkey (fallback in-process) `auth:fail:<ip>:<email>`: 10 fails / 15 min lockout; HTML `/login` POST also `check_ip_rate`.
   - TOTP single-use `totp_reserve` 90s after a successful `verify_code`; 5 attempts per pending token then invalidate.
   - `trust_device` checkbox **removed** (no `trusted_devices` table this pass).
-  - CAPTCHA remains a **stub** (`TURNSTILE_ENFORCE` config gate only; no siteverify). Wire Turnstile/hCaptcha on sign-up / password-reset / guest checkout if abuse is observed.
+  - CAPTCHA remains a **stub** (`TURNSTILE_ENFORCE` config gate only; no siteverify). Wire Turnstile/hCaptcha on sign-up / password-reset / guest checkout if abuse is observed. *(Done in the Go app: real Turnstile siteverify (`internal/captcha`) on sign-up, password reset, checkout `intent=pay`, newsletter and avise-me; `TURNSTILE_ENFORCE=1` rejects. See README.)*
 
 ### 1.7 OAuth link CSRF — `src/auth/routes/oauth.rs:246-280`, `src/auth/routes/accounts.rs:156-166`
 `store_oauth_state(..., Some(user_id))` embeds `link_user_id` (`store_oauth_state` at `:72`); `google_callback` / `link_google_account` never verifies current session == `link_user_id`; no PKCE/nonce bound to cookie.
@@ -211,7 +213,7 @@ Today: Google `Client::new()` per `exchange_code` / `fetch_userinfo` (`google.rs
   - *The background expiry sweeper (MP-aware).*
   - *24h vs 48h copy aligned to the 48h hold (`p2-polish`).*
 
-  *Still open: rate limit / CAPTCHA on order creation, and documenting the shipping-on-discount rule in `termos`.*
+  *Still open: rate limit / CAPTCHA on order creation, and documenting the shipping-on-discount rule in `termos`.* *(Go app: order creation is rate-limited and Turnstile-protected.)*
   - Gate checkout when neither MP nor manual PIX configured: `400 pix_not_configured`.
   - Rate-limit + CAPTCHA on `create_order`; background worker (tokio-cron or `pg_cron`) to expire `pending_payment` past `reservation_expires_at` and `release_expired_reservations` — do not rely on per-request sweeper.
   - Align copy: decide 24h vs 48h, update both code and template.
