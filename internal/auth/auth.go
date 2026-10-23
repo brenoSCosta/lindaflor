@@ -1,16 +1,21 @@
 // Package auth: users, sessions, passwords, TOTP, one-time tokens, Google
 // OAuth and the /api/auth JSON API.
 //
-// Wave 0 defines only the contract every other package codes against:
-// the User/Session types, CurrentUser/CurrentSession readers and the
-// Middleware constructor wired in internal/web/router.go.
-// TODO(wave1-A): implement session loading (sha256 token lookup, 30d
-// sliding expiry, impersonation 1h, banned users), cookies (`session` /
-// `__Host-session`), argon2id, TOTP, tokens, Google PKCE, /api/auth/*.
+// The contract other packages code against: User/Session, CurrentUser /
+// CurrentSession readers, Middleware (wired in internal/web/router.go),
+// RequireUser / RequireAdmin. The behaviour lives in Service (service*.go):
+// sign-up/in, sessions, one-time tokens, TOTP, step-up, Google OAuth,
+// impersonation and admin user management. HTTP surfaces live in
+// internal/web/authapi (/api/auth/*) and internal/web/authpages (HTML).
+//
+// Extension points for other packages: RegisterLoginHook (guest-cart merge
+// on login), RateAllow (in-handler rate-limit budget), MailSender (auth
+// mail rendering).
 package auth
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -20,6 +25,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/wellington-vell/lindaflor/internal/config"
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
+	"github.com/wellington-vell/lindaflor/internal/httpx"
 	"github.com/wellington-vell/lindaflor/internal/valkey"
 )
 
@@ -101,42 +108,65 @@ func IsImpersonating(ctx context.Context) bool {
 }
 
 // MiddlewareDeps are the dependencies of the session middleware.
-// TODO(wave1-A): add fields as needed (keep construction in router.go
-// unchanged: it passes the whole struct).
 type MiddlewareDeps struct {
 	Pool   *pgxpool.Pool
 	Cfg    *config.Config
 	Valkey *valkey.Client
 }
 
-// Middleware loads the session from the cookie and stores the user in the
-// request context. Wave 0 placeholder: loads nothing (everyone is anonymous).
-func Middleware(_ MiddlewareDeps) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler { return next } // TODO(wave1-A)
+// Middleware loads the session from the cookie (`session` /
+// `__Host-session`), resolves the user (unexpired session, not currently
+// banned), slides the expiry about once per day and stores both in the
+// request context. Lookup failures are logged and treated as anonymous.
+func Middleware(d MiddlewareDeps) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		if d.Pool == nil || d.Cfg == nil {
+			return next
+		}
+		q := sqlc.New(d.Pool)
+		secure := d.Cfg.SecureCookies
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			u, s, err := loadSession(r.Context(), w, r, q, secure)
+			if err != nil {
+				slog.ErrorContext(r.Context(), "auth: load session", "error", err)
+			}
+			if u != nil {
+				r = r.WithContext(WithUser(r.Context(), u, s))
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
-// RequireUser redirects anonymous visitors to /login?redirect=<path>.
-// TODO(wave1-A): match the Rust require_user behavior exactly (htmx-aware).
+// LoginPath is where RequireUser sends anonymous visitors.
+const LoginPath = "/login"
+
+// RequireUser redirects anonymous visitors to /login?next=<path> (303, or
+// HX-Location for htmx requests).
 func RequireUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, ok := CurrentUser(r.Context()); !ok {
-			// Local path only (r.URL.Path never carries a scheme/host).
-			target := "/login?" + url.Values{"redirect": {r.URL.EscapedPath()}}.Encode()
-			http.Redirect(w, r, target, http.StatusSeeOther) //nolint:gosec // G710: same-site /login target
+			target := LoginPath
+			if p := r.URL.RequestURI(); p != "" && p != "/" {
+				if safe, ok := httpx.SafeLocalRedirect(p); ok {
+					target += "?" + url.Values{"next": {safe}}.Encode()
+				}
+			}
+			httpx.Redirect(w, r, target)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
 }
 
-// RequireAdmin answers 404 to non-admins (admin pages are not advertised).
-// TODO(wave1-A): confirm against src/app/admin.rs guard.
+// RequireAdmin mirrors src/app/auth_helpers.rs require_admin: anonymous →
+// /login (RequireUser), signed-in non-admins → /dashboard.
 func RequireAdmin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if u, ok := CurrentUser(r.Context()); !ok || !u.IsAdmin() {
-			http.NotFound(w, r)
+	return RequireUser(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if u, _ := CurrentUser(r.Context()); !u.IsAdmin() {
+			httpx.Redirect(w, r, "/dashboard")
 			return
 		}
 		next.ServeHTTP(w, r)
-	})
+	}))
 }
