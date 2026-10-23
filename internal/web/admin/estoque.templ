@@ -1,0 +1,104 @@
+package admin
+
+import (
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+)
+
+const stockResultsID = "stock-results"
+
+templ stockResults(d store.StockDirectory) {
+	<div id={ stockResultsID } class="flex flex-col gap-6">
+		@cardTitled("Saldo por Depósito") {
+			if len(d.Rows) == 0 {
+				<p class="text-sm text-muted-foreground">Nenhum item encontrado.</p>
+			} else {
+				@components.Table(components.Props{}) {
+					@components.TableHeader(components.Props{}) {
+						@components.TableRow(components.Props{}) {
+							@th("Produto")
+							@th("SKU")
+							@th("Depósito")
+							@th("Tamanho")
+							@th("Qtd")
+							@th("Reservado")
+							@th("Disponível")
+							@th("Ajuste")
+						}
+					}
+					@components.TableBody(components.Props{}) {
+						for _, it := range d.Rows {
+							@components.TableRow(components.Props{}) {
+								@components.TableCell(components.Props{}) {
+									<span class="font-medium">{ it.ProductName }</span>
+								}
+								@td(it.SKU)
+								@td(it.WarehouseName)
+								@td(deref(it.Size))
+								@td(itoa(it.Quantity))
+								@td(itoa(it.Reserved))
+								@components.TableCell(components.Props{}) {
+									<span class="font-medium">{ itoa(it.Available()) }</span>
+								}
+								@components.TableCell(components.Props{}) {
+									<form method="post" action="/admin/estoque" class="flex flex-wrap items-center gap-2">
+										@hidden("inventory_id", it.ID.String())
+										@hidden("q", d.Query)
+										@components.Input(components.InputProps{Class: "w-20", Attrs: templ.Attributes{"type": "number", "name": "delta", "required": true, "placeholder": "Δ"}})
+										@components.Input(components.InputProps{Class: "w-36", Attrs: templ.Attributes{"type": "text", "name": "reason", "required": true, "placeholder": "Motivo"}})
+										@submit(components.ButtonOutline, components.ButtonSm) {
+											Ajustar
+										}
+									</form>
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		@cardTitled("Depósitos") {
+			@components.Table(components.Props{}) {
+				@components.TableHeader(components.Props{}) {
+					@components.TableRow(components.Props{}) {
+						@th("Código")
+						@th("Nome")
+						@th("Padrão")
+					}
+				}
+				@components.TableBody(components.Props{}) {
+					for _, wh := range d.Warehouses {
+						@components.TableRow(components.Props{}) {
+							@components.TableCell(components.Props{}) {
+								<span class="font-mono">{ wh.Code }</span>
+							}
+							@components.TableCell(components.Props{}) {
+								<span class="font-medium">{ wh.Name }</span>
+							}
+							@components.TableCell(components.Props{}) {
+								if wh.IsDefault {
+									@components.Badge(components.BadgeProps{Variant: components.BadgeSecondary}) {
+										Sim
+									}
+								} else {
+									<span class="text-muted-foreground">—</span>
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	</div>
+}
+
+templ stockPage(d store.StockDirectory) {
+	@components.Container(components.ContainerProps{}) {
+		@pageTitle("Estoque", "Saldo por depósito. Use o ajuste para entradas e baixas manuais.")
+		@searchForm(searchBox{
+			FormID: "stock-search-form", InputID: "stock-search", Action: stockPath, Fragment: stockListPath,
+			Target: "#" + stockResultsID, Value: d.Query, Placeholder: "Buscar por produto ou SKU", AriaLabel: "Buscar estoque",
+		})
+		@stockResults(d)
+	}
+}

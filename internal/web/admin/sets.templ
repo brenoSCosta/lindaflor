@@ -1,0 +1,188 @@
+package admin
+
+import (
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+)
+
+func toggleLabel(active bool) string {
+	if active {
+		return "Desativar"
+	}
+	return "Ativar"
+}
+
+templ rowToggleDelete(toggleAction, deleteAction, field, id string, active bool) {
+	<div class="flex items-center gap-2">
+		<form { toastForm(toggleAction, "Atualizando…")... } class="inline">
+			@hidden(field, id)
+			@submit(components.ButtonGhost, components.ButtonSm) {
+				{ toggleLabel(active) }
+			}
+		</form>
+		<form { toastForm(deleteAction, "Excluindo…")... } class="inline">
+			@hidden(field, id)
+			@submit(components.ButtonDestructive, components.ButtonSm) {
+				Excluir
+			}
+		</form>
+	</div>
+}
+
+templ setsPage(rows []store.AdminSetRow) {
+	@components.Container(components.ContainerProps{}) {
+		<div class="space-y-8">
+			<div>
+				<h1 class="text-2xl font-semibold tracking-tight">Conjuntos</h1>
+				<p class="text-sm text-muted-foreground">Monte conjuntos com galeria, produtos e preço de bundle.</p>
+			</div>
+			if len(rows) == 0 {
+				<p class="text-sm text-muted-foreground">Nenhum conjunto cadastrado ainda.</p>
+			} else {
+				@components.Table(components.Props{}) {
+					@components.TableHeader(components.Props{}) {
+						@components.TableRow(components.Props{}) {
+							@th("Conjunto")
+							@th("Slug")
+							@th("Produtos")
+							@th("Imagens")
+							@th("Preço")
+							@th("Status")
+							@th("Ações")
+						}
+					}
+					@components.TableBody(components.Props{}) {
+						for _, row := range rows {
+							@components.TableRow(components.Props{}) {
+								@components.TableCell(components.Props{}) {
+									<div class="flex items-center gap-3">
+										if row.CoverURL != "" {
+											<img src={ row.CoverURL } alt={ row.Name } class="h-12 w-20 rounded object-cover"/>
+										}
+										<a href={ templ.SafeURL("/admin/sets/" + row.ID.String()) } class="font-medium text-primary hover:underline">{ row.Name }</a>
+									</div>
+								}
+								@components.TableCell(components.Props{}) {
+									<span class="font-mono text-xs text-muted-foreground">{ row.Slug }</span>
+								}
+								@td(itoa(row.MemberCount))
+								@td(itoa(row.ImageCount))
+								@components.TableCell(components.Props{}) {
+									if row.Price != nil {
+										<span>{ reais(*row.Price) }</span>
+									} else {
+										<span class="text-muted-foreground">—</span>
+									}
+								}
+								@components.TableCell(components.Props{}) {
+									@activeBadge(row.Active)
+								}
+								@components.TableCell(components.Props{}) {
+									@rowToggleDelete("/admin/sets/toggle", "/admin/sets/delete", "set_id", row.ID.String(), row.Active)
+								}
+							}
+						}
+					}
+				}
+			}
+			@components.Card(components.Props{}) {
+				@components.CardContent(components.Props{}) {
+					<h2 class="mb-4 text-lg font-semibold">Novo conjunto</h2>
+					<form method="post" action="/admin/sets/create" enctype="multipart/form-data" class="grid gap-4 md:grid-cols-2">
+						@textField("name", "Nome", templ.Attributes{"type": "text", "name": "name", "id": "name", "required": true, "maxlength": "200"})
+						@textField("slug", "Slug", templ.Attributes{"type": "text", "name": "slug", "id": "slug", "required": true, "maxlength": "120"})
+						<div class="space-y-2 md:col-span-2">
+							@fieldLabel("description", "Descrição")
+							@components.Textarea(components.InputProps{Attrs: components.Attr("name", "description", "id", "description", "rows", "3")}, "")
+						</div>
+						@textField("price", "Preço do bundle (R$, opcional)", templ.Attributes{"type": "text", "name": "price", "id": "price", "placeholder": "199.90"})
+						@textField("compare_at_price", "Preço original (de, opcional)", templ.Attributes{"type": "text", "name": "compare_at_price", "id": "compare_at_price", "placeholder": "249.90"})
+						<div class="space-y-2 md:col-span-2">
+							@fieldLabel("images", "Imagens (JPG, PNG ou WebP · 2MB cada · até 8 no total)")
+							<input type="file" name="images" id="images" accept="image/jpeg,image/png,image/webp" multiple class={ fileInputClass }/>
+						</div>
+						@checkboxField("active", "active", "Ativo na loja", true)
+						<div class="md:col-span-2">
+							@submit(components.ButtonPrimary, components.ButtonMd) {
+								Criar conjunto
+							}
+						</div>
+					</form>
+				}
+			}
+		</div>
+	}
+}
+
+templ setEditPage(s *store.AdminSetEdit) {
+	@components.Container(components.ContainerProps{}) {
+		<p class="text-muted-foreground">
+			<a href="/admin/sets" class="text-primary hover:underline">Conjuntos</a>
+			{ " / " + s.Name }
+		</p>
+		<h1 class="text-2xl font-semibold tracking-tight">Editar conjunto</h1>
+		@components.Card(components.Props{}) {
+			@components.CardContent(components.Props{}) {
+				<form method="post" action={ templ.SafeURL("/admin/sets/" + s.ID.String() + "/update") } enctype="multipart/form-data" class="flex flex-col gap-4">
+					<div class="grid gap-4 @sm/page:grid-cols-2">
+						@textField("name", "Nome", templ.Attributes{"type": "text", "name": "name", "id": "name", "value": s.Name})
+						@textField("slug", "Slug", templ.Attributes{"type": "text", "name": "slug", "id": "slug", "value": s.Slug})
+					</div>
+					<div class="space-y-2">
+						@fieldLabel("description", "Descrição")
+						@components.Textarea(components.InputProps{Attrs: components.Attr("name", "description", "id", "description", "rows", "3")}, deref(s.Description))
+					</div>
+					<div class="grid gap-4 @sm/page:grid-cols-2">
+						@textField("price", "Preço do bundle (R$, opcional)", templ.Attributes{"type": "text", "name": "price", "id": "price", "value": s.PriceInput()})
+						@textField("compare_at_price", "Preço original (de, opcional)", templ.Attributes{"type": "text", "name": "compare_at_price", "id": "compare_at_price", "value": s.CompareInput()})
+					</div>
+					@checkboxField("active", "active", "Ativo na loja", s.Active)
+					<fieldset class="space-y-4 rounded-xl border border-border p-2">
+						<legend class="px-2 font-medium">Imagens atuais</legend>
+						@imageGrid(s.Images, "Imagem do conjunto")
+					</fieldset>
+					<fieldset class="space-y-4 rounded-xl border border-border p-2">
+						<legend class="px-2 font-medium">Produtos do conjunto</legend>
+						if len(s.Products) == 0 {
+							<p class="text-sm text-muted-foreground">Nenhum produto ativo disponível.</p>
+						} else {
+							<div class="space-y-2">
+								for _, p := range s.Products {
+									<label class="flex items-center gap-2">
+										<input type="checkbox" name="member_product_ids[]" value={ p.ID.String() } checked?={ s.MemberIDs[p.ID] }/>
+										<span class="text-sm">{ p.Label }</span>
+									</label>
+								}
+							</div>
+						}
+					</fieldset>
+					<fieldset class="space-y-4 rounded-xl border border-border p-2">
+						<legend class="px-2 font-medium">Etapas do bundle (1 variante por etapa)</legend>
+						<p class="text-xs text-muted-foreground">Cada etapa com variante vira uma peça fixa do conjunto. Deixe a última linha em branco para não criar nova etapa.</p>
+						<div class="flex flex-col gap-4">
+							for _, slot := range s.Slots {
+								<div class="grid grid-cols-1 gap-4 rounded-lg border border-border p-4 @sm/page:grid-cols-2">
+									@variantInput("Etapa", templ.Attributes{"type": "text", "name": "slot_label[]", "value": slot.Label, "placeholder": "Ex.: Parte de cima"})
+									<div class="space-y-2">
+										@components.Label(components.LabelProps{}) {
+											Variante
+										}
+										@components.Select(components.InputProps{Attrs: components.Attr("name", "slot_variant[]")}) {
+											<option value="">Selecione…</option>
+											for _, v := range s.Variants {
+												<option value={ v.ID.String() } selected?={ slot.VariantID == v.ID.String() }>{ v.Label }</option>
+											}
+										}
+									</div>
+								</div>
+							}
+						</div>
+					</fieldset>
+					@submit(components.ButtonPrimary, components.ButtonMd) {
+						Salvar alterações
+					}
+				</form>
+			}
+		}
+	}
+}

@@ -1,0 +1,171 @@
+package admin
+
+import "github.com/wellington-vell/lindaflor/internal/web/components"
+
+// dirLink is a filter button or pager link of a directory: Page is the
+// full-page URL (no-JS), Frag the htmx fragment URL.
+type dirLink struct {
+	Label    string
+	Page     string
+	Frag     string
+	Selected bool
+}
+
+// pagerData is the Anterior / "Página X de Y" / Próxima bar.
+type pagerData struct {
+	Show  bool
+	Label string
+	Prev  *dirLink
+	Next  *dirLink
+}
+
+// searchBox is the directory search form (outside the swapped results so
+// typing keeps focus). Hidden filter state lives in the results region,
+// bound to this form through the form= attribute.
+type searchBox struct {
+	FormID      string
+	InputID     string
+	Action      string
+	Fragment    string
+	Target      string
+	Name        string
+	Value       string
+	Placeholder string
+	AriaLabel   string
+}
+
+func (s searchBox) trigger() string {
+	return "input changed delay:300ms from:#" + s.InputID + ", search from:#" + s.InputID + ", submit"
+}
+
+func inputName(s searchBox) string {
+	if s.Name == "" {
+		return "q"
+	}
+	return s.Name
+}
+
+templ searchForm(s searchBox) {
+	<form
+		id={ s.FormID }
+		method="get"
+		action={ templ.SafeURL(s.Action) }
+		role="search"
+		hx-get={ s.Fragment }
+		hx-target={ s.Target }
+		hx-swap="outerHTML"
+		hx-trigger={ s.trigger() }
+	>
+		@components.Input(components.InputProps{Attrs: templ.Attributes{
+			"id":          s.InputID,
+			"type":        "search",
+			"name":        inputName(s),
+			"value":       s.Value,
+			"placeholder": s.Placeholder,
+			"aria-label":  s.AriaLabel,
+			"maxlength":   "80",
+		}})
+	</form>
+}
+
+func filterClass(selected bool) string {
+	if selected {
+		return components.ButtonVariants(components.ButtonPrimary, components.ButtonSm)
+	}
+	return components.ButtonVariants(components.ButtonOutline, components.ButtonSm)
+}
+
+templ filterBar(target string, links []dirLink) {
+	<div class="flex flex-wrap items-center gap-2">
+		for _, l := range links {
+			<a
+				href={ templ.SafeURL(l.Page) }
+				hx-get={ l.Frag }
+				hx-target={ target }
+				hx-swap="outerHTML"
+				class={ filterClass(l.Selected) }
+				if l.Selected {
+					aria-current="true"
+				}
+			>{ l.Label }</a>
+		}
+	</div>
+}
+
+templ pagerLink(target string, l *dirLink) {
+	<a
+		href={ templ.SafeURL(l.Page) }
+		hx-get={ l.Frag }
+		hx-target={ target }
+		hx-swap="outerHTML"
+		class={ components.ButtonVariants(components.ButtonGhost, components.ButtonMd) }
+	>{ l.Label }</a>
+}
+
+templ pager(target string, p pagerData) {
+	if p.Show {
+		@components.Pagination(components.Props{}) {
+			@components.PaginationContent(components.Props{}) {
+				if p.Prev != nil {
+					@components.PaginationItem(components.Props{}) {
+						@pagerLink(target, p.Prev)
+					}
+				}
+				@components.PaginationItem(components.Props{}) {
+					<span class="px-3 text-sm text-muted-foreground">{ p.Label }</span>
+				}
+				if p.Next != nil {
+					@components.PaginationItem(components.Props{}) {
+						@pagerLink(target, p.Next)
+					}
+				}
+			}
+		}
+	}
+}
+
+templ pageTitle(title, description string) {
+	<h1 class="text-2xl font-semibold tracking-tight">{ title }</h1>
+	if description != "" {
+		<p class="text-muted-foreground">{ description }</p>
+	}
+}
+
+// fileInputClass styles the native multi-file pickers.
+const fileInputClass = "block w-full text-sm text-foreground file:mr-4 file:rounded-lg file:border file:border-border file:bg-foreground/5 file:px-4 file:py-2 file:text-sm file:font-medium hover:file:bg-foreground/10"
+
+templ hidden(name, value string) {
+	<input type="hidden" name={ name } value={ value }/>
+}
+
+templ submit(v components.ButtonVariant, s components.ButtonSize) {
+	@components.Button(components.ButtonProps{Variant: v, Size: s, Attrs: components.Attr("type", "submit")}) {
+		{ children... }
+	}
+}
+
+templ fieldLabel(forID, text string) {
+	@components.Label(components.LabelProps{For: forID}) {
+		{ text }
+	}
+}
+
+// notFound is the "X não encontrado" page body with a back link.
+templ notFoundBody(title, href, link string) {
+	@components.Container(components.ContainerProps{}) {
+		<h1 class="text-2xl font-semibold tracking-tight">{ title }</h1>
+		<a href={ templ.SafeURL(href) } class="text-primary hover:underline">{ link }</a>
+	}
+}
+
+// toastForm is a POST form enhanced with htmx (toast on X-Toast, then
+// HX-Location); without JS it posts and follows the 303.
+func toastForm(action, loading string) templ.Attributes {
+	return templ.Attributes{
+		"method":             "post",
+		"action":             action,
+		"hx-post":            action,
+		"hx-swap":            "none",
+		"data-toast-loading": loading,
+	}
+}

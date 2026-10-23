@@ -1,0 +1,268 @@
+package admin
+
+import (
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+)
+
+const productResultsID = "product-results"
+
+templ productResults(d productDirectory) {
+	<div id={ productResultsID } class="contents">
+		<input type="hidden" name="active" value={ d.Active } form="product-search-form"/>
+		@filterBar("#"+productResultsID, d.Filters)
+		if len(d.Products) == 0 {
+			<p class="text-sm text-muted-foreground">Nenhum produto encontrado.</p>
+		} else {
+			@components.Table(components.Props{}) {
+				@components.TableHeader(components.Props{}) {
+					@components.TableRow(components.Props{}) {
+						@th("Nome")
+						@th("Categoria")
+						@th("Preço")
+						@th("Variantes")
+						@th("Disponível")
+						@th("Status")
+					}
+				}
+				@components.TableBody(components.Props{}) {
+					for _, p := range d.Products {
+						@components.TableRow(components.Props{}) {
+							@components.TableCell(components.Props{}) {
+								<a href={ templ.SafeURL("/admin/produtos/" + p.ID.String()) } class="font-medium text-primary hover:underline">{ p.Name }</a>
+							}
+							@td(p.CategoryLabel())
+							@td(reais(p.PriceInCents))
+							@td(itoa(p.VariantCount))
+							@td(itoa(p.AvailableTotal))
+							@components.TableCell(components.Props{}) {
+								@activeBadge(p.Active)
+							}
+						}
+					}
+				}
+			}
+		}
+		@pager("#"+productResultsID, d.Pager)
+	</div>
+}
+
+templ activeBadge(active bool) {
+	if active {
+		@components.Badge(components.BadgeProps{Variant: components.BadgePrimary}) {
+			Ativo
+		}
+	} else {
+		@components.Badge(components.BadgeProps{Variant: components.BadgeSecondary}) {
+			Inativo
+		}
+	}
+}
+
+templ productsPage(d productDirectory) {
+	@components.Container(components.ContainerProps{}) {
+		<div class="flex flex-wrap items-center justify-between gap-4">
+			<div>
+				<h1 class="text-2xl font-semibold tracking-tight">Produtos</h1>
+				<p class="text-muted-foreground">Lista de produtos cadastrados no catálogo.</p>
+			</div>
+			<a href="/admin/produtos/novo" class={ components.ButtonVariants(components.ButtonPrimary, components.ButtonMd) }>Novo produto</a>
+		</div>
+		@searchForm(searchBox{
+			FormID: "product-search-form", InputID: "product-search", Action: productsPath, Fragment: productsListPath,
+			Target: "#" + productResultsID, Value: d.Query, Placeholder: "Buscar por nome", AriaLabel: "Buscar produtos",
+		})
+		@productResults(d)
+	}
+}
+
+templ textField(id, label string, attrs templ.Attributes) {
+	<div class="space-y-2">
+		@fieldLabel(id, label)
+		@components.Input(components.InputProps{Attrs: attrs})
+	</div>
+}
+
+templ categorySelect(selected string) {
+	<div class="space-y-2">
+		@fieldLabel("category", "Categoria")
+		@components.Select(components.InputProps{Attrs: components.Attr("name", "category", "id", "category")}) {
+			for _, c := range store.ValidCategories {
+				<option value={ c } selected?={ c == selected }>{ store.AdminCategoryLabel(c) }</option>
+			}
+		}
+	</div>
+}
+
+templ checkboxField(id, name, label string, checked bool) {
+	<div class="flex items-center gap-2">
+		@components.Checkbox(components.Props{Attrs: templ.Attributes{"id": id, "name": name, "checked": checked}})
+		@fieldLabel(id, label)
+	</div>
+}
+
+templ productNewPage() {
+	@components.Container(components.ContainerProps{}) {
+		@pageTitle("Novo produto", "Cadastre um produto com variantes, estoque inicial e imagens.")
+		@components.Card(components.Props{}) {
+			@components.CardContent(components.Props{}) {
+				<form method="post" action="/admin/produtos/create" enctype="multipart/form-data" class="flex flex-col gap-4">
+					<div class="grid gap-4 @sm/page:grid-cols-2">
+						@textField("name", "Nome", templ.Attributes{"type": "text", "name": "name", "id": "name", "required": true})
+						@textField("slug", "Slug", templ.Attributes{"type": "text", "name": "slug", "id": "slug", "required": true})
+					</div>
+					<div class="space-y-2">
+						@fieldLabel("description", "Descrição")
+						@components.Textarea(components.InputProps{Attrs: components.Attr("name", "description", "id", "description", "rows", "3")}, "")
+					</div>
+					<div class="grid gap-4 @sm/page:grid-cols-2">
+						@textField("price", "Preço (R$)", templ.Attributes{"type": "text", "name": "price", "id": "price", "placeholder": "199.90", "required": true})
+						@textField("compare_at_price", "Preço original (de)", templ.Attributes{"type": "text", "name": "compare_at_price", "id": "compare_at_price", "placeholder": "249.90"})
+					</div>
+					<div class="grid gap-4 @sm/page:grid-cols-2">
+						@categorySelect("")
+					</div>
+					@checkboxField("featured", "featured", "Destaque na home", false)
+					<div class="space-y-2">
+						@fieldLabel("images", "Imagens (JPG, PNG ou WebP · 2MB cada · até 8)")
+						<input type="file" name="images" id="images" accept="image/jpeg,image/png,image/webp" multiple class={ fileInputClass }/>
+					</div>
+					<fieldset class="space-y-4 rounded-xl border border-border p-2">
+						<legend class="px-2 font-medium">Variantes</legend>
+						<div class="flex flex-col gap-4">
+							<div class="grid grid-cols-1 gap-4 rounded-lg border border-border p-4 @sm/page:grid-cols-2 @lg/page:grid-cols-6">
+								@variantInput("SKU", templ.Attributes{"type": "text", "name": "variant_sku[]", "placeholder": "SKU", "required": true})
+								<div class="space-y-2">
+									@components.Label(components.LabelProps{}) {
+										Tamanho
+									}
+									@components.Select(components.InputProps{Attrs: components.Attr("name", "variant_size[]")}) {
+										<option value="pp">PP</option>
+										<option value="p">P</option>
+										<option value="m">M</option>
+										<option value="g">G</option>
+										<option value="gg">GG</option>
+									}
+								</div>
+								@variantInput("Cor", templ.Attributes{"type": "text", "name": "variant_color[]", "placeholder": "Cor", "required": true})
+								@variantInput("Cor (hex)", templ.Attributes{"type": "text", "name": "variant_color_hex[]", "placeholder": "#000000"})
+								@variantInput("Estoque", templ.Attributes{"type": "number", "name": "variant_quantity[]", "placeholder": "Estoque", "min": "0", "value": "0", "required": true})
+							</div>
+						</div>
+						<p class="text-xs text-muted-foreground">Adicione mais variantes enviando o formulário e editando o produto.</p>
+					</fieldset>
+					@submit(components.ButtonPrimary, components.ButtonMd) {
+						Criar produto
+					}
+				</form>
+			}
+		}
+	}
+}
+
+templ variantInput(label string, attrs templ.Attributes) {
+	<div class="space-y-2">
+		@components.Label(components.LabelProps{}) {
+			{ label }
+		}
+		@components.Input(components.InputProps{Attrs: attrs})
+	</div>
+}
+
+templ imageGrid(images []store.AdminImage, alt string) {
+	if len(images) == 0 {
+		<p class="text-sm text-muted-foreground">Nenhuma imagem cadastrada.</p>
+	} else {
+		<div class="grid grid-cols-2 gap-4 @sm/page:grid-cols-4">
+			for _, img := range images {
+				<div class="space-y-2 rounded-lg border border-border p-2">
+					if img.URL != "" {
+						<img src={ img.URL } alt={ alt } class="aspect-square w-full rounded-md object-cover"/>
+					} else {
+						<div class="flex aspect-square w-full items-center justify-center rounded-md bg-foreground/5 text-xs text-muted-foreground">indisponível</div>
+					}
+					<label class="flex items-center gap-2 text-xs text-muted-foreground">
+						<input type="checkbox" name="delete_image_id" value={ img.ID.String() }/>
+						Excluir
+					</label>
+				</div>
+			}
+		</div>
+	}
+	<div class="space-y-2">
+		@fieldLabel("images", "Adicionar imagens (JPG, PNG ou WebP · 2MB cada · até 8 no total)")
+		<input type="file" name="images" id="images" accept="image/jpeg,image/png,image/webp" multiple class={ fileInputClass }/>
+	</div>
+}
+
+templ productEditPage(p *store.AdminProductEdit) {
+	@components.Container(components.ContainerProps{}) {
+		<p class="text-muted-foreground">
+			<a href="/admin/produtos" class="text-primary hover:underline">Produtos</a>
+			{ " / " + p.Name }
+		</p>
+		<h1 class="text-2xl font-semibold tracking-tight">Editar produto</h1>
+		@components.Card(components.Props{}) {
+			@components.CardContent(components.Props{}) {
+				<form method="post" action="/admin/produtos/update" enctype="multipart/form-data" class="flex flex-col gap-4">
+					@hidden("product_id", p.ID.String())
+					<div class="grid gap-4 @sm/page:grid-cols-2">
+						@textField("name", "Nome", templ.Attributes{"type": "text", "name": "name", "id": "name", "value": p.Name})
+						@textField("slug", "Slug", templ.Attributes{"type": "text", "name": "slug", "id": "slug", "value": p.Slug})
+					</div>
+					<div class="space-y-2">
+						@fieldLabel("description", "Descrição")
+						@components.Textarea(components.InputProps{Attrs: components.Attr("name", "description", "id", "description", "rows", "3")}, deref(p.Description))
+					</div>
+					<div class="grid gap-4 @sm/page:grid-cols-2">
+						@textField("price", "Preço (R$)", templ.Attributes{"type": "text", "name": "price", "id": "price", "value": p.PriceInput()})
+						@textField("compare_at_price", "Preço original (de)", templ.Attributes{"type": "text", "name": "compare_at_price", "id": "compare_at_price", "value": p.CompareAtInput()})
+					</div>
+					<div class="grid gap-4 @sm/page:grid-cols-2">
+						@categorySelect(p.Category)
+					</div>
+					<div class="flex flex-wrap items-center gap-6">
+						@checkboxField("featured", "featured", "Destaque", p.Featured)
+						@checkboxField("active", "active", "Ativo na loja", p.Active)
+					</div>
+					<fieldset class="space-y-4 rounded-xl border border-border p-2">
+						<legend class="px-2 font-medium">Imagens atuais</legend>
+						@imageGrid(p.Images, "Imagem do produto")
+					</fieldset>
+					<fieldset class="space-y-4 rounded-xl border border-border p-2">
+						<legend class="px-2 font-medium">Variantes</legend>
+						<div class="flex flex-col gap-4">
+							for _, v := range p.Variants {
+								<div class="grid grid-cols-1 gap-4 rounded-lg border border-border p-4 @sm/page:grid-cols-2 @lg/page:grid-cols-6">
+									@variantInput("SKU", templ.Attributes{"type": "text", "name": "variant_sku[]", "value": v.SKU})
+									@variantInput("Tamanho", templ.Attributes{"type": "text", "name": "variant_size[]", "value": v.Size})
+									@variantInput("Cor", templ.Attributes{"type": "text", "name": "variant_color[]", "value": v.Color})
+									@variantInput("Cor (hex)", templ.Attributes{"type": "text", "name": "variant_color_hex[]", "value": deref(v.ColorHex), "placeholder": "#000000"})
+									@variantInput("Estoque baixo", templ.Attributes{"type": "number", "name": "variant_threshold[]", "value": itoa(v.LowStockThreshold), "min": "0"})
+								</div>
+							}
+						</div>
+					</fieldset>
+					<fieldset class="space-y-4 rounded-xl border border-border p-2">
+						<legend class="px-2 font-medium">Complete o look</legend>
+						if len(p.OtherProducts) == 0 {
+							<p class="text-sm text-muted-foreground">Nenhum outro produto disponível.</p>
+						} else {
+							<div class="space-y-2">
+								for _, o := range p.OtherProducts {
+									<label class="flex items-center gap-2">
+										<input type="checkbox" name="look_product_ids[]" value={ o.ID.String() } checked?={ p.LookIDs[o.ID] }/>
+										<span class="text-sm">{ o.Name + " — " + store.AdminCategoryLabel(o.Category) }</span>
+									</label>
+								}
+							</div>
+						}
+					</fieldset>
+					@submit(components.ButtonPrimary, components.ButtonMd) {
+						Salvar alterações
+					}
+				</form>
+			}
+		}
+	}
+}

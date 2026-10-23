@@ -1,0 +1,196 @@
+package admin
+
+import (
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+)
+
+type statPair struct{ Title, Value string }
+
+func reportStats(s store.ReportSummary) []statPair {
+	return []statPair{
+		{"Receita", price(s.RevenueCents)},
+		{"Pedidos pagos", itoa(s.Orders)},
+		{"Ticket médio", price(s.AOVCents())},
+		{"Receita líquida", price(s.NetRevenueCents())},
+	}
+}
+
+func reportSecondary(s store.ReportSummary) []statPair {
+	return []statPair{
+		{"Reembolsos parciais (trocas)", price(s.PartialRefundCents)},
+		{"Frete cobrado", price(s.ShippingCents)},
+		{"Desconto PIX", price(s.PixDiscountCents)},
+		{"Desconto de cupons", price(s.DiscountCents)},
+		{"Abandonados / expirados", itoa(s.AbandonedOrders)},
+		{"Aguardando pagamento", itoa(s.PendingOrders)},
+		{"Estornados", itoa(s.RefundedOrders)},
+	}
+}
+
+func barStyle(value, best int64) templ.SafeCSS {
+	return templ.SafeCSS("width: " + itoa(store.BarPercent(value, best)) + "%")
+}
+
+templ topTable(rows []store.TopRow, withDetail bool) {
+	if len(rows) == 0 {
+		<p class="text-sm text-muted-foreground">Sem vendas no período.</p>
+	} else {
+		@components.Table(components.Props{}) {
+			@components.TableHeader(components.Props{}) {
+				@components.TableRow(components.Props{}) {
+					@th("Produto")
+					@th("Unid.")
+					@th("Receita")
+				}
+			}
+			@components.TableBody(components.Props{}) {
+				for _, row := range rows {
+					@components.TableRow(components.Props{}) {
+						if withDetail {
+							@td(row.Name + " (" + row.Detail + ")")
+						} else {
+							@td(row.Name)
+						}
+						@td(itoa(row.Units))
+						@td(price(row.RevenueCents))
+					}
+				}
+			}
+		}
+	}
+}
+
+templ reportsPage(p store.ReportPage) {
+	{{ from := store.FormatDateISO(p.Range.From) }}
+	{{ to := store.FormatDateISO(p.Range.To) }}
+	@components.Container(components.ContainerProps{}) {
+		<h1 class="text-2xl font-semibold tracking-tight">Relatórios</h1>
+		<p class="text-muted-foreground">{ p.Range.Period() }</p>
+		<form method="get" action="/admin/relatorios" class="flex flex-wrap items-end gap-3">
+			<div class="flex flex-col gap-1.5">
+				@fieldLabel("de", "De")
+				@components.Input(components.InputProps{Attrs: components.Attr("id", "de", "name", "de", "type", "date", "value", from)})
+			</div>
+			<div class="flex flex-col gap-1.5">
+				@fieldLabel("ate", "Até")
+				@components.Input(components.InputProps{Attrs: components.Attr("id", "ate", "name", "ate", "type", "date", "value", to)})
+			</div>
+			<button type="submit" class={ components.ButtonVariants(components.ButtonPrimary, components.ButtonMd) }>Aplicar</button>
+			<a href={ templ.SafeURL("/admin/relatorios/pedidos.csv?" + p.CSVQuery) } class={ components.ButtonVariants(components.ButtonOutline, components.ButtonMd) }>Exportar pedidos (CSV)</a>
+		</form>
+		<p class="text-xs text-muted-foreground">
+			{ "Receita: pedidos pagos, em separação, enviados ou entregues, pela data do pagamento; estornados e cancelados ficam de fora. Intervalo máximo de " + itoa(store.MaxRangeDays) + " dias." }
+		</p>
+		<div class="grid gap-4 @sm/page:grid-cols-2 @lg/page:grid-cols-4">
+			for _, s := range reportStats(p.Summary) {
+				@components.Card(components.Props{}) {
+					@components.CardContent(components.Props{}) {
+						<p class="text-sm text-muted-foreground">{ s.Title }</p>
+						<p class="mt-2 text-2xl font-semibold">{ s.Value }</p>
+					}
+				}
+			}
+		</div>
+		@components.Card(components.Props{}) {
+			@components.CardContent(components.Props{}) {
+				<dl class="grid gap-3 text-sm @sm/page:grid-cols-2 @lg/page:grid-cols-4">
+					for _, s := range reportSecondary(p.Summary) {
+						<div>
+							<dt class="text-muted-foreground">{ s.Title }</dt>
+							<dd class="font-medium">{ s.Value }</dd>
+						</div>
+					}
+				</dl>
+			}
+		}
+		@cardTitled("Receita por dia") {
+			@components.Table(components.Props{}) {
+				@components.TableHeader(components.Props{}) {
+					@components.TableRow(components.Props{}) {
+						@th("Dia")
+						@th("Pedidos")
+						@th("Receita")
+						@th("")
+					}
+				}
+				@components.TableBody(components.Props{}) {
+					for _, day := range p.Days {
+						@components.TableRow(components.Props{}) {
+							@td(store.FormatDateBR(day.Day))
+							@td(itoa(day.Orders))
+							@td(price(day.RevenueCents))
+							@components.TableCell(components.Props{}) {
+								<div class="h-2 w-40 rounded-full bg-muted" aria-hidden="true">
+									<div class="h-2 rounded-full bg-primary" style={ barStyle(day.RevenueCents, p.BestDay) }></div>
+								</div>
+							}
+						}
+					}
+				}
+			}
+		}
+		<div class="grid gap-4 @lg/page:grid-cols-2">
+			@cardTitled("Variações mais vendidas (unidades)") {
+				@topTable(p.TopVariants, true)
+			}
+			@cardTitled("Produtos com maior receita") {
+				@topTable(p.TopProducts, false)
+				<p class="mt-2 text-xs text-muted-foreground">Receita dos itens antes de descontos do pedido.</p>
+			}
+			@cardTitled("Cupons") {
+				if len(p.Coupons) == 0 {
+					<p class="text-sm text-muted-foreground">Nenhum cupom usado no período.</p>
+				} else {
+					<p class="text-sm text-muted-foreground">{ itoa(p.CouponOrders) + " pedidos com cupom · " + price(p.CouponDiscount) + " em descontos" }</p>
+					@components.Table(components.Props{}) {
+						@components.TableHeader(components.Props{}) {
+							@components.TableRow(components.Props{}) {
+								@th("Cupom")
+								@th("Pedidos")
+								@th("Desconto")
+								@th("Receita")
+							}
+						}
+						@components.TableBody(components.Props{}) {
+							for _, c := range p.Coupons {
+								@components.TableRow(components.Props{}) {
+									@components.TableCell(components.Props{}) {
+										<span class="font-mono">{ c.Code }</span>
+									}
+									@td(itoa(c.Orders))
+									@td(price(c.DiscountCents))
+									@td(price(c.RevenueCents))
+								}
+							}
+						}
+					}
+				}
+			}
+			@cardTitled("Forma de pagamento") {
+				if len(p.Providers) == 0 {
+					<p class="text-sm text-muted-foreground">Sem vendas no período.</p>
+				} else {
+					@components.Table(components.Props{}) {
+						@components.TableHeader(components.Props{}) {
+							@components.TableRow(components.Props{}) {
+								@th("Provedor")
+								@th("Pedidos")
+								@th("Receita")
+							}
+						}
+						@components.TableBody(components.Props{}) {
+							for _, pr := range p.Providers {
+								@components.TableRow(components.Props{}) {
+									@td(pr.Label())
+									@td(itoa(pr.Orders))
+									@td(price(pr.RevenueCents))
+								}
+							}
+						}
+					}
+				}
+			}
+		</div>
+	}
+}

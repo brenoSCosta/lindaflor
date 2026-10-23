@@ -1,0 +1,84 @@
+package admin
+
+import (
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+)
+
+func activeText(active bool) string {
+	if active {
+		return "Ativo"
+	}
+	return "Inativo"
+}
+
+templ bannersPage(rows []store.AdminBanner) {
+	@components.Container(components.ContainerProps{}) {
+		<div class="space-y-8">
+			<div>
+				<h1 class="text-2xl font-semibold">Banners da home</h1>
+				<p class="text-sm text-muted-foreground">Os banners ativos aparecem no carrossel da página inicial, na ordem definida.</p>
+			</div>
+			if len(rows) == 0 {
+				<p class="text-sm text-muted-foreground">Nenhum banner cadastrado ainda.</p>
+			} else {
+				@components.Table(components.Props{}) {
+					@components.TableHeader(components.Props{}) {
+						@components.TableRow(components.Props{}) {
+							@th("Imagem")
+							@th("Título")
+							@th("Link")
+							@th("Ordem")
+							@th("Status")
+							@th("Ações")
+						}
+					}
+					@components.TableBody(components.Props{}) {
+						for _, b := range rows {
+							@components.TableRow(components.Props{}) {
+								@components.TableCell(components.Props{}) {
+									if b.ImageURL != "" {
+										<img src={ b.ImageURL } alt={ b.Title } class="h-12 w-20 rounded object-cover"/>
+									}
+								}
+								@components.TableCell(components.Props{}) {
+									<div>
+										<p class="font-medium">{ b.Title }</p>
+										<p class="text-xs text-muted-foreground">{ b.Subtitle }</p>
+									</div>
+								}
+								@components.TableCell(components.Props{}) {
+									<span class="text-xs text-muted-foreground">{ b.LinkURL }</span>
+								}
+								@td(itoa(b.SortOrder))
+								@td(activeText(b.Active))
+								@components.TableCell(components.Props{}) {
+									@rowToggleDelete("/admin/banners/toggle", "/admin/banners/delete", "banner_id", b.ID.String(), b.Active)
+								}
+							}
+						}
+					}
+				}
+			}
+			@components.Card(components.Props{}) {
+				@components.CardContent(components.Props{}) {
+					<h2 class="mb-4 text-lg font-semibold">Novo banner</h2>
+					<form method="post" action="/admin/banners/create" enctype="multipart/form-data" class="grid gap-4 md:grid-cols-2">
+						@textField("title", "Título", templ.Attributes{"type": "text", "name": "title", "id": "title", "required": true, "maxlength": "120"})
+						@textField("subtitle", "Subtítulo", templ.Attributes{"type": "text", "name": "subtitle", "id": "subtitle", "maxlength": "200"})
+						@textField("cta_label", "Texto do botão", templ.Attributes{"type": "text", "name": "cta_label", "id": "cta_label", "maxlength": "200", "placeholder": "Ver coleção"})
+						@textField("link_url", "Link (caminho interno)", templ.Attributes{"type": "text", "name": "link_url", "id": "link_url", "maxlength": "200", "placeholder": "/produtos?sort=novos"})
+						@textField("sort_order", "Ordem", templ.Attributes{"type": "number", "name": "sort_order", "id": "sort_order", "value": "0", "min": "0", "max": "999"})
+						@textField("images", "Imagem (JPG, PNG ou WebP, até 2MB)", templ.Attributes{"type": "file", "name": "images", "id": "images", "accept": "image/jpeg,image/png,image/webp", "required": true})
+						@checkboxField("active", "active", "Ativo", true)
+						<div class="md:col-span-2">
+							@submit(components.ButtonPrimary, components.ButtonMd) {
+								Criar banner
+							}
+						</div>
+					</form>
+				}
+			}
+		</div>
+	}
+}

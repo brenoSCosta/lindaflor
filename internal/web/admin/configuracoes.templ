@@ -1,0 +1,86 @@
+package admin
+
+import (
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+)
+
+var pixKeyTypes = [][2]string{{"cpf", "CPF"}, {"cnpj", "CNPJ"}, {"email", "E-mail"}, {"phone", "Telefone"}, {"random", "Chave aleatória"}}
+
+templ hint(text string) {
+	<p class="text-xs text-muted-foreground">{ text }</p>
+}
+
+templ settingsPage(f store.SettingsForm) {
+	@components.Container(components.ContainerProps{}) {
+		<div class="flex flex-col gap-1.5">
+			<h1 class="text-2xl font-semibold tracking-tight">Configurações da loja</h1>
+			<p class="text-muted-foreground">Chave PIX, WhatsApp e frete grátis usados no checkout.</p>
+		</div>
+		@components.Card(components.Props{}) {
+			@components.CardContent(components.Props{}) {
+				<form method="post" action="/admin/configuracoes" class="flex flex-col gap-8">
+					<fieldset class="space-y-4 border-0">
+						<legend class="mb-4 text-base font-semibold">PIX (chave fixa)</legend>
+						<div class="space-y-2">
+							@fieldLabel("pix_key_type", "Tipo da chave")
+							@components.Select(components.InputProps{Attrs: components.Attr("name", "pix_key_type", "id", "pix_key_type")}) {
+								for _, k := range pixKeyTypes {
+									<option value={ k[0] } selected?={ f.PixKeyType == k[0] }>{ k[1] }</option>
+								}
+							}
+						</div>
+						@textField("pix_key", "Chave PIX", templ.Attributes{"type": "text", "name": "pix_key", "id": "pix_key", "value": f.PixKey, "placeholder": "CPF, CNPJ, e-mail, telefone ou chave aleatória"})
+						<div class="grid gap-4 @sm/page:grid-cols-2">
+							<div class="space-y-2">
+								@fieldLabel("pix_merchant_name", "Nome do recebedor")
+								@components.Input(components.InputProps{Attrs: templ.Attributes{"type": "text", "name": "pix_merchant_name", "id": "pix_merchant_name", "value": f.PixMerchantName, "placeholder": "Linda Flor", "maxlength": "25"}})
+								@hint("Máx. 25 caracteres (Bacen)")
+							</div>
+							<div class="space-y-2">
+								@fieldLabel("pix_merchant_city", "Cidade")
+								@components.Input(components.InputProps{Attrs: templ.Attributes{"type": "text", "name": "pix_merchant_city", "id": "pix_merchant_city", "value": f.PixMerchantCity, "placeholder": "Aracaju", "maxlength": "15"}})
+								@hint("Máx. 15 caracteres (Bacen)")
+							</div>
+						</div>
+						<div class="space-y-2">
+							@fieldLabel("pix_discount_percent", "Desconto PIX (%)")
+							@components.Input(components.InputProps{Attrs: templ.Attributes{"type": "number", "name": "pix_discount_percent", "id": "pix_discount_percent", "value": f.PixDiscountPercent, "min": "0", "max": "30", "placeholder": "5"}})
+							@hint("Percentual de desconto para pagamentos PIX (0–30)")
+						</div>
+						<div class="space-y-2">
+							@fieldLabel("announcement_text", "Barra de Anúncio")
+							@components.Textarea(components.InputProps{Attrs: components.Attr("name", "announcement_text", "id", "announcement_text", "rows", "2")}, f.AnnouncementText)
+							@hint("Mensagem exibida no topo da loja (opcional)")
+						</div>
+						<div class="space-y-2">
+							@fieldLabel("first_purchase_coupon_code", "Cupom Primeira Compra")
+							@components.Input(components.InputProps{Attrs: templ.Attributes{"type": "text", "name": "first_purchase_coupon_code", "id": "first_purchase_coupon_code", "value": f.FirstPurchaseCouponCode, "placeholder": "BOAS_VINDAS10"}})
+							@hint("Código do cupom oferecido para primeira compra (opcional)")
+						</div>
+					</fieldset>
+					<fieldset class="space-y-4 border-0">
+						<legend class="mb-4 text-base font-semibold">WhatsApp da loja</legend>
+						@textField("whatsapp_number", "Número (com DDI)", templ.Attributes{"type": "text", "name": "whatsapp_number", "id": "whatsapp_number", "value": f.WhatsappNumber, "placeholder": "Somente números, com DDI e DDD"})
+						<div class="space-y-2">
+							@fieldLabel("whatsapp_message_template", "Modelo da mensagem do cliente")
+							@components.Textarea(components.InputProps{Attrs: components.Attr("name", "whatsapp_message_template", "id", "whatsapp_message_template", "rows", "3")}, f.WhatsappMessageTemplate)
+							@hint("Mensagem da página do pedido. Use {{order_id}} e {{total}}.")
+						</div>
+					</fieldset>
+					<fieldset class="space-y-4 border-0">
+						<legend class="mb-4 text-base font-semibold">Frete grátis</legend>
+						<div class="space-y-2">
+							@fieldLabel("free_shipping_threshold", "Valor mínimo (R$)")
+							@components.Input(components.InputProps{Attrs: templ.Attributes{"type": "text", "name": "free_shipping_threshold", "id": "free_shipping_threshold", "value": f.FreeShippingThreshold, "placeholder": "299.00"}})
+							@hint("Use 0 para frete grátis em todas as compras.")
+						</div>
+					</fieldset>
+					@submit(components.ButtonPrimary, components.ButtonMd) {
+						Salvar configurações
+					}
+				</form>
+			}
+		}
+	}
+}
