@@ -1,0 +1,200 @@
+package components
+
+// DropdownMenu is a native <details> menu (works without JS) enhanced by
+// the Alpine "dropdownMenu" component (web/static/js/components.js):
+// outside click / Escape dismissal, closes after activating an item, and
+// fixed positioning so it escapes overflow containers.
+templ DropdownMenu(p Props) {
+	<details data-dropdown-menu x-data="dropdownMenu" class={ Cn("group relative inline-block", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</details>
+}
+
+const menuTrigger = "cursor-pointer list-none [&::-webkit-details-marker]:hidden"
+
+// DropdownMenuTrigger is the <summary> toggling the menu (style it with
+// ButtonVariants through Class; use group-open: for open-state styling).
+templ DropdownMenuTrigger(p Props) {
+	<summary class={ Cn(menuTrigger, p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</summary>
+}
+
+const menuPanel = "absolute z-50 min-w-40 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-sm"
+
+// MenuSide / MenuAlign place the panel relative to the trigger.
+type MenuSide string
+
+type MenuAlign string
+
+const (
+	MenuBottom MenuSide  = "bottom"
+	MenuTop    MenuSide  = "top"
+	MenuRight  MenuSide  = "right"
+	MenuLeft   MenuSide  = "left"
+	MenuStart  MenuAlign = "start"
+	MenuCenter MenuAlign = "center"
+	MenuEnd    MenuAlign = "end"
+)
+
+type DropdownMenuContentProps struct {
+	Side        MenuSide  // default bottom
+	SideOffset  int       // default 4 (set -1 for 0)
+	Align       MenuAlign // default start
+	AlignOffset int
+	Class       string
+	Attrs       templ.Attributes
+}
+
+func menuFallback(side MenuSide, align MenuAlign) string {
+	cross := map[MenuAlign][2]string{
+		MenuStart:  {"left-0", "top-0"},
+		MenuCenter: {"left-1/2 -translate-x-1/2", "top-1/2 -translate-y-1/2"},
+		MenuEnd:    {"right-0", "bottom-0"},
+	}[align]
+	switch side {
+	case MenuTop:
+		return "bottom-full mb-1 " + cross[0]
+	case MenuRight:
+		return "left-full ml-1 " + cross[1]
+	case MenuLeft:
+		return "right-full mr-1 " + cross[1]
+	default:
+		return "top-full mt-1 " + cross[0]
+	}
+}
+
+func (p DropdownMenuContentProps) norm() DropdownMenuContentProps {
+	if p.Side == "" {
+		p.Side = MenuBottom
+	}
+	if p.Align == "" {
+		p.Align = MenuStart
+	}
+	switch {
+	case p.SideOffset == 0:
+		p.SideOffset = 4
+	case p.SideOffset < 0:
+		p.SideOffset = 0
+	}
+	return p
+}
+
+// DropdownMenuContent is the floating panel.
+templ DropdownMenuContent(p DropdownMenuContentProps) {
+	{{ p = p.norm() }}
+	<div
+		data-dropdown-menu-content
+		data-side={ string(p.Side) }
+		data-side-offset={ itoa(p.SideOffset) }
+		data-align={ string(p.Align) }
+		data-align-offset={ itoa(p.AlignOffset) }
+		class={ Cn(menuPanel, menuFallback(p.Side, p.Align), p.Class) }
+		{ attrs(p.Attrs)... }
+	>
+		{ children... }
+	</div>
+}
+
+const menuItem = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm whitespace-nowrap outline-none hover:bg-foreground/5 focus-visible:bg-foreground/5 active:bg-foreground/10 disabled:pointer-events-none disabled:opacity-50"
+
+// MenuItemClass styles links/forms inside a menu like items.
+const MenuItemClass = menuItem
+
+// DropdownMenuItem is a <button> item (pass type/hx-* via Attrs).
+templ DropdownMenuItem(p Props) {
+	<button class={ Cn(menuItem, p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</button>
+}
+
+templ DropdownMenuSub(p Props) {
+	<details class={ Cn("group/sub relative", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</details>
+}
+
+templ DropdownMenuSubTrigger(p Props) {
+	<summary class={ Cn(menuItem, menuTrigger, "group-open/sub:bg-foreground/5", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+		@Icon("chevron-right", "ml-auto size-4")
+	</summary>
+}
+
+templ DropdownMenuSubContent(p Props) {
+	<div class={ Cn(menuPanel, "top-0 left-full ml-1", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</div>
+}
+
+templ DropdownMenuLabel(p Props) {
+	<p class={ Cn("px-2 py-1.5 text-xs font-medium text-muted-foreground", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</p>
+}
+
+templ DropdownMenuSeparator(p Props) {
+	<hr class={ Cn("-mx-1 my-1 border-border", p.Class) } { attrs(p.Attrs)... }/>
+}
+
+// Tabs: render only the selected panel server-side (links with ?tab=), or
+// all panels with Alpine x-show bindings.
+templ Tabs(p Props) {
+	<div class={ Cn("flex flex-col gap-4", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</div>
+}
+
+templ TabsList(p Props) {
+	<div class={ Cn("inline-flex w-fit items-center gap-1 rounded-lg border border-border p-1", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</div>
+}
+
+const tabsTrigger = "inline-flex shrink-0 cursor-pointer items-center justify-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background text-muted-foreground hover:bg-foreground/5 hover:text-foreground aria-[current=page]:bg-foreground/10 aria-[current=page]:text-foreground aria-[current=page]:hover:bg-foreground/10"
+
+// TabsTrigger is a link selecting a panel (active → aria-current="page").
+templ TabsTrigger(href templ.SafeURL, active bool, p Props) {
+	<a
+		href={ href }
+		if active {
+			aria-current="page"
+		}
+		class={ Cn(tabsTrigger, p.Class) }
+		{ attrs(p.Attrs)... }
+	>
+		{ children... }
+	</a>
+}
+
+templ TabsContent(p Props) {
+	<div class={ p.Class } { attrs(p.Attrs)... }>
+		{ children... }
+	</div>
+}
+
+// Accordion items are native <details> with an animated height.
+templ Accordion(p Props) {
+	<div class={ Cn("w-full", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</div>
+}
+
+templ AccordionItem(p Props) {
+	<details class={ Cn("group border-b border-border last:border-b-0", "[interpolate-size:allow-keywords] [&::details-content]:h-0 [&::details-content]:overflow-hidden [&::details-content]:[transition:height_200ms_ease-out,content-visibility_200ms_allow-discrete] [&[open]::details-content]:h-auto", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</details>
+}
+
+templ AccordionTrigger(p Props) {
+	<summary class={ Cn("flex w-full cursor-pointer list-none items-center justify-between gap-4 py-4 text-left text-sm font-medium outline-none transition-colors hover:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background [&::-webkit-details-marker]:hidden", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+		@Icon("chevron-down", "size-4 shrink-0 text-muted-foreground transition-transform duration-200 ease-out group-open:rotate-180")
+	</summary>
+}
+
+templ AccordionContent(p Props) {
+	<div class={ Cn("pb-4 text-sm text-muted-foreground", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</div>
+}

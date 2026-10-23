@@ -1,0 +1,46 @@
+package components
+
+// Props is the common Class + Attrs pair of simple wrapper components.
+type Props struct {
+	Class string
+	Attrs templ.Attributes
+}
+
+// Card is a bordered panel with stacked sections (each supplies its own
+// horizontal padding).
+templ Card(p Props) {
+	<div class={ Cn("flex flex-col gap-5 rounded-xl border border-border bg-card py-6 text-card-foreground shadow-sm", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</div>
+}
+
+templ CardHeader(p Props) {
+	<div class={ Cn("flex flex-col gap-1.5 px-6", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</div>
+}
+
+// CardTitle renders an <h3>.
+templ CardTitle(p Props) {
+	<h3 class={ Cn("text-base leading-none font-semibold", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</h3>
+}
+
+templ CardDescription(p Props) {
+	<p class={ Cn("text-sm text-muted-foreground", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</p>
+}
+
+templ CardContent(p Props) {
+	<div class={ Cn("px-6", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</div>
+}
+
+templ CardFooter(p Props) {
+	<div class={ Cn("flex items-center gap-2 px-6", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</div>
+}

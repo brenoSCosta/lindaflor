@@ -1,0 +1,206 @@
+package layout
+
+import "github.com/wellington-vell/lindaflor/internal/web/components"
+
+// StorefrontShell is the public chrome: announcement bar, header, the cart
+// sheet ($store.cart.open) and the footer (hidden on /login).
+templ StorefrontShell(s ShellData, path string) {
+	<div class="flex min-h-screen flex-col bg-background text-foreground">
+		@AnnouncementBar(s.Settings)
+		@Header(s)
+		<main class="flex flex-1 flex-col">
+			{ children... }
+		</main>
+		@components.Sheet(components.OverlayProps{
+			XOpen:   "$store.cart.open",
+			OnClose: "$store.cart.open = false",
+			Attrs:   components.Attr("id", "cart-sheet", "aria-label", "Carrinho"),
+		}) {
+			@components.SheetContent(components.SheetContentProps{Class: "[&]:overflow-hidden"}) {
+				<div id="cart-sheet-body" class="flex min-h-0 flex-1 flex-col">
+					if s.CartSheet != nil {
+						@s.CartSheet
+					}
+				</div>
+			}
+		}
+		if path != "/login" {
+			@Footer(s.Settings)
+		}
+	</div>
+}
+
+templ AnnouncementBar(s StoreSettings) {
+	<div class="border-b border-border bg-background px-4 py-2 text-center text-[10px] tracking-widest text-muted-foreground uppercase">
+		{ announcement(s) }
+	</div>
+}
+
+templ navDropdownLink(href, label string) {
+	<a href={ templ.SafeURL(href) } class="block px-4 py-2 text-sm hover:bg-foreground/5 hover:text-primary">{ label }</a>
+}
+
+// CartCount is the header badge. Fragments update it with
+// <hx-partial hx-target="#cart-count" hx-swap="outerHTML">@CartCount(n)</hx-partial>.
+templ CartCount(n int) {
+	<span
+		id="cart-count"
+		data-cart-count
+		class="pointer-events-none absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] leading-none font-semibold text-white"
+		hidden?={ n <= 0 }
+	>
+		{ itoa(max(n, 0)) }
+	</span>
+}
+
+templ Header(s ShellData) {
+	<header class="sticky top-0 z-50 border-b border-border bg-background backdrop-blur">
+		<div class="relative mx-auto max-w-7xl px-4 md:px-8">
+			<div class="flex items-center justify-between gap-4 h-20">
+				<!-- Mobile menu (no JS: <details> opens the panel below) -->
+				<details class="group/menu md:hidden">
+					<summary class={ components.ButtonVariants(components.ButtonGhost, components.ButtonIcon, "list-none [&::-webkit-details-marker]:hidden") } aria-label="Menu" title="Menu">
+						@components.Icon("menu", "")
+					</summary>
+					<nav class="absolute inset-x-0 top-full border-b border-border bg-background px-4 py-4 shadow-lg">
+						<div class="flex flex-col gap-1 text-sm">
+							<a href="/produtos?sort=novos" class="py-2">Novidades</a>
+							<p class="pt-2 text-[10px] tracking-widest uppercase text-muted-foreground">Biquínis</p>
+							<a href="/produtos?category=biquini_top" class="py-2 pl-3">Tops</a>
+							<a href="/produtos?category=biquini_bottom" class="py-2 pl-3">Calcinhas</a>
+							<a href="/produtos?category=biquini" class="py-2 pl-3">Conjuntos</a>
+							<a href="/produtos?category=maio" class="py-2">Maiôs</a>
+							<a href="/produtos?category=saida_praia" class="py-2">Saídas de praia</a>
+							<a href="/produtos?category=acessorio" class="py-2">Acessórios</a>
+							<a href="/sets" class="py-2">Conjuntos</a>
+							<a href="/produtos?sale=true" class="py-2 font-semibold text-red-600">Liquida</a>
+						</div>
+					</nav>
+				</details>
+				<a href="/" class="text-left md:flex-1 md:order-2 md:text-center">
+					<span class="font-serif text-2xl leading-none text-foreground">Linda Flor</span>
+					<span class="block text-[10px] tracking-[0.24em] text-primary uppercase">Moda Praia</span>
+				</a>
+				<nav class="hidden items-center gap-6 md:flex md:order-1 md:flex-1">
+					<a href="/produtos?sort=novos" class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">Novidades</a>
+					<div class="group relative">
+						<button class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary flex items-center gap-1" type="button" aria-expanded="false">
+							Biquínis
+							@components.Icon("chevron-down", "size-3")
+						</button>
+						<div class="absolute left-0 top-full hidden pt-2 group-hover:block group-focus-within:block bg-background border border-border rounded-lg shadow-lg min-w-[200px]">
+							@navDropdownLink("/produtos?category=biquini_top", "Tops")
+							@navDropdownLink("/produtos?category=biquini_bottom", "Calcinhas")
+							@navDropdownLink("/produtos?category=biquini", "Conjuntos")
+						</div>
+					</div>
+					<a href="/produtos?category=maio" class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">Maiôs</a>
+					<a href="/produtos?category=saida_praia" class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">Saídas de praia</a>
+					<a href="/produtos?category=acessorio" class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary">Acessórios</a>
+					<div class="group relative">
+						<button class="text-[10px] tracking-wider uppercase transition-colors hover:text-primary flex items-center gap-1" type="button" aria-expanded="false">
+							Conjuntos
+							@components.Icon("chevron-down", "size-3")
+						</button>
+						<div class="absolute left-0 top-full hidden pt-2 group-hover:block group-focus-within:block bg-background border border-border rounded-lg shadow-lg min-w-[200px]">
+							for _, set := range s.Sets {
+								@navDropdownLink("/sets/"+set.Slug, set.Name)
+							}
+							<div class="border-t border-border"></div>
+							<a href="/sets" class="block px-4 py-2 text-sm font-semibold hover:bg-foreground/5 hover:text-primary">Ver todos</a>
+						</div>
+					</div>
+					<a href="/produtos?sale=true" class="text-[10px] tracking-wider uppercase font-semibold text-red-600 transition-colors hover:text-red-700">Liquida</a>
+				</nav>
+				<div class="flex items-center justify-end gap-2 md:order-3 md:flex-1">
+					<a href="/favoritos" class={ components.ButtonVariants(components.ButtonGhost, components.ButtonIcon) } aria-label="Favoritos" title="Favoritos">
+						@components.Icon("heart", "")
+					</a>
+					if s.User != nil {
+						<a href="/dashboard" class={ components.ButtonVariants(components.ButtonGhost, components.ButtonIcon) } aria-label="Conta" title="Conta">
+							@components.Icon("user", "")
+						</a>
+					} else {
+						<a href="/login" class={ components.ButtonVariants(components.ButtonGhost, components.ButtonIcon) } aria-label="Entrar" title="Entrar">
+							@components.Icon("user", "")
+						</a>
+					}
+					<button
+						type="button"
+						id="cart-open-btn"
+						data-cart-open
+						class={ components.ButtonVariants(components.ButtonGhost, components.ButtonIcon, "relative") }
+						aria-label="Carrinho"
+						title="Carrinho"
+						x-data
+						x-on:click="$store.cart.open = true"
+					>
+						@components.Icon("shopping-cart", "")
+						@CartCount(s.CartCount)
+					</button>
+				</div>
+			</div>
+		</div>
+	</header>
+}
+
+templ footerLink(href, label string) {
+	<a href={ templ.SafeURL(href) } class="transition-colors hover:text-foreground">{ label }</a>
+}
+
+templ Footer(s StoreSettings) {
+	<footer class="border-t border-border bg-background">
+		<div class="mx-auto max-w-7xl px-4 py-16 md:px-8">
+			<div class="grid gap-10 mb-10 sm:grid-cols-2 lg:grid-cols-4">
+				<div class="space-y-3">
+					<p class="font-serif text-2xl text-foreground">Linda Flor</p>
+					<p class="text-sm leading-relaxed text-muted-foreground">
+						Moda praia feminina com qualidade e atendimento próximo. Da praia de Aracaju para você brilhar em qualquer verão.
+					</p>
+					<p class="text-sm text-muted-foreground">Rua Capitão Isaias Alves de Souza, 1100 · Aracaju, SE</p>
+				</div>
+				<div class="space-y-3">
+					<h3 class="text-[10px] tracking-widest uppercase font-semibold">Institucional</h3>
+					<div class="flex flex-col gap-2 text-sm text-muted-foreground">
+						@footerLink("/#sobre", "Sobre")
+						@footerLink("/termos", "Termos")
+						@footerLink("/politica-privacidade", "Privacidade")
+					</div>
+				</div>
+				<div class="space-y-3">
+					<h3 class="text-[10px] tracking-widest uppercase font-semibold">Minha conta</h3>
+					<div class="flex flex-col gap-2 text-sm text-muted-foreground">
+						@footerLink("/login", "Entrar")
+						@footerLink("/conta/pedidos", "Meus pedidos")
+						@footerLink("/conta/enderecos", "Meus endereços")
+						@footerLink("/favoritos", "Favoritos")
+					</div>
+				</div>
+				<div class="space-y-3">
+					<h3 class="text-[10px] tracking-widest uppercase font-semibold">Atendimento</h3>
+					<div class="flex flex-col gap-2 text-sm text-muted-foreground">
+						@footerLink("/trocas-devolucoes", "Trocas e devoluções")
+						@footerLink("/guia-de-medidas", "Guia de medidas")
+						if s.WhatsappNumber != "" {
+							<a href={ templ.SafeURL(WhatsappLink(s.WhatsappNumber, "Olá! Quero saber mais sobre a Linda Flor.")) } target="_blank" rel="noreferrer" class="transition-colors hover:text-foreground">WhatsApp</a>
+						}
+					</div>
+				</div>
+			</div>
+			<div class="border-t border-border pt-8 space-y-6">
+				<div class="space-y-4">
+					<p class="text-sm text-muted-foreground">{ pixText(s) }</p>
+					<div class="flex items-center gap-4">
+						<a href="https://www.instagram.com/biquinislindaflor/" target="_blank" rel="noreferrer" class="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors" title="Instagram">
+							@components.Icon("instagram", "size-5")
+							{ "@biquinislindaflor" }
+						</a>
+					</div>
+				</div>
+			</div>
+			<div class="border-t border-border mt-8 pt-8 text-center text-[10px] tracking-wider text-muted-foreground uppercase">
+				© 2026 Linda Flor Moda Praia
+			</div>
+		</div>
+	</footer>
+}

@@ -1,0 +1,18 @@
+package components
+
+// HXPartial wraps content for an htmx 4 multi-target response:
+//
+//	@components.HXPartial("#cart-count", "outerHTML") { @layout.CartCount(n) }
+//
+// htmx swaps each <hx-partial> into its own target after the main swap.
+// A response made only of partials skips the main swap.
+templ HXPartial(target, swap string) {
+	<hx-partial
+		hx-target={ target }
+		if swap != "" {
+			hx-swap={ swap }
+		}
+	>
+		{ children... }
+	</hx-partial>
+}

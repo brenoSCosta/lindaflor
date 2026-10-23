@@ -1,0 +1,132 @@
+package components
+
+// OverlayProps control a Dialog or Sheet.
+type OverlayProps struct {
+	// Open is the server-rendered state.
+	Open bool
+	// XOpen is an Alpine expression bound to the open state
+	// (e.g. "$store.cart.open" or "confirming"). Enables a focus trap.
+	XOpen string
+	// OnClose is an Alpine statement run on Escape and backdrop click
+	// (e.g. "$store.cart.open = false").
+	OnClose string
+	Class   string
+	Attrs   templ.Attributes
+}
+
+const dialogOverlay = "fixed inset-0 z-50 size-full max-h-none max-w-none items-start justify-center overflow-y-auto bg-background/80 p-4 text-foreground backdrop-blur-sm open:flex"
+
+const overlayFade = "opacity-0 open:opacity-100 starting:open:opacity-0 [transition:opacity_200ms_ease-out,display_200ms_allow-discrete]"
+
+templ overlay(base string, p OverlayProps, role string) {
+	<dialog
+		class={ Cn(base, overlayFade, p.Class) }
+		if p.Open {
+			open
+		}
+		if role != "" {
+			role={ role }
+		}
+		if p.XOpen != "" {
+			x-bind:open={ p.XOpen }
+			x-trap.noscroll={ p.XOpen }
+		}
+		if p.OnClose != "" {
+			x-on:keydown.escape.window={ p.OnClose }
+			x-on:click.self={ p.OnClose }
+		}
+		{ attrs(p.Attrs)... }
+	>
+		{ children... }
+	</dialog>
+}
+
+// Dialog is a panel over the page (non-modal <dialog> + overlay). Give it
+// an accessible name (aria-label / aria-labelledby in Attrs). Without JS,
+// close by navigating to a page that renders it closed.
+templ Dialog(p OverlayProps) {
+	@overlay(dialogOverlay, p, "") {
+		{ children... }
+	}
+}
+
+// AlertDialog is a Dialog with role="alertdialog".
+templ AlertDialog(p OverlayProps) {
+	@overlay(dialogOverlay, p, "alertdialog") {
+		{ children... }
+	}
+}
+
+templ DialogContent(p Props) {
+	<div class={ Cn("relative my-auto flex w-full max-w-lg flex-col gap-4 rounded-xl border border-border bg-card p-6 text-card-foreground shadow-sm", "scale-95 opacity-0 in-[[open]]:scale-100 in-[[open]]:opacity-100 starting:in-[[open]]:scale-95 starting:in-[[open]]:opacity-0 [transition:scale_200ms_ease-out,opacity_200ms_ease-out]", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</div>
+}
+
+templ DialogHeader(p Props) {
+	<div class={ Cn("flex flex-col gap-1.5", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</div>
+}
+
+templ DialogTitle(p Props) {
+	<h2 class={ Cn("text-lg leading-none font-semibold", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</h2>
+}
+
+templ DialogDescription(p Props) {
+	<p class={ Cn("text-sm text-muted-foreground", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</p>
+}
+
+templ DialogFooter(p Props) {
+	<div class={ Cn("flex flex-wrap items-center justify-end gap-2", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</div>
+}
+
+const sheetOverlay = "fixed inset-0 z-50 size-full max-h-none max-w-none overflow-hidden bg-background/10 text-foreground backdrop-blur-xs open:flex"
+
+// Sheet is a panel sliding in from an edge (put a SheetContent inside).
+templ Sheet(p OverlayProps) {
+	@overlay(sheetOverlay, p, "") {
+		{ children... }
+	}
+}
+
+// SheetSide is the edge of a SheetContent (default Right).
+type SheetSide int
+
+const (
+	SheetRight SheetSide = iota
+	SheetLeft
+	SheetTop
+	SheetBottom
+)
+
+func (s SheetSide) classes() string {
+	switch s {
+	case SheetLeft:
+		return "mr-auto h-full w-full max-w-sm border-r -translate-x-full in-[[open]]:translate-x-0 starting:in-[[open]]:-translate-x-full"
+	case SheetTop:
+		return "mb-auto max-h-full w-full border-b -translate-y-full in-[[open]]:translate-y-0 starting:in-[[open]]:-translate-y-full"
+	case SheetBottom:
+		return "mt-auto max-h-full w-full border-t translate-y-full in-[[open]]:translate-y-0 starting:in-[[open]]:translate-y-full"
+	default:
+		return "ml-auto h-full w-full max-w-sm border-l translate-x-full in-[[open]]:translate-x-0 starting:in-[[open]]:translate-x-full"
+	}
+}
+
+type SheetContentProps struct {
+	Side  SheetSide
+	Class string
+	Attrs templ.Attributes
+}
+
+templ SheetContent(p SheetContentProps) {
+	<div class={ Cn("flex flex-col gap-4 overflow-y-auto border-border bg-card p-6 text-card-foreground shadow-sm [transition:translate_200ms_ease-out]", p.Side.classes(), p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</div>
+}

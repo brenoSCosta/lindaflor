@@ -1,0 +1,246 @@
+package components
+
+// TooltipSide / TooltipAlign place a TooltipContent bubble.
+type TooltipSide int
+
+type TooltipAlign int
+
+const (
+	TooltipTop TooltipSide = iota
+	TooltipBottom
+	TooltipLeft
+	TooltipRight
+)
+
+const (
+	TooltipCenter TooltipAlign = iota
+	TooltipStart
+	TooltipEnd
+)
+
+func tooltipPosition(s TooltipSide, a TooltipAlign) string {
+	switch s {
+	case TooltipBottom:
+		return [...]string{"top-full left-1/2 mt-2 -translate-x-1/2", "top-full left-0 mt-2", "top-full right-0 mt-2"}[a]
+	case TooltipLeft:
+		return [...]string{"top-1/2 right-full mr-2 -translate-y-1/2", "top-0 right-full mr-2", "right-full bottom-0 mr-2"}[a]
+	case TooltipRight:
+		return [...]string{"top-1/2 left-full ml-2 -translate-y-1/2", "top-0 left-full ml-2", "bottom-0 left-full ml-2"}[a]
+	default:
+		return [...]string{"bottom-full left-1/2 mb-2 -translate-x-1/2", "bottom-full left-0 mb-2", "right-0 bottom-full mb-2"}[a]
+	}
+}
+
+// Tooltip wraps a trigger and a TooltipContent (CSS-only, hover/focus).
+templ Tooltip(p Props) {
+	<span class={ Cn("group relative inline-flex", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</span>
+}
+
+type TooltipContentProps struct {
+	Side  TooltipSide
+	Align TooltipAlign
+	Class string
+	Attrs templ.Attributes
+}
+
+templ TooltipContent(p TooltipContentProps) {
+	<span role="tooltip" class={ Cn("pointer-events-none invisible absolute z-50 rounded-md bg-foreground px-2.5 py-1 text-xs font-medium text-background opacity-0 shadow-sm whitespace-nowrap [transition:opacity_150ms_ease-out,visibility_150ms_allow-discrete] group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100", tooltipPosition(p.Side, p.Align), p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</span>
+}
+
+templ HoverCard(p Props) {
+	<span class={ Cn("group relative inline-flex", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</span>
+}
+
+templ HoverCardContent(p Props) {
+	<span class={ Cn("flex flex-col gap-2", "invisible absolute top-full left-0 z-50 mt-2 w-64 rounded-lg border border-border bg-popover p-4 text-popover-foreground opacity-0 shadow-sm [transition:opacity_150ms_ease-out_300ms,visibility_150ms_allow-discrete_300ms] group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</span>
+}
+
+// AvatarSize is the avatar size (default Md).
+type AvatarSize int
+
+const (
+	AvatarMd AvatarSize = iota
+	AvatarSm
+	AvatarLg
+)
+
+func (s AvatarSize) classes() string {
+	switch s {
+	case AvatarSm:
+		return "size-8 text-xs"
+	case AvatarLg:
+		return "size-12 text-base"
+	default:
+		return "size-10 text-sm"
+	}
+}
+
+type AvatarProps struct {
+	Size  AvatarSize
+	Class string
+	Attrs templ.Attributes
+}
+
+templ Avatar(p AvatarProps) {
+	<span class={ Cn("relative flex shrink-0 overflow-hidden rounded-full", p.Size.classes(), p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</span>
+}
+
+templ AvatarImage(src string, alt string, p Props) {
+	<img src={ src } alt={ alt } class={ Cn("absolute inset-0 size-full object-cover", p.Class) } { attrs(p.Attrs)... }/>
+}
+
+templ AvatarFallback(p Props) {
+	<span class={ Cn("flex size-full items-center justify-center bg-foreground/10 font-medium text-foreground select-none", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</span>
+}
+
+templ Breadcrumb(p Props) {
+	<nav aria-label="breadcrumb" class={ p.Class } { attrs(p.Attrs)... }>
+		{ children... }
+	</nav>
+}
+
+templ BreadcrumbList(p Props) {
+	<ol class={ Cn("flex flex-wrap items-center gap-2 text-sm text-muted-foreground", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</ol>
+}
+
+templ BreadcrumbItem(p Props) {
+	<li class={ Cn("inline-flex items-center gap-2", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</li>
+}
+
+templ BreadcrumbLink(href templ.SafeURL, p Props) {
+	<a href={ href } class={ Cn("transition-colors hover:text-foreground", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</a>
+}
+
+templ BreadcrumbPage(p Props) {
+	<span aria-current="page" class={ Cn("font-medium text-foreground", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</span>
+}
+
+templ BreadcrumbSeparator(p Props) {
+	<li aria-hidden="true" class={ p.Class } { attrs(p.Attrs)... }>
+		@Icon("chevron-right", "size-3.5")
+	</li>
+}
+
+templ BreadcrumbEllipsis(p Props) {
+	<span class={ Cn("flex items-center", p.Class) } { attrs(p.Attrs)... }>
+		@Icon("ellipsis", "size-4")
+		<span class="sr-only">Mais</span>
+	</span>
+}
+
+templ Kbd(p Props) {
+	<kbd class={ Cn("inline-flex h-5 w-fit min-w-5 shrink-0 items-center justify-center gap-1 rounded-sm border border-border bg-foreground/5 px-1.5 font-sans text-xs font-medium text-background", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</kbd>
+}
+
+templ KbdGroup(p Props) {
+	<span class={ Cn("inline-flex items-center gap-1 whitespace-nowrap", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</span>
+}
+
+// Progress is a native <progress>; value < 0 renders indeterminate.
+templ Progress(value, maxValue float64, p Props) {
+	<progress
+		class={ Cn("h-2 w-full appearance-none overflow-hidden rounded-full bg-foreground/10 [&::-webkit-progress-bar]:bg-transparent [&::-webkit-progress-value]:rounded-full [&::-webkit-progress-value]:bg-primary [&::-webkit-progress-value]:transition-all [&::-moz-progress-bar]:rounded-full [&::-moz-progress-bar]:bg-primary", p.Class) }
+		if value >= 0 {
+			value={ ftoa(value) }
+		}
+		max={ ftoa(maxOr(maxValue, 100)) }
+		{ attrs(p.Attrs)... }
+	></progress>
+}
+
+// Separator is a horizontal (or vertical) hairline.
+templ Separator(vertical bool, p Props) {
+	<hr
+		class={ Cn("shrink-0 border-0 bg-border", If(!vertical, "h-px w-full"), If(vertical, "h-full w-px"), p.Class) }
+		if vertical {
+			aria-orientation="vertical"
+		}
+		{ attrs(p.Attrs)... }
+	/>
+}
+
+templ Skeleton(p Props) {
+	<div class={ Cn("animate-pulse rounded-md bg-foreground/10", p.Class) } { attrs(p.Attrs)... }></div>
+}
+
+// Spinner is an animated loader icon with an accessible label.
+templ Spinner(label string, class string) {
+	<span role="status" class="inline-flex">
+		@Icon("loader-circle", Cn("animate-spin", class))
+		<span class="sr-only">{ labelOr(label, "Carregando") }</span>
+	</span>
+}
+
+// ContainerVariant is the page container width.
+type ContainerVariant int
+
+const (
+	ContainerDefault ContainerVariant = iota
+	ContainerWide
+	ContainerNarrow
+	ContainerCentered
+)
+
+func (v ContainerVariant) shell() string {
+	switch v {
+	case ContainerWide:
+		return "@container/page mx-auto w-full max-w-6xl min-w-0"
+	case ContainerNarrow:
+		return "@container/page mx-auto w-full max-w-3xl min-w-0"
+	case ContainerCentered:
+		return "@container/page mx-auto flex min-h-[70vh] w-full max-w-md min-w-0 flex-col justify-center"
+	default:
+		return "@container/page mx-auto w-full max-w-7xl min-w-0"
+	}
+}
+
+func (v ContainerVariant) layout(flush bool) string {
+	switch {
+	case v == ContainerCentered:
+		return "flex w-full min-w-0 flex-col items-center gap-6 px-4 py-8 @sm/page:px-6 @lg/page:px-8"
+	case flush:
+		return "flex w-full min-w-0 flex-col px-4 @sm/page:px-6 @lg/page:px-8"
+	default:
+		return "flex w-full min-w-0 flex-col gap-6 px-4 py-8 @sm/page:px-6 @lg/page:px-8"
+	}
+}
+
+type ContainerProps struct {
+	Variant ContainerVariant
+	// Flush drops the vertical padding and gap.
+	Flush bool
+	Class string
+	Attrs templ.Attributes
+}
+
+templ Container(p ContainerProps) {
+	<div class={ p.Variant.shell() }>
+		<div class={ Cn(p.Variant.layout(p.Flush), p.Class) } { attrs(p.Attrs)... }>
+			{ children... }
+		</div>
+	</div>
+}

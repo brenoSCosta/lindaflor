@@ -1,0 +1,212 @@
+package components
+
+import (
+	"fmt"
+	"slices"
+
+	"github.com/wellington-vell/lindaflor/internal/httpx/toast"
+)
+
+// ToastPosition is where the toaster sits.
+type ToastPosition int
+
+const (
+	ToastBottomRight ToastPosition = iota
+	ToastBottomLeft
+	ToastBottomCenter
+	ToastTopLeft
+	ToastTopCenter
+	ToastTopRight
+)
+
+func (p ToastPosition) x() string {
+	switch p {
+	case ToastBottomLeft, ToastTopLeft:
+		return "left"
+	case ToastBottomCenter, ToastTopCenter:
+		return "center"
+	}
+	return "right"
+}
+
+func (p ToastPosition) y() string {
+	if p >= ToastTopLeft {
+		return "top"
+	}
+	return "bottom"
+}
+
+// ToasterOptions are the Sonner-style options (defaults match the Rust app).
+type ToasterOptions struct {
+	Position     ToastPosition
+	Expand       bool
+	VisibleToast int
+	RichColors   bool
+	CloseButton  bool
+	Gap          int
+	Duration     int
+	Offset       int
+	MobileOffset int
+}
+
+// DefaultToasterOptions: bottom-right, 3 visible, rich colors, close button.
+func DefaultToasterOptions() ToasterOptions {
+	return ToasterOptions{Position: ToastBottomRight, VisibleToast: 3, RichColors: true, CloseButton: true, Gap: 14, Duration: 4000, Offset: 32, MobileOffset: 16}
+}
+
+// ToastMarkup is one presented toast.
+type ToastMarkup struct {
+	toast.Toast
+	ShowClose bool
+	Style     string
+	Front     bool
+	Hidden    bool
+	Expanded  bool
+}
+
+// PresentToasts orders newest-first and computes the stack layout.
+func PresentToasts(toasts []toast.Toast, o ToasterOptions) []ToastMarkup {
+	visible := max(o.VisibleToast, 1)
+	ordered := slices.Clone(toasts)
+	slices.Reverse(ordered)
+	dir := -1
+	if o.Position.y() == "top" {
+		dir = 1
+	}
+	out := make([]ToastMarkup, 0, len(ordered))
+	for i, t := range ordered {
+		hidden := i >= visible
+		scale := "1"
+		if !(o.Expand || i == 0 || hidden) {
+			scale = fmt.Sprintf("%.3f", max(1-float64(i)*0.05, 0.85))
+		}
+		offset := 0
+		if !hidden && !o.Expand {
+			offset = dir * i * o.Gap
+		}
+		z := max(len(ordered)-i, 1)
+		out = append(out, ToastMarkup{
+			Toast: t, ShowClose: o.CloseButton && t.Dismissible,
+			Style: fmt.Sprintf("--offset:%dpx;--scale:%s;--z:%d;", offset, scale, z),
+			Front: i == 0, Hidden: hidden, Expanded: o.Expand,
+		})
+	}
+	return out
+}
+
+func toastDuration(t toast.Toast) string {
+	if t.Duration == nil {
+		return ""
+	}
+	return fmt.Sprint(*t.Duration)
+}
+
+func toastIconName(kind toast.Type) string {
+	switch kind {
+	case toast.SuccessType:
+		return "circle-check"
+	case toast.InfoType:
+		return "info"
+	case toast.WarningType:
+		return "triangle-alert"
+	case toast.ErrorType:
+		return "circle-alert"
+	case toast.LoadingType:
+		return "loader-circle"
+	}
+	return ""
+}
+
+templ toastIcon(kind toast.Type) {
+	if name := toastIconName(kind); name != "" {
+		@Icon(name, "size-4")
+	}
+}
+
+// Toaster renders the toast stack, the client template and the icon bank.
+// It is hx-preserve'd (id="toaster") so it survives htmx body swaps; new
+// toasts arrive through the X-Toast header (web/static/js/toast.js).
+templ Toaster(toasts []toast.Toast, o ToasterOptions) {
+	<section
+		id="toaster"
+		hx-preserve="true"
+		data-toaster
+		data-x={ o.Position.x() }
+		data-y={ o.Position.y() }
+		data-expand={ boolStr(o.Expand) }
+		data-visible-toasts={ fmt.Sprint(max(o.VisibleToast, 1)) }
+		data-rich-colors={ boolStr(o.RichColors) }
+		data-close-button={ boolStr(o.CloseButton) }
+		data-gap={ fmt.Sprint(o.Gap) }
+		data-duration={ fmt.Sprint(o.Duration) }
+		role="region"
+		aria-label="Notificações"
+		style={ fmt.Sprintf("--toaster-offset: %dpx; --toaster-mobile-offset: %dpx; --gap: %dpx;", o.Offset, o.MobileOffset, o.Gap) }
+	>
+		<ol data-toast-list>
+			for _, t := range PresentToasts(toasts, o) {
+				<li data-toast-item data-front={ boolStr(t.Front) } data-hidden={ boolStr(t.Hidden) } data-expanded={ boolStr(t.Expanded) } style={ t.Style }>
+					<div role="status" data-toast data-type={ string(t.Type) } data-duration={ toastDuration(t.Toast) } data-dismissible={ boolStr(t.Dismissible) } data-mounted={ boolStr(t.Shown) }>
+						<button type="button" data-toast-close aria-label="Fechar" hidden?={ !t.ShowClose }>
+							@Icon("x", "size-3")
+						</button>
+						<span data-toast-icon>
+							@toastIcon(t.Type)
+						</span>
+						<div data-toast-body>
+							<p data-toast-title>{ t.Title }</p>
+							if t.Description != "" {
+								<p data-toast-description>{ t.Description }</p>
+							} else {
+								<p data-toast-description hidden></p>
+							}
+						</div>
+						if t.Action != nil {
+							<a data-toast-action href={ templ.SafeURL(t.Action.Href) }>{ t.Action.Label }</a>
+						} else {
+							<a data-toast-action hidden></a>
+						}
+						if t.Cancel != nil {
+							<a data-toast-cancel href={ templ.SafeURL(t.Cancel.Href) }>{ t.Cancel.Label }</a>
+						} else {
+							<a data-toast-cancel hidden></a>
+						}
+					</div>
+				</li>
+			}
+		</ol>
+		<template data-toast-template>
+			<li data-toast-item>
+				<div role="status" data-toast data-type="default" data-dismissible="true">
+					<button type="button" data-toast-close aria-label="Fechar">
+						@Icon("x", "size-3")
+					</button>
+					<span data-toast-icon></span>
+					<div data-toast-body>
+						<p data-toast-title></p>
+						<p data-toast-description hidden></p>
+					</div>
+					<a data-toast-action hidden></a>
+					<a data-toast-cancel hidden></a>
+				</div>
+			</li>
+		</template>
+		<div data-toast-icon-bank hidden aria-hidden="true">
+			<span data-icon="success">
+				@toastIcon(toast.SuccessType)
+			</span>
+			<span data-icon="info">
+				@toastIcon(toast.InfoType)
+			</span>
+			<span data-icon="warning">
+				@toastIcon(toast.WarningType)
+			</span>
+			<span data-icon="error">
+				@toastIcon(toast.ErrorType)
+			</span>
+			<span data-icon="loading">
+				@toastIcon(toast.LoadingType)
+			</span>
+		</div>
+	</section>
+}

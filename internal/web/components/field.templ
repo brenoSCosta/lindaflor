@@ -1,0 +1,105 @@
+package components
+
+// FieldOrientation is the field layout.
+type FieldOrientation int
+
+const (
+	FieldVertical FieldOrientation = iota
+	FieldHorizontal
+	FieldResponsive
+)
+
+func (o FieldOrientation) classes() string {
+	switch o {
+	case FieldHorizontal:
+		return "flex-row items-center gap-3 [&>[data-slot=field-label]]:flex-1"
+	case FieldResponsive:
+		return "flex-col gap-2 @md/field-group:flex-row @md/field-group:items-start @md/field-group:gap-4 @md/field-group:[&>[data-slot=field-label]]:w-1/3 @md/field-group:[&>[data-slot=field-label]]:shrink-0"
+	default:
+		return "flex-col gap-2"
+	}
+}
+
+templ FieldSet(p Props) {
+	<fieldset class={ Cn("flex min-w-0 flex-col gap-5", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</fieldset>
+}
+
+// FieldLegend: Label=true uses the smaller label-sized variant.
+templ FieldLegend(label bool, p Props) {
+	<legend class={ Cn("mb-3", If(label, "text-sm font-medium"), If(!label, "text-base font-semibold"), p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</legend>
+}
+
+templ FieldGroup(p Props) {
+	<div class={ Cn("@container/field-group flex flex-col gap-5", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</div>
+}
+
+type FieldProps struct {
+	Orientation FieldOrientation
+	// Invalid sets data-invalid="true" (colors the label).
+	Invalid bool
+	Class   string
+	Attrs   templ.Attributes
+}
+
+// Field groups a control with its label, description and error.
+templ Field(p FieldProps) {
+	<div
+		role="group"
+		data-slot="field"
+		class={ Cn("group/field flex min-w-0", p.Orientation.classes(), p.Class) }
+		if p.Invalid {
+			data-invalid="true"
+		}
+		{ attrs(p.Attrs)... }
+	>
+		{ children... }
+	</div>
+}
+
+templ FieldContent(p Props) {
+	<div class={ Cn("flex min-w-0 flex-1 flex-col gap-1.5", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</div>
+}
+
+// FieldLabel is a Label that follows the field's disabled/invalid state.
+templ FieldLabel(p LabelProps) {
+	@Label(LabelProps{For: p.For, Required: p.Required, Class: Cn("leading-snug group-has-[:disabled]/field:opacity-50 group-has-[[aria-invalid=true]]/field:text-destructive group-data-[invalid=true]/field:text-destructive", p.Class), Attrs: withAttr(p.Attrs, "data-slot", "field-label")}) {
+		{ children... }
+	}
+}
+
+templ FieldTitle(p Props) {
+	<div class={ Cn("text-sm leading-snug font-medium", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</div>
+}
+
+templ FieldDescription(p Props) {
+	<p class={ Cn("text-sm leading-relaxed text-muted-foreground [&_a]:underline [&_a]:underline-offset-4", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</p>
+}
+
+templ FieldSeparator(p Props) {
+	<div class={ Cn("flex items-center gap-3 text-xs text-muted-foreground has-[>span:empty]:gap-0 before:h-px before:flex-1 before:bg-border after:h-px after:flex-1 after:bg-border", p.Class) } { attrs(p.Attrs)... }>
+		<span class="empty:hidden">
+			{ children... }
+		</span>
+	</div>
+}
+
+// FieldError is an announced error message. Empty message + no children
+// renders a hidden placeholder (so htmx/Alpine can fill it).
+templ FieldError(message string, p Props) {
+	<div role="alert" class={ Cn("text-sm text-destructive", p.Class) } { attrs(p.Attrs)... }>
+		{ message }
+		{ children... }
+	</div>
+}

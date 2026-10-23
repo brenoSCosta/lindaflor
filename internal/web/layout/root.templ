@@ -1,0 +1,125 @@
+package layout
+
+import (
+	"github.com/wellington-vell/lindaflor/internal/seo"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+	"github.com/wellington-vell/lindaflor/web/static"
+)
+
+templ head(h seo.Resolved) {
+	<title>{ h.Title }</title>
+	if h.Description != "" {
+		<meta name="description" content={ h.Description }/>
+	}
+	if h.Canonical != "" {
+		<link rel="canonical" href={ h.Canonical }/>
+	}
+	if h.Robots != "" {
+		<meta name="robots" content={ h.Robots }/>
+	}
+	if og := h.OG; og != nil {
+		<meta property="og:site_name" content={ seo.SiteName }/>
+		<meta property="og:locale" content="pt_BR"/>
+		<meta property="og:type" content={ og.Kind }/>
+		<meta property="og:title" content={ og.Title }/>
+		if og.Description != "" {
+			<meta property="og:description" content={ og.Description }/>
+		}
+		if og.URL != "" {
+			<meta property="og:url" content={ og.URL }/>
+		}
+		if og.Image != "" {
+			<meta property="og:image" content={ og.Image }/>
+			if og.ImageAlt != "" {
+				<meta property="og:image:alt" content={ og.ImageAlt }/>
+			}
+		}
+		if og.Price != "" {
+			<meta property="product:price:amount" content={ og.Price }/>
+			<meta property="product:price:currency" content="BRL"/>
+			<meta property="og:price:amount" content={ og.Price }/>
+			<meta property="og:price:currency" content="BRL"/>
+		}
+		if og.Availability != "" {
+			<meta property="product:availability" content={ og.Availability }/>
+		}
+		if og.Image != "" {
+			<meta name="twitter:card" content="summary_large_image"/>
+		} else {
+			<meta name="twitter:card" content="summary"/>
+		}
+		<meta name="twitter:title" content={ og.Title }/>
+		if og.Description != "" {
+			<meta name="twitter:description" content={ og.Description }/>
+		}
+		if og.Image != "" {
+			<meta name="twitter:image" content={ og.Image }/>
+		}
+	}
+	for _, body := range h.JSONLD {
+		@templ.Raw(`<script type="application/ld+json">` + body + `</script>`)
+	}
+}
+
+// Root is the HTML document. Children are the page wrapped in its shell.
+templ Root(p Page) {
+	<!DOCTYPE html>
+	<html lang="pt-BR">
+		<head>
+			<meta charset="UTF-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+			<meta name="htmx-config" content={ htmxConfig }/>
+			@head(p.Head)
+			<link rel="stylesheet" href={ static.URL("css/app.css") }/>
+			<script src={ static.URL("vendor/htmx.min.js") } defer></script>
+			<script src={ static.URL("vendor/hx-alpine-compat.min.js") } defer></script>
+			<script src={ static.URL("js/components.js") } defer></script>
+			<script src={ static.URL("vendor/alpine-focus.min.js") } defer></script>
+			<script src={ static.URL("vendor/alpine.min.js") } defer></script>
+			<script src={ static.URL("js/toast.js") } defer></script>
+		</head>
+		<body>
+			if p.Shell.Impersonating && p.Shell.User != nil {
+				@impersonationBanner(p.Shell.User.Name)
+			}
+			@components.Toaster(p.Toasts, components.DefaultToasterOptions())
+			if p.AppShell && p.Shell.User != nil {
+				@AppShell(p.Shell, p.Path) {
+					{ children... }
+				}
+			} else {
+				@StorefrontShell(p.Shell, p.Path) {
+					{ children... }
+				}
+			}
+		</body>
+	</html>
+}
+
+templ impersonationBanner(name string) {
+	<div class="flex items-center justify-center gap-4 border-b border-amber-600/40 bg-amber-100 px-4 py-2 text-sm text-amber-950">
+		<span>
+			Você está atuando como <strong>{ name }</strong>
+		</span>
+		<form method="post" action="/stop-impersonating" class="inline">
+			<button type="submit" class="rounded border border-amber-700/50 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-950 hover:bg-white">
+				Encerrar
+			</button>
+		</form>
+	</div>
+}
+
+// NotFound is the branded 404 body (render.NotFound sets the status).
+templ NotFound() {
+	<main class="mx-auto flex min-h-[70vh] max-w-2xl flex-col items-center justify-center px-4 py-24 text-center md:px-8">
+		<p class="font-serif text-7xl leading-none text-primary md:text-8xl">404</p>
+		<h1 class="mt-8 text-2xl font-semibold tracking-tight md:text-3xl">Página não encontrada</h1>
+		<p class="mt-4 max-w-md text-sm leading-relaxed text-muted-foreground md:text-base">
+			O link que você acessou pode estar quebrado, a página ter sido removida ou o endereço não existir.
+		</p>
+		<div class="mt-10 flex flex-wrap items-center justify-center gap-3">
+			<a href="/" class={ components.ButtonVariants(components.ButtonPrimary, components.ButtonLg) }>Voltar ao início</a>
+			<a href="/produtos" class={ components.ButtonVariants(components.ButtonOutline, components.ButtonLg) }>Ver catálogo</a>
+		</div>
+	</main>
+}

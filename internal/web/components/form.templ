@@ -1,0 +1,162 @@
+package components
+
+const inputBase = "h-9 w-full min-w-0 rounded-lg border border-border bg-transparent px-3 text-sm transition-colors outline-none placeholder:text-muted-foreground file:mr-3 file:h-full file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 aria-invalid:border-destructive aria-invalid:focus-visible:ring-destructive focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50"
+
+type InputProps struct {
+	// Invalid sets aria-invalid="true" (error border + ring).
+	Invalid bool
+	Class   string
+	// Attrs: type, name, id, value, placeholder, required, autocomplete,
+	// x-model, hx-* ...
+	Attrs templ.Attributes
+}
+
+// Input is a styled <input>.
+templ Input(p InputProps) {
+	<input class={ Cn(inputBase, p.Class) } aria-invalid={ boolStr(p.Invalid) } { attrs(p.Attrs)... }/>
+}
+
+const textareaBase = "field-sizing-content min-h-16 w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm transition-colors outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 aria-invalid:border-destructive aria-invalid:focus-visible:ring-destructive focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50"
+
+// Textarea is a styled <textarea>; pass the value as Value (escaped).
+templ Textarea(p InputProps, value string) {
+	<textarea class={ Cn(textareaBase, p.Class) } aria-invalid={ boolStr(p.Invalid) } { attrs(p.Attrs)... }>{ value }</textarea>
+}
+
+const labelBase = "flex items-center gap-2 text-sm leading-none font-medium select-none peer-disabled:pointer-events-none peer-disabled:opacity-50 peer-has-[:disabled]:pointer-events-none peer-has-[:disabled]:opacity-50 has-[+:disabled]:pointer-events-none has-[+:disabled]:opacity-50 has-[:disabled]:pointer-events-none has-[:disabled]:opacity-50"
+
+type LabelProps struct {
+	For      string
+	Required bool
+	Class    string
+	Attrs    templ.Attributes
+}
+
+// Label labels a form control (wrap it or set For).
+templ Label(p LabelProps) {
+	<label
+		class={ Cn(labelBase, p.Class) }
+		if p.For != "" {
+			for={ p.For }
+		}
+		{ attrs(p.Attrs)... }
+	>
+		{ children... }
+		if p.Required {
+			<span class="text-red-500">*</span>
+		}
+	</label>
+}
+
+const checkboxBase = "peer size-4 shrink-0 appearance-none rounded-[4px] border border-border bg-background transition-colors outline-none checked:border-primary checked:bg-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none"
+
+// Checkbox: Attrs go on the <input type="checkbox">, Class on the wrapper.
+templ Checkbox(p Props) {
+	<span class={ Cn("peer relative inline-flex shrink-0 has-[:disabled]:opacity-50", p.Class) }>
+		<input type="checkbox" class={ checkboxBase } { attrs(p.Attrs)... }/>
+		@Icon("check", "pointer-events-none absolute inset-0 m-auto size-3.5 text-primary-foreground opacity-0 peer-checked:opacity-100")
+	</span>
+}
+
+templ RadioGroup(p Props) {
+	<div role="radiogroup" class={ Cn("grid gap-3", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</div>
+}
+
+const radioBase = "peer size-4 shrink-0 appearance-none rounded-full border border-border bg-background transition-colors outline-none checked:border-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none"
+
+// RadioGroupItem: Attrs go on the <input type="radio">.
+templ RadioGroupItem(p Props) {
+	<span class={ Cn("peer relative inline-flex shrink-0 has-[:disabled]:opacity-50", p.Class) }>
+		<input type="radio" class={ radioBase } { attrs(p.Attrs)... }/>
+		<span class="pointer-events-none absolute inset-0 m-auto size-2 rounded-full bg-primary opacity-0 transition-opacity peer-checked:opacity-100"></span>
+	</span>
+}
+
+const switchBase = "peer h-4.5 w-8 shrink-0 appearance-none rounded-full bg-foreground/20 shadow-xs transition-colors outline-none checked:bg-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none"
+
+// Switch: a checkbox with role="switch"; Attrs go on the <input>.
+templ Switch(p Props) {
+	<span class={ Cn("peer relative inline-flex shrink-0 has-[:disabled]:opacity-50", p.Class) }>
+		<input type="checkbox" role="switch" class={ switchBase } { attrs(p.Attrs)... }/>
+		<span class="pointer-events-none absolute top-1/2 left-0.5 size-3.5 -translate-y-1/2 rounded-full bg-background shadow-xs transition-transform peer-checked:translate-x-3.5"></span>
+	</span>
+}
+
+const selectBase = "h-9 w-full appearance-none items-center rounded-lg border border-border bg-transparent pr-8 pl-3 text-left text-sm transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 aria-invalid:border-destructive aria-invalid:focus-visible:ring-destructive focus-visible:ring-offset-background disabled:pointer-events-none"
+
+const selectPicker = "[&::picker(select)]:[appearance:base-select] [&::picker(select)]:mt-1 [&::picker(select)]:rounded-lg [&::picker(select)]:border [&::picker(select)]:border-border [&::picker(select)]:bg-popover [&::picker(select)]:p-1 [&::picker(select)]:text-popover-foreground [&::picker(select)]:shadow-sm [&::picker-icon]:hidden [&_optgroup>legend]:px-2 [&_optgroup>legend]:py-1.5 [&_optgroup>legend]:text-xs [&_optgroup>legend]:font-medium [&_optgroup>legend]:text-muted-foreground [&_optgroup>legend]:cursor-default [&_optgroup>legend]:select-none [&_option]:flex [&_option]:items-center [&_option]:gap-2 [&_option]:rounded-md [&_option]:px-2 [&_option]:py-1.5 [&_option]:text-sm [&_option]:outline-none [&_option:hover]:bg-foreground/5 [&_option:focus]:bg-foreground/5 [&_option:checked]:font-medium [&_option::checkmark]:order-1 [&_option::checkmark]:ml-auto [&_option::checkmark]:size-4 [&_option::checkmark]:shrink-0 [&_option::checkmark]:content-[''] [&_option::checkmark]:bg-muted-foreground [&_option::checkmark]:[mask-size:100%_100%] [&_option::checkmark]:[mask-image:var(--select-checkmark)]"
+
+func selectStyle() string { return "--select-checkmark: " + IconDataURL("check") }
+
+// Select is a styled native <select> (customizable picker where the browser
+// supports appearance: base-select). Children are <option>s; Attrs go on
+// the <select>, Class on the wrapper.
+templ Select(p InputProps) {
+	<span class={ Cn("relative block has-[:disabled]:opacity-50 [&>select]:[appearance:base-select] [&:has(select:open)>svg]:rotate-180", p.Class) } style={ selectStyle() }>
+		<select class={ Cn(selectBase, selectPicker) } aria-invalid={ boolStr(p.Invalid) } { attrs(p.Attrs)... }>
+			{ children... }
+		</select>
+		@Icon("chevron-down", "pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted-foreground transition-transform")
+	</span>
+}
+
+// ToggleKind: Independent (checkbox) or Exclusive (radio).
+type ToggleKind int
+
+const (
+	ToggleIndependent ToggleKind = iota
+	ToggleExclusive
+)
+
+// ToggleSize is the toggle size (default Md).
+type ToggleSize int
+
+const (
+	ToggleMd ToggleSize = iota
+	ToggleSm
+	ToggleLg
+)
+
+func (s ToggleSize) classes() string {
+	switch s {
+	case ToggleSm:
+		return "h-8 gap-1.5 rounded-md px-2"
+	case ToggleLg:
+		return "h-10 gap-2 rounded-lg px-4"
+	default:
+		return "h-9 gap-2 rounded-lg px-3"
+	}
+}
+
+const toggleBase = "inline-flex shrink-0 cursor-pointer items-center justify-center border border-transparent text-sm font-medium whitespace-nowrap transition-colors select-none text-muted-foreground hover:bg-foreground/5 hover:text-foreground has-[:checked]:bg-foreground/10 has-[:checked]:text-foreground has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-offset-2 has-[:focus-visible]:ring-offset-background has-[:disabled]:pointer-events-none has-[:disabled]:opacity-50"
+
+type ToggleProps struct {
+	Kind  ToggleKind
+	Size  ToggleSize
+	Class string
+	// Attrs go on the sr-only input (name, value, checked...).
+	Attrs templ.Attributes
+}
+
+func (k ToggleKind) inputType() string {
+	if k == ToggleExclusive {
+		return "radio"
+	}
+	return "checkbox"
+}
+
+// Toggle is a pressable label around an sr-only checkbox/radio.
+templ Toggle(p ToggleProps) {
+	<label class={ Cn(toggleBase, p.Size.classes(), p.Class) }>
+		<input type={ p.Kind.inputType() } class="sr-only" { attrs(p.Attrs)... }/>
+		{ children... }
+	</label>
+}
+
+templ ToggleGroup(p Props) {
+	<div class={ Cn("inline-flex w-fit items-center gap-1 rounded-lg border border-border p-1", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</div>
+}

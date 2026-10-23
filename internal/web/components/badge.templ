@@ -1,0 +1,43 @@
+package components
+
+// BadgeVariant is the badge style (default Primary).
+type BadgeVariant int
+
+const (
+	BadgePrimary BadgeVariant = iota
+	BadgeSecondary
+	BadgeOutline
+	BadgeDestructive
+)
+
+const badgeBase = "inline-flex w-fit shrink-0 items-center justify-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium whitespace-nowrap"
+
+func (v BadgeVariant) classes() string {
+	switch v {
+	case BadgeSecondary:
+		return "border-transparent bg-foreground/5 text-foreground"
+	case BadgeOutline:
+		return "border-border text-foreground"
+	case BadgeDestructive:
+		return "border-transparent bg-destructive text-destructive-foreground"
+	default:
+		return "border-transparent bg-primary text-primary-foreground"
+	}
+}
+
+// BadgeVariants styles another element as a badge.
+func BadgeVariants(v BadgeVariant, extra ...string) string {
+	return Cn(append([]string{badgeBase, v.classes()}, extra...)...)
+}
+
+type BadgeProps struct {
+	Variant BadgeVariant
+	Class   string
+	Attrs   templ.Attributes
+}
+
+templ Badge(p BadgeProps) {
+	<span class={ BadgeVariants(p.Variant, p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</span>
+}

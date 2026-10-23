@@ -1,0 +1,45 @@
+package components
+
+// AlertVariant is the alert style (default Neutral).
+type AlertVariant int
+
+const (
+	AlertNeutral AlertVariant = iota
+	AlertDestructive
+)
+
+func (v AlertVariant) classes() string {
+	if v == AlertDestructive {
+		return "border-destructive/50 text-destructive"
+	}
+	return "border-border text-foreground"
+}
+
+const alertBase = "grid w-full grid-cols-[0_1fr] items-start gap-y-1 rounded-lg border bg-background px-4 py-3 text-sm has-[>svg]:grid-cols-[1rem_1fr] has-[>svg]:gap-x-3 [&>svg]:size-4 [&>svg]:translate-y-0.5"
+
+type AlertProps struct {
+	Variant AlertVariant
+	Class   string
+	Attrs   templ.Attributes
+}
+
+// Alert is an in-page notice. role="alert" is deliberately absent (it
+// interrupts screen readers); pass it in Attrs for messages that arrive
+// during the visit.
+templ Alert(p AlertProps) {
+	<div class={ Cn(alertBase, p.Variant.classes(), p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</div>
+}
+
+templ AlertTitle(p Props) {
+	<p class={ Cn("col-start-2 font-medium tracking-tight", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</p>
+}
+
+templ AlertDescription(p Props) {
+	<div class={ Cn("col-start-2 text-sm text-muted-foreground", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</div>
+}

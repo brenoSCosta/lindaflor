@@ -1,0 +1,103 @@
+package components
+
+templ Table(p Props) {
+	<div class="relative w-full overflow-x-auto">
+		<table class={ Cn("w-full caption-bottom text-sm", p.Class) } { attrs(p.Attrs)... }>
+			{ children... }
+		</table>
+	</div>
+}
+
+templ TableHeader(p Props) {
+	<thead class={ Cn("[&_tr]:border-b", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</thead>
+}
+
+templ TableBody(p Props) {
+	<tbody class={ Cn("[&_tr:last-child]:border-0", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</tbody>
+}
+
+templ TableFooter(p Props) {
+	<tfoot class={ Cn("border-t border-border bg-foreground/5 font-medium [&>tr]:last:border-b-0", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</tfoot>
+}
+
+templ TableRow(p Props) {
+	<tr class={ Cn("border-b border-border transition-colors hover:bg-foreground/5", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</tr>
+}
+
+templ TableHead(p Props) {
+	<th class={ Cn("h-10 px-3 text-left align-middle font-medium whitespace-nowrap text-muted-foreground", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</th>
+}
+
+templ TableCell(p Props) {
+	<td class={ Cn("p-3 align-middle whitespace-nowrap", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</td>
+}
+
+templ TableCaption(p Props) {
+	<caption class={ Cn("mt-4 text-sm text-muted-foreground", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</caption>
+}
+
+templ Pagination(p Props) {
+	<nav aria-label="pagination" class={ Cn("@container mx-auto flex w-full justify-center", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</nav>
+}
+
+templ PaginationContent(p Props) {
+	<ul class={ Cn("flex flex-row flex-wrap items-center justify-center gap-1", p.Class) } { attrs(p.Attrs)... }>
+		{ children... }
+	</ul>
+}
+
+templ PaginationItem(p Props) {
+	<li class={ p.Class } { attrs(p.Attrs)... }>
+		{ children... }
+	</li>
+}
+
+templ PaginationLink(href templ.SafeURL, active bool, p Props) {
+	<a
+		href={ href }
+		if active {
+			aria-current="page"
+		}
+		class={ paginationLinkClass(active, p.Class) }
+		{ attrs(p.Attrs)... }
+	>
+		{ children... }
+	</a>
+}
+
+templ PaginationPrevious(href templ.SafeURL, label string, p Props) {
+	<a href={ href } class={ ButtonVariants(ButtonGhost, ButtonMd, p.Class) } { attrs(p.Attrs)... }>
+		@Icon("chevron-left", "")
+		<span class="sr-only @xs:not-sr-only">{ labelOr(label, "Anterior") }</span>
+	</a>
+}
+
+templ PaginationNext(href templ.SafeURL, label string, p Props) {
+	<a href={ href } class={ ButtonVariants(ButtonGhost, ButtonMd, p.Class) } { attrs(p.Attrs)... }>
+		<span class="sr-only @xs:not-sr-only">{ labelOr(label, "Próxima") }</span>
+		@Icon("chevron-right", "")
+	</a>
+}
+
+templ PaginationEllipsis(p Props) {
+	<span class={ Cn("flex size-9 items-center justify-center text-muted-foreground", p.Class) } { attrs(p.Attrs)... }>
+		@Icon("ellipsis", "size-4")
+		<span class="sr-only">Mais páginas</span>
+	</span>
+}

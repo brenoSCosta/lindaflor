@@ -1,0 +1,167 @@
+package layout
+
+import "github.com/wellington-vell/lindaflor/internal/web/components"
+
+const userMenuItem = "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm whitespace-nowrap outline-none focus-visible:bg-foreground/5 active:bg-foreground/10 [&>svg]:pointer-events-none [&>svg]:size-4 [&>svg]:shrink-0"
+
+type navItem struct {
+	Href, Label, Icon string
+	Active            func(path string) bool
+}
+
+func exact(to string) func(string) bool  { return func(p string) bool { return pathActive(p, to) } }
+func prefix(to string) func(string) bool { return func(p string) bool { return pathPrefix(p, to) } }
+
+var adminNav = []navItem{
+	{"/admin", "Dashboard", "layout-dashboard", exact("/admin")},
+	{"/admin/usuarios", "Usuários", "users", prefix("/admin/usuarios")},
+	{"/admin/produtos", "Produtos", "shirt", prefix("/admin/produtos")},
+	{"/admin/sets", "Conjuntos", "layers", prefix("/admin/sets")},
+	{"/admin/pedidos", "Pedidos", "shopping-bag", prefix("/admin/pedidos")},
+	{"/admin/trocas", "Trocas", "repeat", prefix("/admin/trocas")},
+	{"/admin/relatorios", "Relatórios", "trending-up", prefix("/admin/relatorios")},
+	{"/admin/estoque", "Estoque", "warehouse", prefix("/admin/estoque")},
+	{"/admin/configuracoes", "Configurações", "settings", prefix("/admin/configuracoes")},
+	{"/admin/cupons", "Cupons", "ticket-percent", prefix("/admin/cupons")},
+	{"/admin/avaliacoes", "Avaliações", "star", prefix("/admin/avaliacoes")},
+}
+
+templ navButton(it navItem, path string) {
+	@components.SidebarMenuItem(components.Props{}) {
+		@components.SidebarMenuButton(components.SidebarMenuButtonProps{Href: it.Href, Active: it.Active(path), Tooltip: it.Label}) {
+			@components.Icon(it.Icon, "")
+			<span>{ it.Label }</span>
+		}
+	}
+}
+
+templ menuLink(href, icon, label string) {
+	<a href={ templ.SafeURL(href) } class={ components.Cn(userMenuItem, "hover:bg-foreground/5") }>
+		@components.Icon(icon, "")
+		{ label }
+	</a>
+}
+
+templ userAvatar(s ShellData, class string) {
+	@components.Avatar(components.AvatarProps{Size: components.AvatarSm, Class: class}) {
+		if s.AvatarURL != "" {
+			@components.AvatarImage(s.AvatarURL, "", components.Props{})
+		}
+		@components.AvatarFallback(components.Props{}) {
+			{ Initials(s.User.Name) }
+		}
+	}
+}
+
+// AppShell is the authenticated chrome: brand, navigation (admin group
+// for admins) and the account menu, in the sidebar primitive.
+templ AppShell(s ShellData, path string) {
+	@components.SidebarProvider(components.SidebarProviderProps{Expanded: s.SidebarExpanded}) {
+		@components.Sidebar(components.SidebarProps{Collapsible: components.SidebarCollapseIcon, Expanded: s.SidebarExpanded, SheetAttrs: components.Attr("id", "app-sidebar")}) {
+			@components.SidebarHeader(components.Props{}) {
+				<div class="flex items-center gap-2">
+					@components.SidebarMenu(components.Props{Class: "flex-1"}) {
+						@components.SidebarMenuItem(components.Props{}) {
+							@components.SidebarMenuButton(components.SidebarMenuButtonProps{Href: "/", Size: components.SidebarMenuButtonLg, Tooltip: "Linda Flor"}) {
+								<div class="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+									@components.Icon("sun", "")
+								</div>
+								<div class="grid flex-1 text-left text-sm leading-tight md:group-data-[collapsible=icon]/sidebar:hidden">
+									<span class="truncate font-medium">Linda Flor</span>
+									<span class="truncate text-xs text-muted-foreground">Moda Praia</span>
+								</div>
+							}
+						}
+					}
+					@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Size: components.ButtonIcon, Class: "md:hidden", Attrs: components.Attr("type", "button", "aria-label", "Fechar menu", "x-on:click", "close()")}) {
+						@components.Icon("x", "")
+					}
+				</div>
+			}
+			@components.SidebarContent(components.Props{}) {
+				@components.SidebarGroup(components.Props{}) {
+					@components.SidebarGroupLabel(components.Props{}) {
+						Geral
+					}
+					@components.SidebarGroupContent(components.Props{}) {
+						@components.SidebarMenu(components.Props{}) {
+							@navButton(navItem{"/dashboard", "Painel", "grid", exact("/dashboard")}, path)
+						}
+					}
+				}
+				if s.User.IsAdmin() {
+					@components.SidebarGroup(components.Props{}) {
+						@components.SidebarGroupLabel(components.Props{}) {
+							Admin
+						}
+						@components.SidebarGroupContent(components.Props{}) {
+							@components.SidebarMenu(components.Props{}) {
+								for _, it := range adminNav {
+									@navButton(it, path)
+								}
+							}
+						}
+					}
+				}
+			}
+			@components.SidebarFooter(components.Props{}) {
+				@components.SidebarMenu(components.Props{}) {
+					@components.SidebarMenuItem(components.Props{}) {
+						@components.DropdownMenu(components.Props{Class: "w-full"}) {
+							@components.DropdownMenuTrigger(components.Props{
+								Class: components.SidebarMenuButtonVariants(components.SidebarMenuButtonDefault, components.SidebarMenuButtonLg, "group-open:bg-sidebar-accent group-open:text-sidebar-accent-foreground"),
+								Attrs: components.Attr("title", s.User.Name),
+							}) {
+								@userAvatar(s, "rounded-lg!")
+								<span class="grid min-w-0 flex-1 text-left text-sm leading-tight md:group-data-[collapsible=icon]/sidebar:hidden">
+									<span class="truncate font-medium">{ s.User.Name }</span>
+									<span class="truncate text-xs">{ s.User.Email }</span>
+								</span>
+								@components.Icon("chevrons-up-down", "ml-auto md:group-data-[collapsible=icon]/sidebar:hidden")
+							}
+							@components.DropdownMenuContent(components.DropdownMenuContentProps{Side: components.MenuTop, Class: "min-w-56 md:[&]:bottom-0"}) {
+								<div class="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
+									@userAvatar(s, "")
+									<div class="grid min-w-0 flex-1 text-left text-sm leading-tight">
+										<span class="truncate font-medium">{ s.User.Name }</span>
+										<span class="truncate text-xs">{ s.User.Email }</span>
+									</div>
+								</div>
+								@components.DropdownMenuSeparator(components.Props{})
+								@menuLink("/favoritos", "heart", "Favoritos")
+								@menuLink("/conta/pedidos", "shopping-bag", "Pedidos")
+								@menuLink("/conta/enderecos", "map-pin", "Endereços")
+								@components.DropdownMenuSeparator(components.Props{})
+								@components.DropdownMenuLabel(components.Props{}) {
+									Configurações
+								}
+								@menuLink("/settings?tab=profile", "users", "Perfil")
+								@menuLink("/settings?tab=account", "badge-check", "Conta")
+								@menuLink("/settings?tab=sessions", "monitor", "Sessões")
+								@menuLink("/settings?tab=security", "shield", "Segurança")
+								@menuLink("/settings?tab=linked-accounts", "link", "Contas vinculadas")
+								@components.DropdownMenuSeparator(components.Props{})
+								<form method="post" action="/logout">
+									<input type="hidden" name="redirect" value="/"/>
+									<button type="submit" class={ components.Cn(userMenuItem, "text-destructive hover:bg-destructive/10 hover:text-destructive") }>
+										@components.Icon("log-out", "")
+										Sair
+									</button>
+								</form>
+							}
+						}
+					}
+				}
+			}
+			@components.SidebarRail(components.Props{})
+		}
+		@components.SidebarInset(components.Props{}) {
+			@components.SidebarHeader(components.Props{}) {
+				@components.SidebarTrigger(true, components.Props{Attrs: components.Attr("aria-controls", "app-sidebar")})
+			}
+			<div class="flex-1">
+				{ children... }
+			</div>
+		}
+	}
+}
