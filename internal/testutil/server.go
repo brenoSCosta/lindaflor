@@ -197,7 +197,10 @@ func (s *Server) Client(t testing.TB) *Client {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hc := s.Server.Client()
+	// httptest.Server.Client returns one shared *http.Client: copy it so
+	// every Client keeps its own jar.
+	base := *s.Server.Client()
+	hc := &base
 	hc.Jar = jar
 	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &Client{t: t, srv: s, HTTP: hc, Headers: http.Header{}}
@@ -303,13 +306,11 @@ func (c *Client) SessionCookieName() string {
 }
 
 // SignUp calls POST /api/auth/sign-up/email.
-// TODO(wave1-A): works once the auth API lands.
 func (c *Client) SignUp(name, email, password string) *Response {
 	return c.PostJSON("/api/auth/sign-up/email", map[string]string{"name": name, "email": email, "password": password})
 }
 
 // SignIn calls POST /api/auth/sign-in/email.
-// TODO(wave1-A): works once the auth API lands.
 func (c *Client) SignIn(email, password string) *Response {
 	return c.PostJSON("/api/auth/sign-in/email", map[string]string{"email": email, "password": password})
 }
