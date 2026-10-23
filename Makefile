@@ -8,8 +8,10 @@ BIN        ?= bin
 GOOSE_DIR  := db/migrations
 CSS_IN     := web/styles/input.css
 CSS_OUT    := web/static/css/app.css
+IMAGE      ?= lindaflor
+IMAGE_TAG  ?= dev
 
-.PHONY: generate templ sqlc css build test test-race lint fmt fmt-check vet dev run migrate migrate-status seed create-admin db-reset tidy drift clean
+.PHONY: generate templ sqlc css build test test-race lint lint-infra vuln fmt fmt-check vet dev run migrate migrate-status backup seed create-admin db-reset tidy drift docker docker-runtime docker-migrate docker-smoke clean
 
 ## generate: templ + sqlc + tailwind (outputs are committed)
 generate: templ sqlc css
@@ -40,6 +42,16 @@ lint:
 	sqlc vet
 	templ fmt -fail .
 
+## lint-infra: Dockerfile (hadolint), shell scripts (shellcheck), workflows (actionlint)
+lint-infra:
+	hadolint --failure-threshold warning --ignore DL3008 Dockerfile
+	shellcheck scripts/*.sh
+	actionlint
+
+## vuln: known vulnerabilities in reachable code (govulncheck)
+vuln:
+	govulncheck ./...
+
 ## fmt: gofumpt + goimports (golangci-lint fmt), templ fmt
 fmt:
 	golangci-lint fmt ./...
@@ -66,6 +78,10 @@ migrate:
 migrate-status:
 	goose -dir $(GOOSE_DIR) postgres "$$DATABASE_URL" status
 
+## backup: pg_dump $$DATABASE_URL into ./backups (scripts/backup.sh)
+backup:
+	scripts/backup.sh manual
+
 seed:
 	go run ./cmd/seed
 
@@ -74,6 +90,19 @@ create-admin:
 
 tidy:
 	go mod tidy
+
+## docker: build the runtime and migrate images ($(IMAGE):$(IMAGE_TAG), $(IMAGE)-migrate:$(IMAGE_TAG))
+docker: docker-runtime docker-migrate
+
+docker-runtime:
+	docker build --target runtime -t $(IMAGE):$(IMAGE_TAG) .
+
+docker-migrate:
+	docker build --target migrate -t $(IMAGE)-migrate:$(IMAGE_TAG) .
+
+## docker-smoke: boot both images against throwaway Postgres + Valkey
+docker-smoke: docker
+	scripts/docker-smoke.sh $(IMAGE):$(IMAGE_TAG) $(IMAGE)-migrate:$(IMAGE_TAG)
 
 clean:
 	rm -rf $(BIN) tmp

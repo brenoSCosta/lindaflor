@@ -30,6 +30,10 @@ in
     valkey
     nixfmt
     gnumake
+    govulncheck
+    hadolint
+    actionlint
+    shellcheck
   ];
 
   languages.go = {

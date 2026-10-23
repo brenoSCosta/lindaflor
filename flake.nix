@@ -51,6 +51,10 @@
           pgweb
           nixfmt
           gnumake
+          govulncheck
+          hadolint
+          actionlint
+          shellcheck
         ];
       in
       {

@@ -1,8 +1,13 @@
+# Go CI. Every Go job runs inside the flake dev shell (`nix develop`), so CI
+# uses exactly the toolchain developers do: go 1.27.3, templ, sqlc,
+# golangci-lint v2, tailwindcss 4, postgres 17 (tests start their own
+# server from the shell's initdb/postgres), govulncheck, hadolint,
+# actionlint, shellcheck.
 name: CI
 
 on:
   push:
-    branches: [main, migration]
+    branches: [main, migration, migration-golang]
   pull_request:
   workflow_dispatch:
 
@@ -14,109 +19,106 @@ permissions:
   contents: read
 
 env:
-  CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: "0"
-  RUST_BACKTRACE: "1"
-  # Compile sqlx macros against the committed `.sqlx/` cache. The `sqlx` job
-  # below is the one place that talks to a live database to verify it.
-  SQLX_OFFLINE: "true"
-  SQLX_CLI_VERSION: "0.8.6"
+  GOTOOLCHAIN: local
 
 jobs:
-  fmt:
+  lint:
+    name: lint (golangci-lint, sqlc vet, templ fmt, infra)
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      # Installs the channel pinned in rust-toolchain.toml (1.98.1).
-      - run: rustup toolchain install
-      - run: cargo fmt --all -- --check
-
-  clippy:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - run: rustup toolchain install
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: debug
-      - run: cargo clippy --all-targets --locked -- -D warnings
-
-  test:
-    runs-on: ubuntu-24.04
-    env:
-      # postgresql_embedded downloads Postgres from GitHub releases; the token
-      # avoids anonymous API rate limits.
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - uses: actions/checkout@v4
-      - run: rustup toolchain install
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: debug
-      - name: Cache embedded Postgres binaries
-        uses: actions/cache@v4
-        with:
-          path: ~/.theseus
-          key: theseus-pg-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
-      - run: cargo install --locked topcoat-cli --version 0.9.0
-      # HTML settings/2FA tests render `asset!` tags and load the bundle from
-      # `target/debug/assets` (see crates/test-support).
-      - run: topcoat asset bundle --bin lindaflor
-        env:
-          SQLX_OFFLINE: "true"
-      - run: cargo test --locked --all-targets
-
-  sqlx:
-    name: sqlx (migrations + offline cache)
-    runs-on: ubuntu-24.04
-    services:
-      postgres:
-        image: postgres:17-bookworm
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: lindaflor
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s --health-timeout 3s --health-retries 20
-    env:
-      DATABASE_URL: postgres://postgres:postgres@localhost:5432/lindaflor
-    steps:
-      - uses: actions/checkout@v4
-      - run: rustup toolchain install
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: debug
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: sqlx-cli@${{ env.SQLX_CLI_VERSION }}
-      - name: Apply migrations to a fresh database
-        run: |
-          sqlx migrate run
-          sqlx migrate info
-      - name: Check .sqlx is up to date
-        env:
-          SQLX_OFFLINE: "false"
-        run: cargo sqlx prepare --check -- --all-targets
-
-  audit:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-audit
+      - uses: cachix/install-nix-action@v31
       - uses: actions/cache@v4
         with:
-          path: ~/.cargo/advisory-db
-          key: advisory-db-${{ github.run_id }}
-          restore-keys: advisory-db-
-      - run: cargo audit
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+            ~/.cache/golangci-lint
+          key: go-lint-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-lint-${{ runner.os }}-
+      - name: Toolchain
+        run: nix develop -c bash -c 'go version && templ version && sqlc version && golangci-lint version'
+      - name: golangci-lint + sqlc vet + templ fmt
+        run: nix develop -c make lint
+      - name: go vet
+        run: nix develop -c go vet ./...
+      - name: hadolint + shellcheck + actionlint
+        run: nix develop -c make lint-infra
+
+  generate:
+    name: generated code is current (templ, sqlc, tailwind)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-
+      - run: nix develop -c make generate
+      - name: No drift
+        run: |
+          git status --porcelain
+          git diff --exit-code
+          test -z "$(git status --porcelain)"
+
+  test:
+    name: test (race)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-race-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-race-${{ runner.os }}-
+      - name: go build
+        run: nix develop -c go build ./...
+      # testutil starts one Postgres per test binary from the shell's
+      # initdb/postgres (LINDAFLOR_TEST_PG=local fails fast instead of
+      # falling back to a downloaded embedded server).
+      - name: go test -race
+        env:
+          LINDAFLOR_TEST_PG: local
+        run: nix develop -c go test -race -count=1 ./...
+
+  vuln:
+    name: govulncheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - uses: actions/cache@v4
+        with:
+          path: ~/go/pkg/mod
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: go-mod-${{ runner.os }}-
+      - run: nix develop -c govulncheck ./...
+
+  nix:
+    name: nix build (vendorHash current)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - run: nix build -L .#default
+      - run: test -x result/bin/server && test -x result/bin/create-admin && test -x result/bin/seed
 
   docker:
-    name: docker build smoke
+    name: docker (build, compose config, boot smoke)
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: hadolint/hadolint-action@v3.1.0
@@ -146,35 +148,16 @@ jobs:
           push: false
           cache-from: type=gha,scope=migrate
           cache-to: type=gha,mode=max,scope=migrate
-      - name: Smoke-test images
+      - name: Compose file is valid
+        env:
+          APP_ORIGIN: https://ci.invalid
+          MAIL_FROM: Lindaflor <ci@lindaflor.invalid>
         run: |
-          docker run --rm --entrypoint /bin/sh lindaflor:ci -c \
-            'test -x /app/lindaflor && test -f /app/assets/manifest.toml && id -u | grep -qv "^0$"'
-          docker run --rm --entrypoint sqlx lindaflor-migrate:ci --version
           mkdir -p secrets
           for s in postgres_password database_url valkey_password valkey_url \
             s3_access_key s3_secret_key token_pepper totp_encryption_key metrics_token; do
             echo ci > "secrets/$s"
           done
-          docker compose -f docker-compose.prod.yml config --quiet
-        env:
-          APP_ORIGIN: https://ci.invalid
-      - name: Boot against Postgres + Valkey (migrate job, then web)
-        run: |
-          set -euo pipefail
-          docker network create lf
-          docker run -d --name pg --network lf -e POSTGRES_PASSWORD=pg -e POSTGRES_DB=lindaflor postgres:17-bookworm
-          docker run -d --name valkey --network lf valkey/valkey:8-bookworm
-          for _ in $(seq 1 30); do docker exec pg pg_isready -h 127.0.0.1 -U postgres && break; sleep 2; done
-          docker run --rm --network lf -e DATABASE_URL=postgres://postgres:pg@pg:5432/lindaflor lindaflor-migrate:ci
-          docker run -d --name web --network lf -p 4200:4200 \
-            -e APP_ORIGIN=http://localhost:4200 \
-            -e DATABASE_URL=postgres://postgres:pg@pg:5432/lindaflor \
-            -e VALKEY_URL=redis://valkey:6379 \
-            -e TOTP_ENCRYPTION_KEY="$(openssl rand -base64 32)" \
-            lindaflor:ci
-          for _ in $(seq 1 30); do curl -fsS http://localhost:4200/api/health && break; sleep 2; done
-          curl -fsS http://localhost:4200/api/health
-          curl -fsS -o /dev/null http://localhost:4200/
-      - if: failure()
-        run: docker logs web || true
+          docker compose -f docker-compose.prod.yml --profile ops config --quiet
+      - name: Boot smoke (migrate + backup jobs, web /api/readyz, HEALTHCHECK)
+        run: scripts/docker-smoke.sh lindaflor:ci lindaflor-migrate:ci
