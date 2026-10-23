@@ -1,0 +1,229 @@
+package storefront
+
+import (
+	"strconv"
+
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+)
+
+const chipClass = "inline-flex items-center gap-1 rounded-full bg-secondary px-3 py-1 text-sm hover:opacity-80"
+
+// catalogToolbar is src/app/store/catalog_filters.rs catalog_toolbar: sort
+// select, active-filter chips and the "Filtrar" panel, one plain GET form.
+templ catalogToolbar(p store.CatalogParams, colors []store.ColorSwatch, base string) {
+	<form method="get" action={ templ.SafeURL(base) } class="space-y-4">
+		if p.Category != "" && p.Category != "all" {
+			<input type="hidden" name="category" value={ p.Category }/>
+		}
+		if p.Search != "" {
+			<input type="hidden" name="search" value={ p.Search }/>
+		}
+		<div class="flex flex-wrap items-center justify-end gap-3">
+			<label for="sort-select" class="text-sm font-medium whitespace-nowrap">Ordenar:</label>
+			<select
+				id="sort-select"
+				name="sort"
+				onchange="this.form.requestSubmit()"
+				class="rounded border border-input bg-background px-3 py-2 text-sm"
+			>
+				for _, opt := range store.SortOptions {
+					<option value={ opt[0] } selected?={ p.Sort == opt[0] }>{ opt[1] }</option>
+				}
+			</select>
+		</div>
+		if p.HasFacets() {
+			<div class="flex flex-wrap items-center gap-2">
+				for _, chip := range p.Chips(base) {
+					<a href={ templ.SafeURL(chip.Href) } class={ chipClass }>{ chip.Label } <span aria-hidden="true">×</span></a>
+				}
+				<a href={ templ.SafeURL(p.ClearFacetsHref(base)) } class="text-sm text-muted-foreground underline">Limpar tudo</a>
+			</div>
+		}
+		<details class="rounded-lg border border-border p-4" open?={ p.HasFacets() }>
+			<summary class="cursor-pointer font-medium">Filtrar</summary>
+			<div class="mt-4 grid gap-6 md:grid-cols-4">
+				<fieldset>
+					<legend class="mb-2 text-sm font-semibold">Tamanhos</legend>
+					<div class="space-y-2">
+						for _, size := range store.ValidSizes {
+							<div class="flex items-center gap-2">
+								@components.Checkbox(components.Props{Attrs: templ.Attributes{"id": "size-" + size, "name": "tamanho", "value": size, "checked": containsStr(p.Sizes, size)}})
+								<label for={ "size-" + size } class="cursor-pointer text-sm">{ store.SizeLabel(size) }</label>
+							</div>
+						}
+					</div>
+				</fieldset>
+				if len(colors) > 0 {
+					<fieldset>
+						<legend class="mb-2 text-sm font-semibold">Cores</legend>
+						<div class="max-h-56 space-y-2 overflow-y-auto">
+							for i, color := range colors {
+								<div class="flex items-center gap-2">
+									@components.Checkbox(components.Props{Attrs: templ.Attributes{"id": "color-" + strconv.Itoa(i), "name": "cor", "value": color.Name, "checked": containsStr(p.Colors, color.Name)}})
+									if color.Hex != nil {
+										<span class="size-4 rounded-full border border-border" style={ swatchStyle(color.Hex) }></span>
+									}
+									<label for={ "color-" + strconv.Itoa(i) } class="cursor-pointer text-sm">{ color.Name }</label>
+								</div>
+							}
+						</div>
+					</fieldset>
+				}
+				<fieldset>
+					<legend class="mb-2 text-sm font-semibold">Preço (R$)</legend>
+					<div class="grid grid-cols-2 gap-2">
+						<div>
+							<label for="preco-min" class="text-xs text-muted-foreground">De</label>
+							@components.Input(components.InputProps{Attrs: templ.Attributes{"id": "preco-min", "name": "preco_min", "type": "number", "step": "0.01", "min": "0", "inputmode": "decimal", "placeholder": "0", "value": deref(p.PrecoMin)}})
+						</div>
+						<div>
+							<label for="preco-max" class="text-xs text-muted-foreground">Até</label>
+							@components.Input(components.InputProps{Attrs: templ.Attributes{"id": "preco-max", "name": "preco_max", "type": "number", "step": "0.01", "min": "0", "inputmode": "decimal", "placeholder": "999", "value": deref(p.PrecoMax)}})
+						</div>
+					</div>
+				</fieldset>
+				<fieldset class="space-y-2">
+					<legend class="mb-2 text-sm font-semibold">Outros</legend>
+					<div class="flex items-center gap-2">
+						@components.Checkbox(components.Props{Attrs: templ.Attributes{"id": "disponivel", "name": "disponivel", "value": "true", "checked": p.Disponivel}})
+						<label for="disponivel" class="cursor-pointer text-sm">Somente disponíveis</label>
+					</div>
+					<div class="flex items-center gap-2">
+						@components.Checkbox(components.Props{Attrs: templ.Attributes{"id": "sale", "name": "sale", "value": "true", "checked": p.Sale}})
+						<label for="sale" class="cursor-pointer text-sm">Em promoção</label>
+					</div>
+				</fieldset>
+			</div>
+			<div class="mt-4 flex gap-2">
+				<button type="submit" class={ components.ButtonVariants(components.ButtonPrimary, components.ButtonSm) }>Aplicar</button>
+				<a href={ templ.SafeURL(p.ClearFacetsHref(base)) } class={ components.ButtonVariants(components.ButtonGhost, components.ButtonSm) }>Limpar</a>
+			</div>
+		</details>
+	</form>
+}
+
+func categoryButtonVariant(selected bool) components.ButtonVariant {
+	if selected {
+		return components.ButtonPrimary
+	}
+	return components.ButtonOutline
+}
+
+// catalogResults is the /busca/produtos shard (src/app/produtos.rs
+// catalog_results). Category pills, search and pagination swap this block
+// through htmx (the server answers HX-Replace-Url with the /produtos URL);
+// every control is also a plain link or GET form.
+templ catalogResults(v catalogView) {
+	{{ p := v.Page.Params }}
+	<div id="catalog-results" class="flex flex-col">
+		<section class="border-b border-border">
+			@components.Container(components.ContainerProps{}) {
+				@components.Breadcrumb(components.Props{}) {
+					@components.BreadcrumbList(components.Props{}) {
+						@components.BreadcrumbItem(components.Props{}) {
+							@components.BreadcrumbLink("/", components.Props{}) {
+								Início
+							}
+						}
+						@components.BreadcrumbSeparator(components.Props{})
+						@components.BreadcrumbItem(components.Props{}) {
+							@components.BreadcrumbPage(components.Props{}) {
+								Catálogo
+							}
+						}
+					}
+				}
+				<h1 class="mt-4 text-4xl font-bold tracking-tight">{ v.Page.Heading }</h1>
+				<p class="mt-3 max-w-2xl text-muted-foreground">
+					Biquínis, maiôs e saídas de praia, peças selecionadas para o seu verão.
+				</p>
+			}
+		</section>
+		@components.Container(components.ContainerProps{}) {
+			<div class="flex flex-wrap items-center gap-2">
+				for _, c := range catalogCategories {
+					{{ q := categoryQuery(p, c[0]) }}
+					<a
+						id={ "catalog-category-" + c[0] }
+						href={ templ.SafeURL(withQuery("/produtos", q)) }
+						hx-get={ withQuery("/busca/produtos", q) }
+						hx-target="#catalog-results"
+						hx-swap="outerHTML"
+						class={ components.ButtonVariants(categoryButtonVariant(p.Category == c[0]), components.ButtonSm) }
+					>
+						{ c[1] }
+					</a>
+				}
+			</div>
+			<form method="get" action="/produtos" role="search">
+				if p.Category != "all" {
+					<input type="hidden" name="category" value={ p.Category }/>
+				}
+				if p.FeaturedOnly {
+					<input type="hidden" name="destaque" value="true"/>
+				}
+				if p.IncludeOutOfStock {
+					<input type="hidden" name="esgotados" value="true"/>
+				}
+				@components.Input(components.InputProps{Attrs: templ.Attributes{
+					"id":           "catalog-search",
+					"type":         "search",
+					"name":         "search",
+					"value":        p.Search,
+					"placeholder":  "Buscar produtos...",
+					"aria-label":   "Buscar produtos",
+					"autocomplete": "off",
+					"hx-preserve":  true,
+					"hx-get":       "/busca/produtos",
+					"hx-trigger":   "input changed delay:300ms, search",
+					"hx-target":    "#catalog-results",
+					"hx-swap":      "outerHTML",
+					"hx-include":   "closest form",
+				}})
+			</form>
+			@catalogToolbar(p, v.Page.AvailableColors, v.Base)
+			if len(v.Page.Products) == 0 {
+				<p class="text-muted-foreground">
+					Nenhum produto encontrado.
+					<a href="/produtos" class="text-primary underline">Limpar filtros</a>
+				</p>
+			} else {
+				@productGrid("grid gap-8 @sm/page:grid-cols-2 @2xl/page:grid-cols-3", v.Page.Products, v.Cards)
+				if v.Page.Pager.Show() {
+					@components.Pagination(components.Props{}) {
+						@components.PaginationContent(components.Props{}) {
+							if v.Page.Pager.HasPrev() {
+								@components.PaginationItem(components.Props{}) {
+									{{ q := pageQuery(p, v.Page.Pager.Page-1) }}
+									<a
+										href={ templ.SafeURL(withQuery("/produtos", q)) }
+										hx-get={ withQuery("/busca/produtos", q) }
+										hx-target="#catalog-results"
+										hx-swap="outerHTML show:top"
+										class={ components.ButtonVariants(components.ButtonGhost, components.ButtonMd) }
+									>Anterior</a>
+								}
+							}
+							@components.PaginationItem(components.Props{}) {
+								<span class="px-3 text-sm text-muted-foreground">{ v.Page.Pager.Label() }</span>
+							}
+							if v.Page.Pager.HasNext() {
+								@components.PaginationItem(components.Props{}) {
+									{{ q := pageQuery(p, v.Page.Pager.Page+1) }}
+									<a
+										href={ templ.SafeURL(withQuery("/produtos", q)) }
+										hx-get={ withQuery("/busca/produtos", q) }
+										hx-target="#catalog-results"
+										hx-swap="outerHTML show:top"
+										class={ components.ButtonVariants(components.ButtonGhost, components.ButtonMd) }
+									>Próxima</a>
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	</div>
+}

@@ -1,0 +1,263 @@
+package storefront
+
+import (
+	"strconv"
+
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+	"github.com/wellington-vell/lindaflor/internal/web/layout"
+)
+
+// cartMutationResponse answers a cart procedure: the sheet body (main
+// swap into #cart-sheet-body), the header badge and, after an add, the
+// page's add-to-cart message.
+templ cartMutationResponse(v sheetView, count int, added bool) {
+	@cartSheetBody(v)
+	@components.HXPartial("#cart-count", "outerHTML") {
+		@layout.CartCount(count)
+	}
+	if added {
+		@components.HXPartial("#add-to-cart-feedback", "outerHTML") {
+			@addToCartFeedback(true, "")
+		}
+	}
+}
+
+// cartPage is the no-JS cart (GET /carrinho/sheet without htmx).
+templ cartPage(v sheetView) {
+	@components.Container(components.ContainerProps{Variant: components.ContainerNarrow}) {
+		<div id="cart-sheet-body" class="flex flex-col">
+			@cartSheetBody(v)
+		</div>
+	}
+}
+
+// cartForm is one sheet control: a no-JS POST form enhanced with hx-post
+// into #cart-sheet-body.
+templ cartForm(action string) {
+	<form method="post" action={ templ.SafeURL(action) } hx-post={ action } hx-target="#cart-sheet-body" class="contents">
+		{ children... }
+	</form>
+}
+
+templ qtyButton(label, aria string, disabled bool, variant components.ButtonVariant) {
+	@components.Button(components.ButtonProps{Variant: variant, Size: components.ButtonSm, Attrs: templ.Attributes{"type": "submit", "aria-label": aria, "disabled": disabled}}) {
+		{ label }
+	}
+}
+
+templ cartLineHeader(item store.CartItem) {
+	<a href={ templ.SafeURL(productPath(item.ProductSlug)) } class="shrink-0 overflow-hidden rounded-md">
+		if item.ImageURL != nil && *item.ImageURL != "" {
+			<img src={ *item.ImageURL } alt={ item.ProductName } class="h-20 w-16 object-cover"/>
+		}
+	</a>
+}
+
+templ cartLineName(item store.CartItem) {
+	<a
+		href={ templ.SafeURL(productPath(item.ProductSlug)) }
+		class="block truncate text-sm font-medium uppercase tracking-wide transition-colors hover:text-primary"
+	>
+		{ item.ProductName }
+	</a>
+	<p class="text-xs text-muted-foreground">{ item.VariantLabel }</p>
+}
+
+func piecesLabel(n int32) string {
+	if n == 1 {
+		return "1 peça"
+	}
+	return strconv.Itoa(int(n)) + " peças"
+}
+
+// cartSheetBody is src/app/store/cart_sheet.rs cart_sheet.
+templ cartSheetBody(v sheetView) {
+	<div class="flex h-full min-h-0 flex-col gap-4">
+		@components.DialogHeader(components.Props{Class: "shrink-0"}) {
+			<div class="flex items-start justify-between gap-4">
+				<div>
+					@components.DialogTitle(components.Props{}) {
+						Carrinho
+					}
+					if v.ItemCount > 0 {
+						<p class="mt-1 text-sm text-muted-foreground">{ piecesLabel(v.ItemCount) }</p>
+					}
+				</div>
+				<div class="flex items-center gap-2">
+					if v.ItemCount > 0 {
+						@components.Badge(components.BadgeProps{Variant: components.BadgeSecondary}) {
+							{ strconv.Itoa(int(v.ItemCount)) }
+						}
+					}
+					if !v.Page {
+						@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Size: components.ButtonIcon, Attrs: sheetCloseAttrs(false)}) {
+							✕
+						}
+					}
+				</div>
+			</div>
+		}
+		if len(v.Notices) > 0 {
+			<div class="flex shrink-0 flex-col gap-2">
+				for _, n := range v.Notices {
+					@components.Alert(components.AlertProps{Variant: components.AlertNeutral}) {
+						@components.AlertTitle(components.Props{}) {
+							{ n.Message() }
+						}
+					}
+				}
+			</div>
+		}
+		if v.empty() {
+			<div class="flex flex-1 flex-col justify-center py-10 text-center">
+				<p class="text-muted-foreground">Seu carrinho está vazio.</p>
+				<div class="mt-4 flex justify-center gap-2">
+					<a href="/produtos" class={ components.ButtonVariants(components.ButtonPrimary, components.ButtonMd) }>Ver catálogo</a>
+					if !v.Page {
+						@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Attrs: templ.Attributes{"type": "button", "x-on:click": "$store.cart.open = false"}}) {
+							Fechar
+						}
+					}
+				</div>
+			</div>
+		} else {
+			<div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+				for _, item := range v.Loose {
+					<div class="flex items-center gap-3 rounded-lg border border-border p-3">
+						@cartLineHeader(item)
+						<div class="min-w-0 flex-1 space-y-1">
+							@cartLineName(item)
+							<div class="flex items-center gap-2 pt-1">
+								@cartForm("/carrinho/quantidade") {
+									<input type="hidden" name="variant_id" value={ item.VariantID.String() }/>
+									<input type="hidden" name="quantity" value={ strconv.Itoa(int(item.Quantity - 1)) }/>
+									@qtyButton("-", "Diminuir", item.Quantity <= 1, components.ButtonOutline)
+								}
+								<span class="min-w-8 text-center text-sm">{ strconv.Itoa(int(item.Quantity)) }</span>
+								@cartForm("/carrinho/quantidade") {
+									<input type="hidden" name="variant_id" value={ item.VariantID.String() }/>
+									<input type="hidden" name="quantity" value={ strconv.Itoa(int(item.Quantity + 1)) }/>
+									@qtyButton("+", "Aumentar", item.Quantity >= item.MaxQuantity, components.ButtonOutline)
+								}
+								@cartForm("/carrinho/remover") {
+									<input type="hidden" name="variant_id" value={ item.VariantID.String() }/>
+									@qtyButton("✕", "Remover", false, components.ButtonGhost)
+								}
+							</div>
+						</div>
+						<p class="shrink-0 text-right text-sm font-medium text-primary">{ price(item.LineTotalCents()) }</p>
+					</div>
+				}
+				for _, g := range v.Groups {
+					<div class="flex flex-col gap-2 rounded-lg border border-border p-3">
+						if g.Name != "" {
+							<p class="text-sm font-medium uppercase tracking-wide">{ g.Name }</p>
+						}
+						for _, m := range g.Members {
+							<div class="flex items-center gap-3">
+								@cartLineHeader(m)
+								<div class="min-w-0 flex-1 space-y-1">
+									@cartLineName(m)
+								</div>
+								<p class="shrink-0 text-right text-sm font-medium text-primary">{ price(m.LineTotalCents()) }</p>
+							</div>
+						}
+						<div class="flex items-center gap-2 pt-1">
+							@cartForm("/carrinho/conjunto/quantidade") {
+								<input type="hidden" name="set_id" value={ g.ID.String() }/>
+								<input type="hidden" name="quantity" value={ strconv.Itoa(int(g.Quantity - 1)) }/>
+								@qtyButton("-", "Diminuir conjunto", g.Quantity <= 1, components.ButtonOutline)
+							}
+							<span class="min-w-8 text-center text-sm">{ strconv.Itoa(int(g.Quantity)) }</span>
+							@cartForm("/carrinho/conjunto/quantidade") {
+								<input type="hidden" name="set_id" value={ g.ID.String() }/>
+								<input type="hidden" name="quantity" value={ strconv.Itoa(int(g.Quantity + 1)) }/>
+								@qtyButton("+", "Aumentar conjunto", g.Quantity >= g.MaxQuantity, components.ButtonOutline)
+							}
+							@cartForm("/carrinho/conjunto/remover") {
+								<input type="hidden" name="set_id" value={ g.ID.String() }/>
+								@qtyButton("✕", "Remover conjunto", false, components.ButtonGhost)
+							}
+							<p class="ml-auto shrink-0 text-right text-sm font-medium text-primary">{ price(g.TotalCents) }</p>
+						</div>
+					</div>
+				}
+			</div>
+			<div class="flex shrink-0 flex-col gap-3 rounded-lg border border-border p-4">
+				if v.Settings.FreeShippingThresholdCents > 0 {
+					<div class="space-y-2">
+						if v.missingForFreeShipping() > 0 {
+							<p class="text-sm text-muted-foreground">Faltam { price(v.missingForFreeShipping()) } para frete grátis</p>
+						} else {
+							<p class="text-sm text-primary font-medium">Você ganhou frete grátis!</p>
+						}
+						<div class="h-2 bg-border rounded-full overflow-hidden">
+							<div class="h-full bg-primary transition-all" style={ "width: " + strconv.Itoa(v.freeShippingPercent()) + "%" }></div>
+						</div>
+					</div>
+				} else {
+					<p class="text-sm text-primary">Frete grátis em todas as compras!</p>
+				}
+				@components.Separator(false, components.Props{Class: "my-1"})
+				<div class="flex items-center justify-between">
+					<span class="text-sm text-muted-foreground">Subtotal</span>
+					<span class="text-lg font-semibold text-primary">{ price(v.Subtotal) }</span>
+				</div>
+				if v.Discount > 0 {
+					<div class="flex items-center justify-between text-sm">
+						<span class="text-muted-foreground">Desconto</span>
+						<span>-{ price(v.Discount) }</span>
+					</div>
+				}
+				if v.Settings.PixDiscountPercent > 0 {
+					<div class="flex items-center justify-between text-sm">
+						<span class="text-muted-foreground">Total no Pix</span>
+						<span class="text-primary font-medium">{ price(v.pixTotal()) }</span>
+					</div>
+					<p class="text-xs text-muted-foreground text-right">Estimativa (antes do frete)</p>
+				}
+				<form method="post" action="/carrinho/cupom" hx-post="/carrinho/cupom" hx-target="#cart-sheet-body">
+					@components.Field(components.FieldProps{Invalid: v.CouponError != ""}) {
+						@components.FieldLabel(components.LabelProps{For: "cart-coupon"}) {
+							Cupom
+						}
+						<div class="flex items-center gap-2">
+							@components.Input(components.InputProps{Class: "min-w-0 flex-1", Attrs: templ.Attributes{"id": "cart-coupon", "name": "code", "placeholder": "CUPOM10", "autocomplete": "off", "value": v.CouponInput}})
+							@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Attrs: templ.Attributes{"type": "submit"}}) {
+								Aplicar
+							}
+						</div>
+						<p class="text-sm text-destructive" hidden?={ v.CouponError == "" }>{ v.CouponError }</p>
+					}
+				</form>
+				if v.Coupon != nil {
+					<div class="flex items-center justify-between gap-2">
+						<p class="text-sm text-muted-foreground">Cupom { v.Coupon.Code } aplicado.</p>
+						@cartForm("/carrinho/cupom") {
+							<input type="hidden" name="code" value=""/>
+							@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Size: components.ButtonSm, Attrs: templ.Attributes{"type": "submit"}}) {
+								Remover
+							}
+						}
+					</div>
+				} else if v.Settings.FirstPurchaseCouponCode != nil && *v.Settings.FirstPurchaseCouponCode != "" {
+					<p class="text-xs text-primary bg-primary/10 rounded px-3 py-2">
+						Primeira compra? Use o cupom <strong>{ *v.Settings.FirstPurchaseCouponCode }</strong>
+					</p>
+				}
+				<p class="text-xs text-muted-foreground">{ v.freeShippingHint() }</p>
+			</div>
+			<div class="flex shrink-0 flex-col gap-2">
+				<a href="/checkout" class={ components.ButtonVariants(components.ButtonPrimary, components.ButtonLg) }>Finalizar compra</a>
+				if v.Page {
+					<a href="/produtos" class={ components.ButtonVariants(components.ButtonOutline, components.ButtonLg, "w-full") }>Continuar comprando</a>
+				} else {
+					@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Size: components.ButtonLg, Class: "w-full", Attrs: templ.Attributes{"type": "button", "x-on:click": "$store.cart.open = false"}}) {
+						Continuar comprando
+					}
+				}
+			</div>
+		}
+	</div>
+}

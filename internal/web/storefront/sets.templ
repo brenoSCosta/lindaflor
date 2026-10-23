@@ -1,0 +1,194 @@
+package storefront
+
+import (
+	"strconv"
+
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+)
+
+templ setsPage(cards []setCard) {
+	@components.Container(components.ContainerProps{}) {
+		<h1 class="text-4xl font-bold tracking-tight">Conjuntos</h1>
+		<p class="max-w-xl text-muted-foreground">
+			Combine top e calcinha em conjuntos prontos, com preço especial.
+		</p>
+		if len(cards) == 0 {
+			<p class="text-muted-foreground">
+				Nenhum conjunto disponível no momento. Volte em breve.
+			</p>
+		} else {
+			<div class="grid gap-4 @md/page:grid-cols-2">
+				for _, c := range cards {
+					<a href={ templ.SafeURL(setPath(c.Set.Slug)) } class="block transition-colors">
+						@components.Card(components.Props{Class: "overflow-hidden hover:border-primary"}) {
+							<div class="aspect-[16/9] overflow-hidden bg-foreground/5">
+								<img src={ c.Cover } alt={ c.Set.Name } class="h-full w-full object-cover"/>
+							</div>
+							@components.CardHeader(components.Props{}) {
+								@components.CardTitle(components.Props{}) {
+									{ c.Set.Name }
+								}
+								if c.Set.Description != nil {
+									@components.CardDescription(components.Props{}) {
+										{ *c.Set.Description }
+									}
+								}
+							}
+							@components.CardFooter(components.Props{}) {
+								@components.Badge(components.BadgeProps{Variant: components.BadgeSecondary}) {
+									{ strconv.FormatInt(c.Set.ProductCount, 10) } peças
+								}
+								if c.Set.PriceInCents != nil {
+									<span class="text-sm font-medium">{ price(*c.Set.PriceInCents) }</span>
+								}
+							}
+						}
+					</a>
+				}
+			</div>
+		}
+	}
+}
+
+templ setNotFound() {
+	@components.Container(components.ContainerProps{}) {
+		<h1 class="text-2xl font-bold">Conjunto não encontrado</h1>
+		<a href="/sets" class={ components.ButtonVariants(components.ButtonPrimary, components.ButtonMd, "mx-auto mt-6 w-fit") }>
+			Ver conjuntos
+		</a>
+	}
+}
+
+func noKeep() map[string][]string { return nil }
+
+templ setPageView(v setView) {
+	@components.Container(components.ContainerProps{}) {
+		@components.Breadcrumb(components.Props{}) {
+			@components.BreadcrumbList(components.Props{}) {
+				@components.BreadcrumbItem(components.Props{}) {
+					@components.BreadcrumbLink("/", components.Props{}) {
+						Início
+					}
+				}
+				@components.BreadcrumbSeparator(components.Props{})
+				@components.BreadcrumbItem(components.Props{}) {
+					@components.BreadcrumbLink("/sets", components.Props{}) {
+						Conjuntos
+					}
+				}
+				@components.BreadcrumbSeparator(components.Props{})
+				@components.BreadcrumbItem(components.Props{}) {
+					@components.BreadcrumbPage(components.Props{}) {
+						{ v.Set.Name }
+					}
+				}
+			}
+		}
+		<h1 class="text-4xl font-bold tracking-tight">{ v.Set.Name }</h1>
+		if v.Set.Description != nil {
+			<p class="max-w-2xl text-muted-foreground">{ *v.Set.Description }</p>
+		}
+		<p class="text-sm text-muted-foreground">{ strconv.FormatInt(v.MemberCount, 10) } peças neste conjunto</p>
+		<div class="grid gap-4 @3xl/page:grid-cols-2" x-data={ "{ img: '" + v.InitialImg + "' }" }>
+			if len(v.Gallery) == 0 {
+				<div class="space-y-4">
+					<div class="relative overflow-hidden rounded-xl border border-border">
+						<div class="relative aspect-[4/5] bg-foreground/5">
+							<img src={ productFallbackImage } alt={ v.Set.Name } class="absolute inset-0 h-full w-full object-cover"/>
+						</div>
+					</div>
+				</div>
+			} else {
+				@productGallery(v.Gallery, v.InitialImg, v.Set.Name, setPath(v.Set.Slug), noKeep(), nil, "Imagens do conjunto")
+			}
+			<div class="space-y-4">
+				if v.Set.PriceInCents != nil {
+					<div class="space-y-2">
+						<div class="flex items-center gap-2">
+							if b := v.discountBadge(); b != "" {
+								@components.Badge(components.BadgeProps{Variant: components.BadgePrimary}) {
+									{ b }
+								}
+							}
+							if v.soldOut() {
+								@components.Badge(components.BadgeProps{Variant: components.BadgeDestructive}) {
+									Esgotado
+								}
+							} else {
+								@components.Badge(components.BadgeProps{Variant: components.BadgePrimary}) {
+									Em estoque
+								}
+							}
+						</div>
+						if v.Set.CompareAtPriceInCents != nil {
+							<p class="text-sm text-muted-foreground line-through">{ price(*v.Set.CompareAtPriceInCents) }</p>
+						}
+						if v.Settings.PixDiscountPercent > 0 {
+							<p class="text-2xl font-bold text-primary">{ pixText(v.pixCents()) }</p>
+							<p class="text-sm text-muted-foreground">ou { price(*v.Set.PriceInCents) }</p>
+						} else {
+							<p class="text-2xl font-medium text-primary">{ price(*v.Set.PriceInCents) }</p>
+						}
+						if v.soldOut() {
+							<p class="text-sm text-muted-foreground">Este conjunto está esgotado no momento.</p>
+						} else {
+							<p class="text-sm text-muted-foreground">{ strconv.FormatInt(v.Available, 10) } disponíveis</p>
+						}
+					</div>
+					<form
+						method="post"
+						action={ templ.SafeURL(setPath(v.Set.Slug)) }
+						hx-post="/conjuntos/adicionar"
+						hx-target="#cart-sheet-body"
+						hx-swap="innerHTML"
+						class="space-y-3"
+					>
+						<input type="hidden" name="set_id" value={ v.Set.ID.String() }/>
+						<input type="hidden" name="quantity" value="1"/>
+						<button type="submit" disabled?={ v.soldOut() } class={ components.ButtonVariants(components.ButtonPrimary, components.ButtonLg, "w-full") }>
+							if v.soldOut() {
+								Indisponível
+							} else {
+								Adicionar conjunto
+							}
+						</button>
+						@addToCartFeedback(v.Added, v.AddError)
+					</form>
+				} else if v.soldOut() {
+					@components.Badge(components.BadgeProps{Variant: components.BadgeDestructive}) {
+						Esgotado
+					}
+				}
+			</div>
+		</div>
+		if len(v.Members) > 0 {
+			<section>
+				<p class="text-sm font-medium tracking-tight text-primary uppercase">O conjunto</p>
+				<h2 class="mt-2 mb-4 text-4xl font-bold tracking-tight">Peças inclusas</h2>
+				@productGrid("grid gap-8 @sm/page:grid-cols-2 @lg/page:grid-cols-4", v.Members, v.Cards)
+			</section>
+		}
+	}
+}
+
+templ favoritosPage(products []store.ProductSummary, c CardCtx) {
+	@components.Container(components.ContainerProps{}) {
+		<h1 class="text-4xl font-serif font-bold mb-2">Meus Favoritos</h1>
+		<p class="text-muted-foreground mb-8">Produtos que você curtiu</p>
+		if len(products) == 0 {
+			<div class="text-center py-16">
+				<p class="text-muted-foreground mb-4">Você ainda não tem favoritos</p>
+				<a href="/" class="inline-block px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90">
+					Voltar para a loja
+				</a>
+			</div>
+		} else {
+			<div class="grid grid-cols-1 gap-6 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4" data-favorites-grid>
+				for _, p := range products {
+					@ProductCard(p, c)
+				}
+			</div>
+		}
+	}
+}
