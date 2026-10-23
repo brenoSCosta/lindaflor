@@ -18,6 +18,7 @@ import (
 
 	"github.com/wellington-vell/lindaflor/internal/app"
 	"github.com/wellington-vell/lindaflor/internal/auth"
+	"github.com/wellington-vell/lindaflor/internal/config"
 	"github.com/wellington-vell/lindaflor/internal/httpx"
 	"github.com/wellington-vell/lindaflor/internal/httpx/toast"
 	"github.com/wellington-vell/lindaflor/internal/seo"
@@ -31,6 +32,7 @@ func Page(w http.ResponseWriter, r *http.Request, d *app.Deps, content templ.Com
 
 // Status is Page with an explicit status code.
 func Status(w http.ResponseWriter, r *http.Request, d *app.Deps, status int, content templ.Component) {
+	noStoreInDev(w, d)
 	if httpx.IsPartial(r) {
 		Fragment(w, r, status, content)
 		return
@@ -52,8 +54,19 @@ func Fragment(w http.ResponseWriter, r *http.Request, status int, c templ.Compon
 	}
 }
 
+// noStoreInDev keeps the browser from reusing an old HTML document (and its
+// immutable stylesheet URL) after a live-reload rebuild. Production keeps the
+// default caching behavior.
+func noStoreInDev(w http.ResponseWriter, d *app.Deps) {
+	if d == nil || d.Cfg == nil || !config.IsDevEnv(d.Cfg.AppEnv) {
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+}
+
 func page(w http.ResponseWriter, r *http.Request, d *app.Deps, status int, content templ.Component, failed bool) {
 	ctx := r.Context()
+	noStoreInDev(w, d)
 	var shell layout.ShellData
 	if d.Shell != nil {
 		s, err := d.Shell(r)
@@ -86,6 +99,9 @@ func page(w http.ResponseWriter, r *http.Request, d *app.Deps, status int, conte
 		Toasts:   toasts,
 		Path:     r.URL.Path,
 		AppShell: shell.User != nil && layout.IsAppShellPath(r.URL.Path),
+	}
+	if d.Cfg != nil && config.IsDevEnv(d.Cfg.AppEnv) {
+		p.DevVersion = app.BuildID
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)

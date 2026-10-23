@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/wellington-vell/lindaflor/internal/app"
+	"github.com/wellington-vell/lindaflor/internal/config"
 	"github.com/wellington-vell/lindaflor/internal/metrics"
 	"github.com/wellington-vell/lindaflor/internal/payments"
 	"github.com/wellington-vell/lindaflor/internal/ratelimit"
@@ -34,6 +35,10 @@ func Mount(r chi.Router, d *app.Deps) {
 	r.Get(seo.RobotsPath, seo.RobotsHandler(d.Cfg.AppOrigin))
 	r.Get(seo.SitemapPath, seo.SitemapHandler(d.Cfg.AppOrigin, d.Q, &seo.SitemapCache{}))
 
+	if config.IsDevEnv(d.Cfg.AppEnv) {
+		r.Get("/api/dev/version", DevVersion)
+	}
+
 	notFound := func(w http.ResponseWriter, r *http.Request) { render.NotFound(w, r, d) }
 	docs := func(h http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
@@ -51,6 +56,18 @@ func Mount(r chi.Router, d *app.Deps) {
 	svc := &payments.Service{Pool: d.Pool, Provider: d.Payments, Orders: d.Orders}
 	r.With(ratelimit.Limit(ratelimit.ScopeMPWebhook, ratelimit.DefaultMPWebhookPerMin)).
 		Post(payments.WebhookPath, svc.WebhookHandler(notFound))
+}
+
+// DevVersionResponse is the live-reload build id.
+type DevVersionResponse struct {
+	Version string `json:"version"`
+}
+
+// DevVersion reports the running process build id (development only). The
+// browser reloads when it changes, i.e. after an air rebuild.
+func DevVersion(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, DevVersionResponse{Version: app.BuildID})
 }
 
 // HealthResponse is the liveness payload.

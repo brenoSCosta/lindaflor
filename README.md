@@ -67,7 +67,7 @@ All targets expect the dev shell (`devenv shell` or `nix develop`).
 | Target | What it does |
 | --- | --- |
 | `make generate` | `templ generate` + `sqlc generate` + Tailwind build. Outputs are **committed** (`*_templ.go`, `internal/db/sqlc/`, `web/static/css/app.css`) |
-| `make dev` | Live reload with [air](https://github.com/air-verse/air) (regenerates templ/CSS, rebuilds, restarts) |
+| `make dev` | Live reload with [air](https://github.com/air-verse/air) (regenerates templ/CSS, rebuilds, restarts, and the open tab reloads itself) |
 | `make build` | Static binaries in `./bin` (`server`, `seed`, `create-admin`) |
 | `make test` / `make test-race` | `go test ./...` (with `-race`) |
 | `make lint` | `golangci-lint run` + `sqlc vet` + `templ fmt -fail` |

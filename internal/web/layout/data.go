@@ -63,6 +63,8 @@ type Page struct {
 	Toasts   []toast.Toast
 	Path     string
 	AppShell bool
+	// DevVersion enables the live-reload script; "" disables it (production).
+	DevVersion string
 }
 
 // IsAppShellPath reports paths that use the authenticated app chrome.

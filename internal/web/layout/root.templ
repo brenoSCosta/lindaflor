@@ -79,6 +79,9 @@ templ Root(p Page) {
 			<script src={ static.URL("vendor/alpine.min.js") } defer></script>
 			<script src={ static.URL("js/toast.js") } defer></script>
 			<script src={ static.URL("js/turnstile.js") } defer></script>
+			if p.DevVersion != "" {
+				<script src={ static.URL("js/dev-reload.js") } data-version={ p.DevVersion } defer></script>
+			}
 		</head>
 		<body>
 			if p.Shell.Impersonating && p.Shell.User != nil {

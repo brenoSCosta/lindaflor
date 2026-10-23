@@ -4,6 +4,8 @@ package app
 import (
 	"log/slog"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -42,3 +44,8 @@ type Deps struct {
 	// unconfigured = no-op; NewRouter builds it from Cfg.Captcha).
 	Captcha *captcha.Verifier
 }
+
+// BuildID identifies this server process. Development renders it into the
+// page so the live-reload script (static/js/dev-reload.js) notices an air
+// rebuild and reloads the browser. It is stable for the process lifetime.
+var BuildID = strconv.FormatInt(time.Now().UnixNano(), 36)

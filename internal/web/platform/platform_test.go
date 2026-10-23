@@ -304,3 +304,16 @@ func TestAppPagesEmitOnlySelfHostedScripts(t *testing.T) {
 		t.Fatal("htmx/Alpine need 'unsafe-eval'")
 	}
 }
+
+func TestDevVersionIsDevOnly(t *testing.T) {
+	s := testutil.NewServer(t, testutil.Options{})
+	res := s.Client(t).Get("/api/dev/version")
+	j := res.JSON(t)
+	if res.StatusCode != http.StatusOK || j["version"] == "" || res.Header.Get("Cache-Control") != "no-store" {
+		t.Fatal(res.StatusCode, res.Header, j)
+	}
+	prod := testutil.NewServer(t, testutil.Options{Prod: true})
+	if res := prod.Client(t).Get("/api/dev/version"); res.StatusCode != http.StatusNotFound {
+		t.Fatal(res.StatusCode)
+	}
+}
