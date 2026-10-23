@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 	"github.com/wellington-vell/lindaflor/internal/mail"
 )
 
@@ -56,54 +57,10 @@ func (o SubscribeOutcome) Toast() (string, bool) {
 	return "Esta variação não está disponível.", false
 }
 
-var (
-	sqlVariantStock = sqlText(`SELECT p.active,
-        COALESCE((
-          SELECT SUM(` + LiveAvailableSQL + `)
-          FROM inventory i
-          INNER JOIN warehouses w ON w.id = i.warehouse_id
-          WHERE i.variant_id = pv.id AND w.active = true
-        ), 0)::bigint
- FROM product_variants pv
- INNER JOIN products p ON p.id = pv.product_id
- WHERE pv.id = $1`)
-	sqlVariantSlug = sqlText(`SELECT p.slug FROM product_variants pv
- INNER JOIN products p ON p.id = pv.product_id
- WHERE pv.id = $1`)
-	sqlPendingAlerts = sqlText(`SELECT count(*) FROM stock_alerts WHERE email_norm = $1 AND notified_at IS NULL`)
-	sqlInsertAlert   = sqlText(`INSERT INTO stock_alerts (id, variant_id, email_norm, user_id)
- VALUES ($1, $2, $3, $4)
- ON CONFLICT (variant_id, email_norm) WHERE notified_at IS NULL
- DO NOTHING`)
-	sqlCancelAlerts = sqlText(`DELETE FROM stock_alerts WHERE email_norm = $1 AND notified_at IS NULL`)
-	sqlDueAlerts    = sqlText(`SELECT a.id, a.email_norm, pv.id AS variant_id,
-        p.name AS product_name, p.slug AS product_slug,
-        pv.size::text AS size, pv.color
- FROM stock_alerts a
- INNER JOIN product_variants pv ON pv.id = a.variant_id
- INNER JOIN products p ON p.id = pv.product_id
- WHERE a.notified_at IS NULL
-   AND p.active = true
-   AND COALESCE((
-     SELECT SUM(` + LiveAvailableSQL + `)
-     FROM inventory i
-     INNER JOIN warehouses w ON w.id = i.warehouse_id
-     WHERE i.variant_id = pv.id AND w.active = true
-   ), 0) > 0
- ORDER BY a.created_at
- LIMIT $1
- FOR UPDATE OF a SKIP LOCKED`)
-	sqlCloseAlerts = sqlText(`UPDATE stock_alerts SET notified_at = now() WHERE id = ANY($1)`)
-)
-
 // VariantSlug is the product slug of a variant ("" when unknown).
 func VariantSlug(ctx context.Context, q DBTX, variantID uuid.UUID) (string, error) {
-	var slug string
-	err := q.QueryRow(ctx, sqlVariantSlug, variantID).Scan(&slug)
-	if found, err := optional(err); err != nil || !found {
-		return "", err
-	}
-	return slug, nil
+	slug, _, err := noRows(queries(q).StoreVariantSlug(ctx, variantID))
+	return slug, err
 }
 
 // ProductVariantPath is /produtos/{slug}?variant={id} (redirect target).
@@ -114,30 +71,30 @@ func ProductVariantPath(slug string, variantID uuid.UUID) string {
 // SubscribeStockAlert registers an alert. emailNorm must already be
 // validated (ValidateEmail).
 func SubscribeStockAlert(ctx context.Context, q DBTX, variantID uuid.UUID, emailNorm string, userID *uuid.UUID) (SubscribeOutcome, error) {
-	var active bool
-	var available int64
-	err := q.QueryRow(ctx, sqlVariantStock, variantID).Scan(&active, &available)
-	found, err := optional(err)
+	qs := queries(q)
+	stock, found, err := noRows(qs.StoreVariantStock(ctx, variantID))
 	switch {
 	case err != nil:
 		return 0, err
-	case !found || !active:
+	case !found || !stock.Active:
 		return AlertUnknownVariant, nil
-	case available > 0:
+	case stock.Available > 0:
 		return AlertInStock, nil
 	}
-	var pending int64
-	if err := q.QueryRow(ctx, sqlPendingAlerts, emailNorm).Scan(&pending); err != nil {
+	pending, err := qs.StorePendingAlerts(ctx, emailNorm)
+	if err != nil {
 		return 0, err
 	}
 	if pending >= MaxPendingAlertsPerEmail {
 		return AlertTooMany, nil
 	}
-	tag, err := q.Exec(ctx, sqlInsertAlert, uuid.Must(uuid.NewV7()), variantID, emailNorm, userID)
+	inserted, err := qs.StoreInsertAlert(ctx, sqlc.StoreInsertAlertParams{
+		ID: uuid.Must(uuid.NewV7()), VariantID: variantID, EmailNorm: emailNorm, UserID: userID,
+	})
 	if err != nil {
 		return 0, err
 	}
-	if tag.RowsAffected() > 0 {
+	if inserted > 0 {
 		return AlertSubscribed, nil
 	}
 	return AlertAlreadySubscribed, nil
@@ -146,11 +103,7 @@ func SubscribeStockAlert(ctx context.Context, q DBTX, variantID uuid.UUID, email
 // CancelStockAlerts drops every pending alert of the address (signed cancel
 // link) and returns how many were removed.
 func CancelStockAlerts(ctx context.Context, q DBTX, email string) (int64, error) {
-	tag, err := q.Exec(ctx, sqlCancelAlerts, strings.ToLower(strings.TrimSpace(email)))
-	if err != nil {
-		return 0, err
-	}
-	return tag.RowsAffected(), nil
+	return queries(q).StoreCancelAlerts(ctx, strings.ToLower(strings.TrimSpace(email)))
 }
 
 // StockAlertCancelURL is the absolute signed cancel link of an address.
@@ -161,23 +114,14 @@ func VerifyStockAlertCancelToken(email, token string) bool {
 	return MailLinks().VerifyStockAlertCancelToken(email, token)
 }
 
-type dueAlert struct {
-	ID          uuid.UUID `db:"id"`
-	EmailNorm   string    `db:"email_norm"`
-	VariantID   uuid.UUID `db:"variant_id"`
-	ProductName string    `db:"product_name"`
-	ProductSlug string    `db:"product_slug"`
-	Size        string    `db:"size"`
-	Color       string    `db:"color"`
-}
-
 // NotifyRestocked is the sweeper pass: mail every pending alert whose
 // variant is sellable again (active product, live available > 0) and close
 // it. Returns the number mailed.
 func NotifyRestocked(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 	sent := 0
 	err := withTx(ctx, pool, func(tx pgx.Tx) error {
-		due, err := collect[dueAlert](tx.Query(ctx, sqlDueAlerts, stockAlertSweepBatch))
+		q := queries(tx)
+		due, err := q.StoreDueAlerts(ctx, stockAlertSweepBatch)
 		if err != nil || len(due) == 0 {
 			return err
 		}
@@ -191,7 +135,7 @@ func NotifyRestocked(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 			}
 			ids = append(ids, a.ID)
 		}
-		if _, err := tx.Exec(ctx, sqlCloseAlerts, ids); err != nil {
+		if err := q.StoreCloseAlerts(ctx, ids); err != nil {
 			return err
 		}
 		sent = len(ids)

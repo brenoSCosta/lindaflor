@@ -86,59 +86,6 @@ func withTx(ctx context.Context, pool *pgxpool.Pool, fn func(tx pgx.Tx) error) e
 	return db.WithTx(ctx, pool, fn)
 }
 
-// collect scans every row of a query into T by column name (`db` tags).
-func collect[T any](rows pgx.Rows, err error) ([]T, error) {
-	if err != nil {
-		return nil, err
-	}
-	out, err := pgx.CollectRows(rows, pgx.RowToStructByName[T])
-	if err != nil {
-		return nil, err
-	}
-	if out == nil {
-		out = []T{}
-	}
-	return out, nil
-}
-
-// collectOne scans exactly one row into T, (nil, nil) when there is none.
-func collectOne[T any](rows pgx.Rows, err error) (*T, error) {
-	if err != nil {
-		return nil, err
-	}
-	v, err := pgx.CollectOneRow(rows, pgx.RowToAddrOfStructByName[T])
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	return v, err
-}
-
-// scalars collects a single-column result.
-func scalars[T any](rows pgx.Rows, err error) ([]T, error) {
-	if err != nil {
-		return nil, err
-	}
-	out, err := pgx.CollectRows(rows, pgx.RowTo[T])
-	if err != nil {
-		return nil, err
-	}
-	if out == nil {
-		out = []T{}
-	}
-	return out, nil
-}
-
-// optional maps pgx.ErrNoRows to found=false.
-func optional(err error) (found bool, _ error) {
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
 // ptr returns a pointer to v.
 func ptr[T any](v T) *T { return &v }
 
@@ -158,14 +105,3 @@ func nonEmpty(s string) *string {
 	}
 	return &s
 }
-
-// TRANSITION: removed once every statement moved to sqlc.
-var statements []string
-
-func sqlText(s string) string {
-	statements = append(statements, s)
-	return s
-}
-
-// Statements returns the registered static SQL (tests).
-func Statements() []string { return append([]string(nil), statements...) }

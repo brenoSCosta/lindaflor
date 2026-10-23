@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 	"github.com/wellington-vell/lindaflor/internal/storage"
 )
 
@@ -136,20 +137,20 @@ func storageFailure(err error) error {
 	return fmt.Errorf("storage put: %w", err)
 }
 
-var (
-	sqlInsertProductImage = sqlText(`INSERT INTO product_images (id, product_id, url, alt, sort_order, created_at)
- VALUES ($1, $2, $3, NULL, $4, now())`)
-	sqlProductImageURL    = sqlText(`SELECT url FROM product_images WHERE id = $1`)
-	sqlDeleteProductImage = sqlText(`DELETE FROM product_images WHERE id = $1`)
-	sqlInsertSetImage     = sqlText(`INSERT INTO set_images (id, set_id, url, alt, sort_order, created_at)
- VALUES ($1, $2, $3, NULL, $4, now())`)
-	sqlSetImageURL    = sqlText(`SELECT url FROM set_images WHERE id = $1`)
-	sqlDeleteSetImage = sqlText(`DELETE FROM set_images WHERE id = $1`)
-)
+// imageRowInsert inserts an image row (id, owner, key, sort order).
+type imageRowInsert func(ctx context.Context, q *sqlc.Queries, id, ownerID uuid.UUID, key string, sortOrder int32) error
+
+func insertProductImageRow(ctx context.Context, q *sqlc.Queries, id, productID uuid.UUID, key string, sortOrder int32) error {
+	return q.StoreInsertProductImage(ctx, sqlc.StoreInsertProductImageParams{ID: id, ProductID: productID, Url: key, SortOrder: sortOrder})
+}
+
+func insertSetImageRow(ctx context.Context, q *sqlc.Queries, id, setID uuid.UUID, key string, sortOrder int32) error {
+	return q.StoreInsertSetImage(ctx, sqlc.StoreInsertSetImageParams{ID: id, SetID: setID, Url: key, SortOrder: sortOrder})
+}
 
 // saveImage validates, stores under prefix/{owner}/<uuid>.<ext> and inserts
 // the row (deleting the object when the insert fails).
-func saveImage(ctx context.Context, q DBTX, st storage.Store, prefix, insertSQL string, ownerID uuid.UUID, up Upload, sortOrder int32) (string, error) {
+func saveImage(ctx context.Context, q DBTX, st storage.Store, prefix string, insert imageRowInsert, ownerID uuid.UUID, up Upload, sortOrder int32) (string, error) {
 	kind, err := ValidateImage(up.Bytes, up.ContentType)
 	if err != nil {
 		return "", err
@@ -161,7 +162,7 @@ func saveImage(ctx context.Context, q DBTX, st storage.Store, prefix, insertSQL 
 	if err := st.Put(ctx, key, up.Bytes, kind.ContentType); err != nil {
 		return "", storageFailure(err)
 	}
-	if _, err := q.Exec(ctx, insertSQL, uuid.Must(uuid.NewV7()), ownerID, key, sortOrder); err != nil {
+	if err := insert(ctx, queries(q), uuid.Must(uuid.NewV7()), ownerID, key, sortOrder); err != nil {
 		if derr := st.Delete(ctx, key); derr != nil {
 			slog.WarnContext(ctx, "orphaned image object", "key", key, "error", derr)
 		}
@@ -172,21 +173,22 @@ func saveImage(ctx context.Context, q DBTX, st storage.Store, prefix, insertSQL 
 
 // SaveProductImage stores a product image (products/{id}/…).
 func SaveProductImage(ctx context.Context, q DBTX, st storage.Store, productID uuid.UUID, up Upload, sortOrder int32) (string, error) {
-	return saveImage(ctx, q, st, "products", sqlInsertProductImage, productID, up, sortOrder)
+	return saveImage(ctx, q, st, "products", insertProductImageRow, productID, up, sortOrder)
 }
 
 // SaveSetImage stores a set image (sets/{id}/…).
 func SaveSetImage(ctx context.Context, q DBTX, st storage.Store, setID uuid.UUID, up Upload, sortOrder int32) (string, error) {
-	return saveImage(ctx, q, st, "sets", sqlInsertSetImage, setID, up, sortOrder)
+	return saveImage(ctx, q, st, "sets", insertSetImageRow, setID, up, sortOrder)
 }
 
-func deleteImage(ctx context.Context, q DBTX, st storage.Store, selectSQL, deleteSQL, keyPrefix string, imageID uuid.UUID) error {
-	var url string
-	err := q.QueryRow(ctx, selectSQL, imageID).Scan(&url)
-	if found, err := optional(err); err != nil || !found {
+func deleteImage(ctx context.Context, st storage.Store, lookup func(context.Context, uuid.UUID) (string, error),
+	remove func(context.Context, uuid.UUID) error, keyPrefix string, imageID uuid.UUID,
+) error {
+	url, found, err := noRows(lookup(ctx, imageID))
+	if err != nil || !found {
 		return err
 	}
-	if _, err := q.Exec(ctx, deleteSQL, imageID); err != nil {
+	if err := remove(ctx, imageID); err != nil {
 		return err
 	}
 	if IsStorageKey(url) && strings.HasPrefix(url, keyPrefix) && !storage.IsUnavailable(st) {
@@ -197,10 +199,12 @@ func deleteImage(ctx context.Context, q DBTX, st storage.Store, selectSQL, delet
 
 // DeleteProductImage removes the row and its stored object (when a key).
 func DeleteProductImage(ctx context.Context, q DBTX, st storage.Store, imageID uuid.UUID) error {
-	return deleteImage(ctx, q, st, sqlProductImageURL, sqlDeleteProductImage, "", imageID)
+	qs := queries(q)
+	return deleteImage(ctx, st, qs.StoreProductImageURL, qs.StoreDeleteProductImage, "", imageID)
 }
 
 // DeleteSetImage removes the row and its stored object (sets/ keys only).
 func DeleteSetImage(ctx context.Context, q DBTX, st storage.Store, imageID uuid.UUID) error {
-	return deleteImage(ctx, q, st, sqlSetImageURL, sqlDeleteSetImage, "sets/", imageID)
+	qs := queries(q)
+	return deleteImage(ctx, st, qs.StoreSetImageURL, qs.StoreDeleteSetImage, "sets/", imageID)
 }

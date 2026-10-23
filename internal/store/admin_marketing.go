@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/wellington-vell/lindaflor/internal/db"
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 	"github.com/wellington-vell/lindaflor/internal/httpx"
 	"github.com/wellington-vell/lindaflor/internal/storage"
 )
@@ -32,33 +33,21 @@ type HeroSlide struct {
 	ImageURL string
 }
 
-var sqlHeroBanners = sqlText(`SELECT id, title, subtitle, cta_label, link_url, image_url
-   FROM home_banners WHERE active = true
-   ORDER BY sort_order ASC, created_at DESC LIMIT $1`)
-
 // LoadHeroSlides loads active banners; unresolvable images are skipped.
 // Empty → the caller keeps its static hero.
 func LoadHeroSlides(ctx context.Context, q DBTX, st storage.Store) ([]HeroSlide, error) {
-	type row struct {
-		ID       uuid.UUID `db:"id"`
-		Title    string    `db:"title"`
-		Subtitle *string   `db:"subtitle"`
-		CTALabel *string   `db:"cta_label"`
-		LinkURL  *string   `db:"link_url"`
-		ImageURL string    `db:"image_url"`
-	}
-	rows, err := collect[row](q.Query(ctx, sqlHeroBanners, MaxHeroBanners))
+	rows, err := queries(q).StoreHeroBanners(ctx, MaxHeroBanners)
 	if err != nil {
 		return nil, err
 	}
 	out := []HeroSlide{}
 	for _, r := range rows {
-		img := ResolveStorageURL(ctx, st, &r.ImageURL)
+		img := ResolveStorageURL(ctx, st, &r.ImageUrl)
 		if img == "" {
 			continue
 		}
-		cta := orDefault(r.CTALabel, "Ver coleção")
-		link := orDefault(r.LinkURL, "/produtos")
+		cta := orDefault(r.CtaLabel, "Ver coleção")
+		link := orDefault(r.LinkUrl, "/produtos")
 		out = append(out, HeroSlide{ID: r.ID, Title: r.Title, Subtitle: r.Subtitle, CTALabel: cta, LinkURL: link, ImageURL: img})
 	}
 	return out, nil
@@ -75,32 +64,18 @@ type AdminBanner struct {
 	ImageURL  string
 }
 
-var sqlAdminBanners = sqlText(`SELECT id, title, subtitle, link_url, image_url, sort_order, active
-   FROM home_banners ORDER BY sort_order ASC, created_at DESC`)
-
 // ListAdminBanners lists every banner with resolved images.
 func ListAdminBanners(ctx context.Context, q DBTX, st storage.Store) ([]AdminBanner, error) {
-	type row struct {
-		ID        uuid.UUID `db:"id"`
-		Title     string    `db:"title"`
-		Subtitle  *string   `db:"subtitle"`
-		LinkURL   *string   `db:"link_url"`
-		ImageURL  string    `db:"image_url"`
-		SortOrder int32     `db:"sort_order"`
-		Active    bool      `db:"active"`
-	}
-	rows, err := collect[row](q.Query(ctx, sqlAdminBanners))
+	rows, err := queries(q).StoreAdminBanners(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]AdminBanner, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, AdminBanner{
-			ID: r.ID, Title: r.Title, Subtitle: deref(r.Subtitle), LinkURL: deref(r.LinkURL),
-			SortOrder: r.SortOrder, Active: r.Active, ImageURL: ResolveStorageURL(ctx, st, &r.ImageURL),
-		})
-	}
-	return out, nil
+	return mapSlice(rows, func(r sqlc.StoreAdminBannersRow) AdminBanner {
+		return AdminBanner{
+			ID: r.ID, Title: r.Title, Subtitle: deref(r.Subtitle), LinkURL: deref(r.LinkUrl),
+			SortOrder: r.SortOrder, Active: r.Active, ImageURL: ResolveStorageURL(ctx, st, &r.ImageUrl),
+		}
+	}), nil
 }
 
 const (
@@ -137,9 +112,6 @@ type BannerForm struct {
 	Image                                         *Upload
 }
 
-var sqlInsertBanner = sqlText(`INSERT INTO home_banners (id, title, subtitle, cta_label, link_url, image_url, sort_order, active, created_at)
- VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())`)
-
 // CreateBanner validates, stores the image under banners/ and inserts
 // ("Banner criado.").
 func CreateBanner(ctx context.Context, q DBTX, st storage.Store, f BannerForm) error {
@@ -171,27 +143,21 @@ func CreateBanner(ctx context.Context, q DBTX, st storage.Store, f BannerForm) e
 	if err := st.Put(ctx, key, f.Image.Bytes, kind.ContentType); err != nil {
 		return userErr(MsgStorageUnavailable)
 	}
-	_, err = q.Exec(ctx, sqlInsertBanner, id, *title, limited(f.Subtitle, bannerTextMax), limited(f.CTALabel, bannerTextMax),
-		link, key, int32(sort), f.Active)
-	return err
+	return queries(q).StoreInsertBanner(ctx, sqlc.StoreInsertBannerParams{
+		ID: id, Title: *title, Subtitle: limited(f.Subtitle, bannerTextMax), CtaLabel: limited(f.CTALabel, bannerTextMax),
+		LinkUrl: link, ImageUrl: key, SortOrder: int32(sort), Active: f.Active,
+	})
 }
-
-var (
-	sqlToggleBanner = sqlText(`UPDATE home_banners SET active = NOT active WHERE id = $1`)
-	sqlDeleteBanner = sqlText(`DELETE FROM home_banners WHERE id = $1 RETURNING image_url`)
-)
 
 // ToggleBanner flips active ("Banner atualizado.").
 func ToggleBanner(ctx context.Context, q DBTX, id uuid.UUID) error {
-	_, err := q.Exec(ctx, sqlToggleBanner, id)
-	return err
+	return queries(q).StoreToggleBanner(ctx, id)
 }
 
 // DeleteBanner deletes the row and its banners/ object ("Banner excluído.").
 func DeleteBanner(ctx context.Context, q DBTX, st storage.Store, id uuid.UUID) error {
-	var key string
-	err := q.QueryRow(ctx, sqlDeleteBanner, id).Scan(&key)
-	if found, err := optional(err); err != nil || !found {
+	key, found, err := noRows(queries(q).StoreDeleteBanner(ctx, id))
+	if err != nil || !found {
 		return err
 	}
 	if strings.HasPrefix(key, "banners/") && !storage.IsUnavailable(st) {
@@ -238,35 +204,9 @@ func shortDT(raw string) string {
 	return truncateRunes(strings.ReplaceAll(strings.TrimSpace(raw), "T", " "), 16)
 }
 
-var sqlAdminCoupons = sqlText(`SELECT c.id, c.code, c.discount_type, c.discount_value,
-     c.min_subtotal_cents, c.max_discount_cents, c.active,
-     c.starts_at::text AS starts_at, c.expires_at::text AS expires_at,
-     c.usage_type, c.max_uses, c.per_user_limit,
-     (SELECT COUNT(*) FROM coupon_redemptions r WHERE r.coupon_id = c.id) AS uses_count,
-     (SELECT COUNT(*) FROM coupon_assignments a WHERE a.coupon_id = c.id) AS assignee_count
- FROM coupons c
- WHERE ($1::text = '' OR c.code ILIKE '%' || $1::text || '%' ESCAPE '\')
- ORDER BY c.created_at DESC`)
-
 // ListAdminCoupons searches coupons by code (literal match).
 func ListAdminCoupons(ctx context.Context, q DBTX, query string) ([]AdminCouponRow, error) {
-	type row struct {
-		ID               uuid.UUID `db:"id"`
-		Code             string    `db:"code"`
-		DiscountType     string    `db:"discount_type"`
-		DiscountValue    int64     `db:"discount_value"`
-		MinSubtotalCents int64     `db:"min_subtotal_cents"`
-		MaxDiscountCents *int64    `db:"max_discount_cents"`
-		Active           bool      `db:"active"`
-		StartsAt         *string   `db:"starts_at"`
-		ExpiresAt        *string   `db:"expires_at"`
-		UsageType        string    `db:"usage_type"`
-		MaxUses          *int32    `db:"max_uses"`
-		PerUserLimit     int32     `db:"per_user_limit"`
-		UsesCount        int64     `db:"uses_count"`
-		AssigneeCount    int64     `db:"assignee_count"`
-	}
-	rows, err := collect[row](q.Query(ctx, sqlAdminCoupons, db.EscapeLike(ClampCouponQuery(query))))
+	rows, err := queries(q).StoreAdminCoupons(ctx, db.EscapeLike(ClampCouponQuery(query)))
 	if err != nil {
 		return nil, err
 	}
@@ -330,19 +270,18 @@ type AssignedUser struct {
 	Email string    `db:"email"`
 }
 
-var (
-	sqlCouponAssignees   = sqlText(`SELECT u.id, u.name, u.email FROM coupon_assignments a INNER JOIN users u ON u.id = a.user_id WHERE a.coupon_id = $1 ORDER BY u.name ASC`)
-	sqlCouponAssigneeIDs = sqlText(`SELECT user_id FROM coupon_assignments WHERE coupon_id = $1`)
-)
-
 // CouponAssignees lists a coupon's assigned users.
 func CouponAssignees(ctx context.Context, q DBTX, couponID uuid.UUID) ([]AssignedUser, error) {
-	return collect[AssignedUser](q.Query(ctx, sqlCouponAssignees, couponID))
+	rows, err := queries(q).StoreCouponAssignees(ctx, couponID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(rows, func(r sqlc.StoreCouponAssigneesRow) AssignedUser { return AssignedUser(r) }), nil
 }
 
 // CouponAssigneeIDs is the assigned-user set (user directory checkboxes).
 func CouponAssigneeIDs(ctx context.Context, q DBTX, couponID uuid.UUID) (map[uuid.UUID]bool, error) {
-	ids, err := scalars[uuid.UUID](q.Query(ctx, sqlCouponAssigneeIDs, couponID))
+	ids, err := queries(q).StoreCouponAssigneeIDs(ctx, couponID)
 	if err != nil {
 		return nil, err
 	}
@@ -457,13 +396,6 @@ func validateCoupon(f CouponForm) (validCoupon, error) {
 	return c, nil
 }
 
-var sqlInsertCoupon = sqlText(`INSERT INTO coupons (id, code, discount_type, discount_value,
- min_subtotal_cents, max_discount_cents, active, starts_at, expires_at,
- usage_type, max_uses, per_user_limit)
- VALUES ($1, $2, $3, $4, $5, $6, true,
- NULLIF($7::text, '')::timestamptz, NULLIF($8::text, '')::timestamptz, $9, $10, $11)
- ON CONFLICT ((upper(code))) DO NOTHING`)
-
 // CreateCoupon validates and inserts a coupon (*UserError on refusal,
 // including "Este código já está em uso.").
 func CreateCoupon(ctx context.Context, q DBTX, f CouponForm) error {
@@ -471,31 +403,27 @@ func CreateCoupon(ctx context.Context, q DBTX, f CouponForm) error {
 	if err != nil {
 		return err
 	}
-	tag, err := q.Exec(ctx, sqlInsertCoupon, uuid.Must(uuid.NewV7()), c.code, c.discountType, c.discountValue,
-		c.minSubtotal, c.maxDiscount, c.startsAt, c.expiresAt, c.usageType, c.maxUses, c.perUser)
+	n, err := queries(q).StoreInsertCoupon(ctx, sqlc.StoreInsertCouponParams{
+		ID: uuid.Must(uuid.NewV7()), Code: c.code, DiscountType: c.discountType, DiscountValue: c.discountValue,
+		MinSubtotalCents: c.minSubtotal, MaxDiscountCents: c.maxDiscount, StartsAt: c.startsAt, ExpiresAt: c.expiresAt,
+		UsageType: c.usageType, MaxUses: c.maxUses, PerUserLimit: c.perUser,
+	})
 	if err != nil {
 		return userErr(CouponDBErrorMessage(err))
 	}
-	if tag.RowsAffected() != 1 {
+	if n != 1 {
 		return userErr("Este código já está em uso.")
 	}
 	return nil
 }
 
-var (
-	sqlToggleCoupon   = sqlText(`UPDATE coupons SET active = NOT active WHERE id = $1`)
-	sqlDeleteCoupon   = sqlText(`DELETE FROM coupons WHERE id = $1`)
-	sqlAssignCoupon   = sqlText(`INSERT INTO coupon_assignments (coupon_id, user_id) SELECT $1, unnest($2::uuid[]) ON CONFLICT DO NOTHING`)
-	sqlUnassignCoupon = sqlText(`DELETE FROM coupon_assignments WHERE coupon_id = $1 AND user_id = $2`)
-)
-
 // ToggleCoupon flips active; *UserError "Cupom não encontrado." when absent.
 func ToggleCoupon(ctx context.Context, q DBTX, id uuid.UUID) error {
-	tag, err := q.Exec(ctx, sqlToggleCoupon, id)
+	n, err := queries(q).StoreToggleCoupon(ctx, id)
 	if err != nil {
 		return userErr(CouponDBErrorMessage(err))
 	}
-	if tag.RowsAffected() != 1 {
+	if n != 1 {
 		return userErr("Cupom não encontrado.")
 	}
 	return nil
@@ -503,11 +431,11 @@ func ToggleCoupon(ctx context.Context, q DBTX, id uuid.UUID) error {
 
 // DeleteCoupon deletes a coupon; *UserError when absent.
 func DeleteCoupon(ctx context.Context, q DBTX, id uuid.UUID) error {
-	tag, err := q.Exec(ctx, sqlDeleteCoupon, id)
+	n, err := queries(q).StoreDeleteCoupon(ctx, id)
 	if err != nil {
 		return userErr(CouponDBErrorMessage(err))
 	}
-	if tag.RowsAffected() != 1 {
+	if n != 1 {
 		return userErr("Cupom não encontrado.")
 	}
 	return nil
@@ -519,7 +447,7 @@ func AssignCoupon(ctx context.Context, q DBTX, couponID uuid.UUID, rawUserIDs []
 	if len(ids) == 0 {
 		return userErr("Selecione ao menos um usuário.")
 	}
-	if _, err := q.Exec(ctx, sqlAssignCoupon, couponID, ids); err != nil {
+	if err := queries(q).StoreAssignCoupon(ctx, sqlc.StoreAssignCouponParams{CouponID: couponID, UserIds: ids}); err != nil {
 		return userErr(CouponDBErrorMessage(err))
 	}
 	return nil
@@ -527,7 +455,7 @@ func AssignCoupon(ctx context.Context, q DBTX, couponID uuid.UUID, rawUserIDs []
 
 // UnassignCoupon removes one assignment.
 func UnassignCoupon(ctx context.Context, q DBTX, couponID, userID uuid.UUID) error {
-	if _, err := q.Exec(ctx, sqlUnassignCoupon, couponID, userID); err != nil {
+	if err := queries(q).StoreUnassignCoupon(ctx, sqlc.StoreUnassignCouponParams{CouponID: couponID, UserID: userID}); err != nil {
 		return userErr(CouponDBErrorMessage(err))
 	}
 	return nil

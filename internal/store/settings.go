@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 	"github.com/wellington-vell/lindaflor/internal/payments/pix"
 )
 
@@ -46,24 +47,19 @@ func (s StoreSettings) PixConfigured() bool {
 	return !isBlank(deref(s.PixKey)) && !isBlank(deref(s.PixKeyType))
 }
 
-var sqlGetSettings = sqlText(`SELECT whatsapp_number, whatsapp_message_template, pix_key, pix_key_type::text AS pix_key_type,
-       pix_merchant_name, pix_merchant_city, free_shipping_threshold_cents, pix_discount_percent,
-       announcement_text, first_purchase_coupon_code
-FROM store_settings WHERE id`)
-
 // GetStoreSettings reads the singleton (defaults when missing).
 func GetStoreSettings(ctx context.Context, q DBTX) (StoreSettings, error) {
-	s := DefaultStoreSettings()
-	var pct int16
-	err := q.QueryRow(ctx, sqlGetSettings).Scan(&s.WhatsappNumber, &s.WhatsappMessageTemplate, &s.PixKey,
-		&s.PixKeyType, &s.PixMerchantName, &s.PixMerchantCity, &s.FreeShippingThresholdCents, &pct,
-		&s.AnnouncementText, &s.FirstPurchaseCouponCode)
-	found, err := optional(err)
+	r, found, err := noRows(queries(q).StoreGetSettings(ctx))
 	if err != nil || !found {
 		return DefaultStoreSettings(), err
 	}
-	s.PixDiscountPercent = int(pct)
-	return s, nil
+	return StoreSettings{
+		WhatsappNumber: r.WhatsappNumber, WhatsappMessageTemplate: r.WhatsappMessageTemplate,
+		PixKey: r.PixKey, PixKeyType: r.PixKeyType, PixMerchantName: r.PixMerchantName,
+		PixMerchantCity: r.PixMerchantCity, FreeShippingThresholdCents: r.FreeShippingThresholdCents,
+		PixDiscountPercent: int(r.PixDiscountPercent), AnnouncementText: r.AnnouncementText,
+		FirstPurchaseCouponCode: r.FirstPurchaseCouponCode,
+	}, nil
 }
 
 // StorefrontSettings is GetStoreSettings with a logged fallback to the
@@ -239,31 +235,9 @@ func parseDecimal(trimmed string) (float64, bool) {
 	return v, true
 }
 
-var sqlUpsertSettings = sqlText(`INSERT INTO store_settings (
-      id, pix_key, pix_key_type, pix_merchant_name, pix_merchant_city,
-      pix_discount_percent, announcement_text, first_purchase_coupon_code,
-      whatsapp_number, whatsapp_message_template, free_shipping_threshold_cents,
-      created_at, updated_at
-   ) VALUES (true, $1, $2::text::pix_key_type, $3, $4, $5, $6, $7, $8, $9, $10, now(), now())
-   ON CONFLICT (id) DO UPDATE SET
-      pix_key = EXCLUDED.pix_key,
-      pix_key_type = EXCLUDED.pix_key_type,
-      pix_merchant_name = EXCLUDED.pix_merchant_name,
-      pix_merchant_city = EXCLUDED.pix_merchant_city,
-      pix_discount_percent = EXCLUDED.pix_discount_percent,
-      announcement_text = EXCLUDED.announcement_text,
-      first_purchase_coupon_code = EXCLUDED.first_purchase_coupon_code,
-      whatsapp_number = EXCLUDED.whatsapp_number,
-      whatsapp_message_template = EXCLUDED.whatsapp_message_template,
-      free_shipping_threshold_cents = EXCLUDED.free_shipping_threshold_cents,
-      updated_at = now()`)
-
 // UpsertStoreSettings writes the singleton (race-free single upsert).
 func UpsertStoreSettings(ctx context.Context, q DBTX, w SettingsWrite) error {
-	_, err := q.Exec(ctx, sqlUpsertSettings, w.PixKey, w.PixKeyType, w.PixMerchantName, w.PixMerchantCity,
-		w.PixDiscountPercent, w.AnnouncementText, w.FirstPurchaseCouponCode, w.WhatsappNumber,
-		w.WhatsappMessageTemplate, w.FreeShippingThresholdCents)
-	return err
+	return queries(q).StoreUpsertSettings(ctx, sqlc.StoreUpsertSettingsParams(w))
 }
 
 // SaveSettings validates and saves the admin form. On success the UI shows

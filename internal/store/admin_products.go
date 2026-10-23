@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/wellington-vell/lindaflor/internal/db"
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 	"github.com/wellington-vell/lindaflor/internal/storage"
 )
 
@@ -54,22 +55,6 @@ type AdminProductRow struct {
 // CategoryLabel is the admin category label.
 func (r AdminProductRow) CategoryLabel() string { return AdminCategoryLabel(r.Category) }
 
-var (
-	sqlAdminProductCount = sqlText(`SELECT COUNT(*) FROM products p WHERE ($1::text = '' OR p.name ILIKE '%' || $1::text || '%' ESCAPE '\') AND ($2::text = 'all' OR p.active = ($2::text = 'true'))`)
-	sqlAdminProductList  = sqlText(`SELECT p.id, p.name, p.slug, p.category::text AS category, p.price_in_cents, p.active,
-        COUNT(DISTINCT pv.id) AS variant_count,
-        COALESCE(SUM(GREATEST(i.quantity - i.reserved, 0)) FILTER (WHERE w.active = true), 0)::bigint AS available_total
- FROM products p
- LEFT JOIN product_variants pv ON pv.product_id = p.id
- LEFT JOIN inventory i ON i.variant_id = pv.id
- LEFT JOIN warehouses w ON w.id = i.warehouse_id
- WHERE ($1::text = '' OR p.name ILIKE '%' || $1::text || '%' ESCAPE '\')
-   AND ($2::text = 'all' OR p.active = ($2::text = 'true'))
- GROUP BY p.id
- ORDER BY p.name
- LIMIT $3 OFFSET $4`)
-)
-
 // AdminProductDirectory is /admin/produtos (and its /lista fragment).
 type AdminProductDirectory struct {
 	Query    string
@@ -83,14 +68,20 @@ type AdminProductDirectory struct {
 func LoadAdminProducts(ctx context.Context, q DBTX, query, active string, page int64) (AdminProductDirectory, error) {
 	out := AdminProductDirectory{Query: ClampAdminQuery(query, adminProductQueryMax), Active: ClampProductActive(active)}
 	like := db.EscapeLike(out.Query)
-	var total int64
-	if err := q.QueryRow(ctx, sqlAdminProductCount, like, out.Active).Scan(&total); err != nil {
+	qs := queries(q)
+	total, err := qs.StoreAdminProductCount(ctx, sqlc.StoreAdminProductCountParams{Query: like, Active: out.Active})
+	if err != nil {
 		return out, err
 	}
 	out.Pager = Paginate(page, 20, total)
-	var err error
-	out.Products, err = collect[AdminProductRow](q.Query(ctx, sqlAdminProductList, like, out.Active, out.Pager.PageSize, out.Pager.Offset()))
-	return out, err
+	rows, err := qs.StoreAdminProductList(ctx, sqlc.StoreAdminProductListParams{
+		Query: like, Active: out.Active, PageSize: out.Pager.PageSize, PageOffset: out.Pager.Offset(),
+	})
+	if err != nil {
+		return out, err
+	}
+	out.Products = mapSlice(rows, func(r sqlc.StoreAdminProductListRow) AdminProductRow { return AdminProductRow(r) })
+	return out, nil
 }
 
 // --- Validation (shared by create/edit) ---
@@ -214,28 +205,20 @@ func ParseStockQuantity(raw string) (int32, error) {
 
 func optionalDescription(raw string) *string { return nonEmpty(strings.TrimSpace(raw)) }
 
-var (
-	sqlDefaultWarehouse = sqlText(`SELECT id FROM warehouses WHERE is_default = true ORDER BY created_at LIMIT 1`)
-	sqlAnyWarehouse     = sqlText(`SELECT id FROM warehouses ORDER BY created_at LIMIT 1`)
-	sqlCreateWarehouse  = sqlText(`INSERT INTO warehouses (id, code, name, is_default, active, created_at)
- VALUES ($1, 'PRINCIPAL', 'Depósito Principal', true, true, now())`)
-)
-
 // EnsureDefaultWarehouse returns the default warehouse, else the first
 // one, creating PRINCIPAL when none exists.
 func EnsureDefaultWarehouse(ctx context.Context, q DBTX) (uuid.UUID, error) {
-	var id uuid.UUID
-	for _, s := range []string{sqlDefaultWarehouse, sqlAnyWarehouse} {
-		err := q.QueryRow(ctx, s).Scan(&id)
-		if found, err := optional(err); err != nil {
+	qs := queries(q)
+	for _, lookup := range []func(context.Context) (uuid.UUID, error){qs.StoreDefaultWarehouse, qs.StoreAnyWarehouse} {
+		id, found, err := noRows(lookup(ctx))
+		if err != nil {
 			return uuid.Nil, err
 		} else if found {
 			return id, nil
 		}
 	}
-	id = uuid.Must(uuid.NewV7())
-	_, err := q.Exec(ctx, sqlCreateWarehouse, id)
-	return id, err
+	id := uuid.Must(uuid.NewV7())
+	return id, qs.StoreCreateDefaultWarehouse(ctx, id)
 }
 
 // productDBError maps constraint violations to admin messages.
@@ -357,16 +340,13 @@ func validateUploads(images []Upload) error {
 	return nil
 }
 
-var (
-	sqlProductIDBySlug  = sqlText(`SELECT id FROM products WHERE slug = $1`)
-	sqlProductSlugTaken = sqlText(`SELECT id FROM products WHERE slug = $1 AND id != $2`)
-	sqlInsertProduct    = sqlText(`INSERT INTO products (id, name, slug, description, price_in_cents, compare_at_price_in_cents, category, active, featured, created_at, updated_at)
- VALUES ($1, $2, $3, $4, $5, $6, $7::text::product_category, true, $8, now(), now())`)
-	sqlInsertVariant = sqlText(`INSERT INTO product_variants (id, product_id, sku, size, color, color_hex, price_in_cents, low_stock_threshold, created_at, updated_at)
- VALUES ($1, $2, $3, $4::text::product_size, $5, $6, NULL, $7, now(), now())`)
-	sqlInsertInventory = sqlText(`INSERT INTO inventory (id, variant_id, warehouse_id, quantity, reserved, updated_at)
- VALUES ($1, $2, $3, $4, 0, now())`)
-)
+// insertVariant inserts one new variant of productID.
+func insertVariant(ctx context.Context, q *sqlc.Queries, id, productID uuid.UUID, v validVariant) error {
+	return q.StoreInsertVariant(ctx, sqlc.StoreInsertVariantParams{
+		ID: id, ProductID: productID, Sku: v.sku, Size: v.size, Color: v.color, ColorHex: v.hex,
+		LowStockThreshold: v.threshold,
+	})
+}
 
 // CreateProductResult is the outcome of CreateProduct: on success the UI
 // redirects to the edit page with Message ("Produto criado com sucesso."
@@ -425,9 +405,8 @@ func CreateProduct(ctx context.Context, pool *pgxpool.Pool, st storage.Store, f 
 	if err := validateUploads(f.Images); err != nil {
 		return CreateProductResult{}, err
 	}
-	var existing uuid.UUID
-	err = pool.QueryRow(ctx, sqlProductIDBySlug, v.slug).Scan(&existing)
-	if found, err := optional(err); err != nil {
+	_, found, err := noRows(queries(pool).StoreProductIDBySlug(ctx, v.slug))
+	if err != nil {
 		return CreateProductResult{}, err
 	} else if found {
 		return CreateProductResult{}, userErr("Este slug já está em uso por outro produto.")
@@ -438,15 +417,21 @@ func CreateProduct(ctx context.Context, pool *pgxpool.Pool, st storage.Store, f 
 	}
 	productID := uuid.Must(uuid.NewV7())
 	err = withTx(ctx, pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, sqlInsertProduct, productID, v.name, v.slug, v.description, v.price, v.compare, v.category, f.Featured); err != nil {
+		q := queries(tx)
+		if err := q.StoreInsertProduct(ctx, sqlc.StoreInsertProductParams{
+			ID: productID, Name: v.name, Slug: v.slug, Description: v.description, PriceInCents: v.price,
+			CompareAtPriceInCents: v.compare, Category: v.category, Featured: f.Featured,
+		}); err != nil {
 			return productDBError(err)
 		}
 		for _, vv := range variants {
 			variantID := uuid.Must(uuid.NewV7())
-			if _, err := tx.Exec(ctx, sqlInsertVariant, variantID, productID, vv.sku, vv.size, vv.color, vv.hex, vv.threshold); err != nil {
+			if err := insertVariant(ctx, q, variantID, productID, vv); err != nil {
 				return productDBError(err)
 			}
-			if _, err := tx.Exec(ctx, sqlInsertInventory, uuid.Must(uuid.NewV7()), variantID, warehouse, vv.quantity); err != nil {
+			if err := q.StoreInsertInventory(ctx, sqlc.StoreInsertInventoryParams{
+				ID: uuid.Must(uuid.NewV7()), VariantID: variantID, WarehouseID: warehouse, Quantity: vv.quantity,
+			}); err != nil {
 				return productDBError(err)
 			}
 		}
@@ -520,40 +505,40 @@ type LookOption struct {
 	Category string    `db:"category"`
 }
 
-var (
-	sqlAdminProduct  = sqlText(`SELECT id, name, slug, description, price_in_cents, compare_at_price_in_cents, category::text, featured, active FROM products WHERE id = $1`)
-	sqlAdminVariants = sqlText(`SELECT id, sku, size::text AS size, color, color_hex, price_in_cents, low_stock_threshold FROM product_variants WHERE product_id = $1 ORDER BY created_at`)
-	sqlAdminImages   = sqlText(`SELECT id, url FROM product_images WHERE product_id = $1 ORDER BY sort_order ASC`)
-	sqlLookOptions   = sqlText(`SELECT id, name, category::text AS category FROM products WHERE active = true AND id != $1 ORDER BY name`)
-	sqlExistingLooks = sqlText(`SELECT related_product_id FROM product_looks WHERE product_id = $1`)
-)
-
 // LoadAdminProduct loads the edit page (nil when missing).
 func LoadAdminProduct(ctx context.Context, q DBTX, st storage.Store, id uuid.UUID) (*AdminProductEdit, error) {
-	var p AdminProductEdit
-	err := q.QueryRow(ctx, sqlAdminProduct, id).Scan(&p.ID, &p.Name, &p.Slug, &p.Description, &p.PriceInCents,
-		&p.CompareAtPriceInCents, &p.Category, &p.Featured, &p.Active)
-	if found, err := optional(err); err != nil || !found {
+	qs := queries(q)
+	r, found, err := noRows(qs.StoreAdminProduct(ctx, id))
+	if err != nil || !found {
 		return nil, err
 	}
-	if p.Variants, err = collect[AdminVariantRow](q.Query(ctx, sqlAdminVariants, id)); err != nil {
+	p := AdminProductEdit{
+		ID: r.ID, Name: r.Name, Slug: r.Slug, Description: r.Description, PriceInCents: r.PriceInCents,
+		CompareAtPriceInCents: r.CompareAtPriceInCents, Category: r.Category, Featured: r.Featured, Active: r.Active,
+	}
+	variants, err := qs.StoreAdminVariants(ctx, id)
+	if err != nil {
 		return nil, err
 	}
-	type imgRow struct {
-		ID  uuid.UUID `db:"id"`
-		URL string    `db:"url"`
-	}
-	imgs, err := collect[imgRow](q.Query(ctx, sqlAdminImages, id))
+	p.Variants = mapSlice(variants, func(v sqlc.StoreAdminVariantsRow) AdminVariantRow {
+		return AdminVariantRow{
+			ID: v.ID, SKU: v.Sku, Size: v.Size, Color: v.Color, ColorHex: v.ColorHex,
+			PriceInCents: v.PriceInCents, LowStockThreshold: v.LowStockThreshold,
+		}
+	})
+	imgs, err := qs.StoreAdminProductImages(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	for _, r := range imgs {
-		p.Images = append(p.Images, AdminImage{ID: r.ID, URL: ResolveStorageURL(ctx, st, &r.URL)})
+		p.Images = append(p.Images, AdminImage{ID: r.ID, URL: ResolveStorageURL(ctx, st, &r.Url)})
 	}
-	if p.OtherProducts, err = collect[LookOption](q.Query(ctx, sqlLookOptions, id)); err != nil {
+	options, err := qs.StoreLookOptions(ctx, id)
+	if err != nil {
 		return nil, err
 	}
-	looks, err := scalars[uuid.UUID](q.Query(ctx, sqlExistingLooks, id))
+	p.OtherProducts = mapSlice(options, func(o sqlc.StoreLookOptionsRow) LookOption { return LookOption(o) })
+	looks, err := qs.StoreExistingLooks(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -563,29 +548,6 @@ func LoadAdminProduct(ctx context.Context, q DBTX, st storage.Store, id uuid.UUI
 	}
 	return &p, nil
 }
-
-var (
-	sqlProductExists   = sqlText(`SELECT id FROM products WHERE id = $1`)
-	sqlProductImgCount = sqlText(`SELECT COUNT(*) FROM product_images WHERE product_id = $1`)
-	sqlUpdateProduct   = sqlText(`UPDATE products SET name = $2, slug = $3, description = $4, price_in_cents = $5, compare_at_price_in_cents = $6,
- category = $7::text::product_category, featured = $8, active = $9, updated_at = now() WHERE id = $1`)
-	sqlExistingVariantSKUs = sqlText(`SELECT id, sku FROM product_variants WHERE product_id = $1`)
-	sqlUpdateVariant       = sqlText(`UPDATE product_variants SET size = $2::text::product_size, color = $3, color_hex = $4,
- low_stock_threshold = $5, updated_at = now() WHERE id = $1`)
-	sqlInsertEmptyInventory = sqlText(`INSERT INTO inventory (id, variant_id, warehouse_id, quantity, reserved, updated_at)
- VALUES ($1, $2, $3, 0, 0, now())
- ON CONFLICT (variant_id, warehouse_id) DO NOTHING`)
-	sqlDeleteVariant = sqlText(`DELETE FROM product_variants WHERE id = $1`)
-	sqlDeleteLooks   = sqlText(`DELETE FROM product_looks WHERE product_id = $1`)
-	sqlInsertLooks   = sqlText(`INSERT INTO product_looks (product_id, related_product_id, sort_order)
- SELECT $1, p.id, (ids.ord - 1)::int
- FROM unnest($2::uuid[]) WITH ORDINALITY AS ids(id, ord)
- INNER JOIN products p ON p.id = ids.id
- WHERE p.id <> $1
- ON CONFLICT DO NOTHING`)
-	sqlImageOwner     = sqlText(`SELECT product_id FROM product_images WHERE id = $1`)
-	sqlNextImageOrder = sqlText(`SELECT (COALESCE(MAX(sort_order), -1) + 1)::int FROM product_images WHERE product_id = $1`)
-)
 
 // ErrProductNotFound: the edited product does not exist (redirect to the list).
 var ErrProductNotFound = errors.New("Produto não encontrado.")
@@ -607,9 +569,9 @@ func parseUUIDs(raw []string) []uuid.UUID {
 // post-commit image failure "Alterações salvas, mas alguma imagem falhou.
 // Tente novamente.") is shown as an error toast.
 func UpdateProduct(ctx context.Context, pool *pgxpool.Pool, st storage.Store, productID uuid.UUID, f ProductForm) error {
-	var exists uuid.UUID
-	err := pool.QueryRow(ctx, sqlProductExists, productID).Scan(&exists)
-	if found, err := optional(err); err != nil {
+	qs := queries(pool)
+	_, found, err := noRows(qs.StoreProductExists(ctx, productID))
+	if err != nil {
 		return err
 	} else if !found {
 		return ErrProductNotFound
@@ -643,8 +605,8 @@ func UpdateProduct(ctx context.Context, pool *pgxpool.Pool, st storage.Store, pr
 		variants = append(variants, validVariant{sku: sku, size: size, color: color, hex: hex, threshold: int32(t)})
 	}
 	deleteIDs := parseUUIDs(f.DeleteImageIDs)
-	var current int64
-	if err := pool.QueryRow(ctx, sqlProductImgCount, productID).Scan(&current); err != nil {
+	current, err := qs.StoreProductImageCount(ctx, productID)
+	if err != nil {
 		return err
 	}
 	remaining := current - int64(len(deleteIDs)) + int64(len(f.Images))
@@ -654,9 +616,8 @@ func UpdateProduct(ctx context.Context, pool *pgxpool.Pool, st storage.Store, pr
 	if err := validateUploads(f.Images); err != nil {
 		return err
 	}
-	var taken uuid.UUID
-	err = pool.QueryRow(ctx, sqlProductSlugTaken, v.slug, productID).Scan(&taken)
-	if found, err := optional(err); err != nil {
+	_, found, err = noRows(qs.StoreProductSlugTaken(ctx, sqlc.StoreProductSlugTakenParams{Slug: v.slug, ProductID: productID}))
+	if err != nil {
 		return err
 	} else if found {
 		return userErr("Este slug já está em uso por outro produto.")
@@ -666,25 +627,27 @@ func UpdateProduct(ctx context.Context, pool *pgxpool.Pool, st storage.Store, pr
 		return userErr("Não foi possível salvar as variantes.")
 	}
 	err = withTx(ctx, pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, sqlUpdateProduct, productID, v.name, v.slug, v.description, v.price, v.compare, v.category, f.Featured, f.Active); err != nil {
+		q := queries(tx)
+		if err := q.StoreUpdateProduct(ctx, sqlc.StoreUpdateProductParams{
+			ID: productID, Name: v.name, Slug: v.slug, Description: v.description, PriceInCents: v.price,
+			CompareAtPriceInCents: v.compare, Category: v.category, Featured: f.Featured, Active: f.Active,
+		}); err != nil {
 			return productDBError(err)
 		}
 		if err := syncVariants(ctx, tx, productID, warehouse, variants); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, sqlDeleteLooks, productID); err != nil {
+		if err := q.StoreDeleteLooks(ctx, productID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, sqlInsertLooks, productID, parseUUIDs(f.LookProductIDs))
-		return err
+		return q.StoreInsertLooks(ctx, sqlc.StoreInsertLooksParams{ProductID: productID, RelatedIds: parseUUIDs(f.LookProductIDs)})
 	})
 	if err != nil {
 		return err
 	}
 	for _, imageID := range deleteIDs {
-		var owner uuid.UUID
-		err := pool.QueryRow(ctx, sqlImageOwner, imageID).Scan(&owner)
-		if found, err := optional(err); err != nil {
+		owner, found, err := noRows(qs.StoreImageOwner(ctx, imageID))
+		if err != nil {
 			return err
 		} else if found && owner == productID {
 			if err := DeleteProductImage(ctx, pool, st, imageID); err != nil {
@@ -692,8 +655,8 @@ func UpdateProduct(ctx context.Context, pool *pgxpool.Pool, st storage.Store, pr
 			}
 		}
 	}
-	var next int32
-	if err := pool.QueryRow(ctx, sqlNextImageOrder, productID).Scan(&next); err != nil {
+	next, err := qs.StoreNextImageOrder(ctx, productID)
+	if err != nil {
 		return err
 	}
 	for i, up := range f.Images {
@@ -706,38 +669,39 @@ func UpdateProduct(ctx context.Context, pool *pgxpool.Pool, st storage.Store, pr
 
 // syncVariants reconciles submitted variants (by SKU) with stored rows.
 func syncVariants(ctx context.Context, tx DBTX, productID, warehouse uuid.UUID, variants []validVariant) error {
-	type existingRow struct {
-		ID  uuid.UUID `db:"id"`
-		SKU string    `db:"sku"`
-	}
-	existing, err := collect[existingRow](tx.Query(ctx, sqlExistingVariantSKUs, productID))
+	q := queries(tx)
+	existing, err := q.StoreExistingVariantSKUs(ctx, productID)
 	if err != nil {
 		return userErr("Não foi possível salvar as variantes.")
 	}
 	bySKU := map[string]uuid.UUID{}
 	for _, e := range existing {
-		bySKU[e.SKU] = e.ID
+		bySKU[e.Sku] = e.ID
 	}
 	submitted := map[string]bool{}
 	for _, v := range variants {
 		submitted[v.sku] = true
 		if id, ok := bySKU[v.sku]; ok {
-			if _, err := tx.Exec(ctx, sqlUpdateVariant, id, v.size, v.color, v.hex, v.threshold); err != nil {
+			if err := q.StoreUpdateVariant(ctx, sqlc.StoreUpdateVariantParams{
+				ID: id, Size: v.size, Color: v.color, ColorHex: v.hex, LowStockThreshold: v.threshold,
+			}); err != nil {
 				return productDBError(err)
 			}
 			continue
 		}
 		id := uuid.Must(uuid.NewV7())
-		if _, err := tx.Exec(ctx, sqlInsertVariant, id, productID, v.sku, v.size, v.color, v.hex, v.threshold); err != nil {
+		if err := insertVariant(ctx, q, id, productID, v); err != nil {
 			return productDBError(err)
 		}
-		if _, err := tx.Exec(ctx, sqlInsertEmptyInventory, uuid.Must(uuid.NewV7()), id, warehouse); err != nil {
+		if err := q.StoreInsertEmptyInventory(ctx, sqlc.StoreInsertEmptyInventoryParams{
+			ID: uuid.Must(uuid.NewV7()), VariantID: id, WarehouseID: warehouse,
+		}); err != nil {
 			return productDBError(err)
 		}
 	}
 	for _, e := range existing {
-		if !submitted[e.SKU] {
-			if _, err := tx.Exec(ctx, sqlDeleteVariant, e.ID); err != nil {
+		if !submitted[e.Sku] {
+			if err := q.StoreDeleteVariant(ctx, e.ID); err != nil {
 				return productDBError(err)
 			}
 		}
