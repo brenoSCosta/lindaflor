@@ -112,6 +112,24 @@ func TestProductImageLimits(t *testing.T) {
 	wantRedirect(t, postMultipart(t, a.c, "/admin/produtos/create", productFields("nove-imagens"), files...), "/admin/produtos/novo")
 	wantToast(t, a.c, toast.ErrorType, "O produto pode ter no máximo 8 imagens")
 
+	// Regression: delete_image_id values that are not this product's images
+	// were still subtracted from the count, so a stale or made-up id let a
+	// full product take a 9th image (and a stale one failed the update).
+	res0 := postMultipart(t, a.c, "/admin/produtos/create", productFields("oito-imagens"), files[:8]...)
+	wantRedirect(t, res0, "/admin/produtos/*")
+	full := uuid.MustParse(strings.TrimPrefix(res0.Header.Get("Location"), "/admin/produtos/"))
+	upd := map[string][]string{
+		"product_id": {full.String()}, "name": {"Oito"}, "slug": {"oito-imagens"}, "price": {"199.90"},
+		"category": {"biquini"}, "variant_sku[]": {"SKU-oito-imagens"}, "variant_size[]": {"m"},
+		"variant_color[]": {"Coral"}, "variant_color_hex[]": {""}, "variant_threshold[]": {"5"},
+		"delete_image_id": {uuid.NewString()},
+	}
+	wantRedirect(t, postMultipart(t, a.c, "/admin/produtos/update", upd, files[0]), "/admin/produtos/"+full.String())
+	wantToast(t, a.c, toast.ErrorType, "O produto pode ter no máximo 8 imagens")
+	if n := scalar[int64](t, s, `SELECT COUNT(*) FROM product_images WHERE product_id = $1`, full); n != 8 {
+		t.Fatalf("images = %d, want 8", n)
+	}
+
 	// 20 MiB route cap: a ~3 MiB body passes the limit (the image is then
 	// refused by size), a 21 MiB body is a 413.
 	big := append(pngBytes(), bytes.Repeat([]byte{0}, 3<<20)...)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -604,7 +605,18 @@ func UpdateProduct(ctx context.Context, pool *pgxpool.Pool, st storage.Store, pr
 		}
 		variants = append(variants, validVariant{sku: sku, size: size, color: color, hex: hex, threshold: int32(t)})
 	}
-	deleteIDs := parseUUIDs(f.DeleteImageIDs)
+	// Only this product's images count as deletions: a stale or foreign id
+	// must neither fail the update nor make room for extra uploads.
+	var deleteIDs []uuid.UUID
+	for _, imageID := range parseUUIDs(f.DeleteImageIDs) {
+		owner, found, err := noRows(qs.StoreImageOwner(ctx, imageID))
+		if err != nil {
+			return err
+		}
+		if found && owner == productID && !slices.Contains(deleteIDs, imageID) {
+			deleteIDs = append(deleteIDs, imageID)
+		}
+	}
 	current, err := qs.StoreProductImageCount(ctx, productID)
 	if err != nil {
 		return err
