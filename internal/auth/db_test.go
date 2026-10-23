@@ -3,6 +3,9 @@ package auth_test
 import (
 	"context"
 	"errors"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -239,5 +242,31 @@ func TestRejectsWeakPasswordBadEmailAndMissingPassword(t *testing.T) {
 	}
 	if n := count(t, pool, `SELECT count(*) FROM users WHERE email = $1`, email); n != 0 {
 		t.Fatal("nothing created")
+	}
+}
+
+// Regression (e2e): a browser aborting a request while its session was
+// being loaded logged `level=ERROR "auth: load session" … context
+// canceled`. A cancelled request is the client's doing: no ERROR.
+func TestMiddlewareCancelledRequestIsNotAnError(t *testing.T) {
+	pool := testutil.NewPool(t)
+	var buf strings.Builder
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	mw := auth.Middleware(auth.MiddlewareDeps{Pool: pool, Cfg: testutil.TestConfig(false)})
+	called := false
+	h := mw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	r := httptest.NewRequestWithContext(ctx, http.MethodGet, "/", nil)
+	r.AddCookie(&http.Cookie{Name: auth.SessionCookieName(false), Value: "some-session-token"})
+	h.ServeHTTP(httptest.NewRecorder(), r)
+	if !called {
+		t.Fatal("next handler not called")
+	}
+	if strings.Contains(buf.String(), "level=ERROR") {
+		t.Fatalf("cancelled request logged an error: %s", buf.String())
 	}
 }

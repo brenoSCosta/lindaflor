@@ -127,7 +127,13 @@ func Middleware(d MiddlewareDeps) func(http.Handler) http.Handler {
 		secure := d.Cfg.SecureCookies
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			u, s, err := loadSession(r.Context(), w, r, q, secure)
-			if err != nil {
+			switch {
+			case err == nil:
+			case r.Context().Err() != nil:
+				// The client went away mid-lookup (navigation, aborted
+				// fetch): not a server fault, the response is never read.
+				slog.DebugContext(r.Context(), "auth: load session: request cancelled", "error", err)
+			default:
 				slog.ErrorContext(r.Context(), "auth: load session", "error", err)
 			}
 			if u != nil {
