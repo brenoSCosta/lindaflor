@@ -75,7 +75,7 @@
             ];
           };
           # Update with `nix build 2>&1 | grep got:` after changing go.mod.
-          vendorHash = "sha256-byBShoL2m2QVbTP0nHKXqehdgbHhmIxYcSIQ5WS1DMw=";
+          vendorHash = "sha256-7jNhhlAzxrc9v2Fqs5pODcwFwwFAKG1sfTUwzSwVDaA=";
           subPackages = [
             "cmd/server"
             "cmd/seed"
