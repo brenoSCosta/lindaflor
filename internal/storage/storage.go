@@ -1,16 +1,17 @@
 // Package storage: object storage for avatars and product images (S3 /
 // RustFS, path-style, presigned GETs).
 //
-// Wave 0: Store contract + in-memory and unavailable implementations.
-// TODO(wave1-B): S3 implementation (aws-sdk-go-v2, presign cache,
-// EnsureBucket/HeadBucket) and avatar rules from src/storage.rs.
+// Implementations: S3 (aws-sdk-go-v2, see s3.go), Memory (tests, S3-less
+// development) and Unavailable (S3 not configured).
 package storage
 
 import (
 	"context"
 	"errors"
-	"net/url"
+	"log/slog"
 	"sync"
+
+	"github.com/wellington-vell/lindaflor/internal/config"
 )
 
 // Errors.
@@ -69,7 +70,7 @@ func (m *Memory) PresignGet(_ context.Context, key string) (string, error) {
 	if _, ok := m.objs[key]; !ok {
 		return "", ErrNotFound
 	}
-	return "memory://" + url.PathEscape(key), nil
+	return "memory://" + key, nil
 }
 
 // Get returns a stored object (tests).
@@ -108,4 +109,17 @@ func (Unavailable) HealthCheck(context.Context) error { return nil }
 func IsUnavailable(s Store) bool {
 	_, ok := s.(Unavailable)
 	return ok || s == nil
+}
+
+// FromConfig builds the S3 store when configured (and ensures its bucket,
+// warning on failure: uploads fail until it exists), else Unavailable.
+func FromConfig(ctx context.Context, cfg *config.S3Config) Store {
+	if cfg == nil {
+		return Unavailable{}
+	}
+	st := NewS3(*cfg)
+	if err := st.EnsureBucket(ctx); err != nil {
+		slog.WarnContext(ctx, "object storage bucket is not ready", "error", err)
+	}
+	return st
 }

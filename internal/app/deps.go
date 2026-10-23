@@ -28,9 +28,13 @@ type Deps struct {
 	Pool     *pgxpool.Pool
 	Q        *sqlc.Queries
 	Valkey   *valkey.Client
-	Mailer   mail.Mailer // nil until wave1-B wires a transport
+	Mailer   mail.Mailer // log or SMTP transport (the outbox worker sends)
 	Storage  storage.Store
 	Payments payments.Provider
-	Logger   *slog.Logger
-	Shell    ShellLoader
+	// Orders is the order FSM seen by payments (webhook, sweep, admin
+	// sync/refund). TODO(wave1-C): wire internal/store's implementation;
+	// nil makes payment syncs fail with payments.ErrOrdersNotWired.
+	Orders payments.OrderTransitioner
+	Logger *slog.Logger
+	Shell  ShellLoader
 }

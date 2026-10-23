@@ -24,6 +24,7 @@ import (
 	"github.com/wellington-vell/lindaflor/internal/app"
 	"github.com/wellington-vell/lindaflor/internal/config"
 	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
+	"github.com/wellington-vell/lindaflor/internal/mail"
 	"github.com/wellington-vell/lindaflor/internal/payments"
 	"github.com/wellington-vell/lindaflor/internal/storage"
 	"github.com/wellington-vell/lindaflor/internal/valkey"
@@ -160,7 +161,7 @@ func NewServer(t testing.TB, opts Options) *Server {
 	mem := storage.NewMemory()
 	d := &app.Deps{
 		Cfg: cfg, Pool: pool, Q: sqlc.New(pool), Valkey: vk,
-		Storage: mem, Payments: payments.StaticPix{},
+		Mailer: mail.LogMailer{}, Storage: mem, Payments: payments.StaticPix{},
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 	if opts.MutateDeps != nil {
