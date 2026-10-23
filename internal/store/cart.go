@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 	"github.com/wellington-vell/lindaflor/internal/ratelimit"
 )
 
@@ -74,31 +75,29 @@ var (
 	ErrCartEmpty      = errors.New("Seu carrinho está vazio.")
 )
 
-type cartRow struct {
-	ID     uuid.UUID  `db:"id"`
-	Token  uuid.UUID  `db:"token"`
-	UserID *uuid.UUID `db:"user_id"`
-}
-
-var (
-	sqlCartByToken = sqlText(`SELECT id, token, user_id FROM carts WHERE token = $1`)
-	sqlCartByUser  = sqlText(`SELECT id, token, user_id FROM carts WHERE user_id = $1`)
-	sqlInsertCart  = sqlText(`INSERT INTO carts (id, token, user_id) VALUES ($1, $2, $3)`)
-)
+type cartRow = sqlc.StoreCartByTokenRow
 
 func fetchCartByToken(ctx context.Context, q DBTX, token uuid.UUID) (*cartRow, error) {
-	return collectOne[cartRow](q.Query(ctx, sqlCartByToken, token))
+	c, found, err := noRows(queries(q).StoreCartByToken(ctx, token))
+	if err != nil || !found {
+		return nil, err
+	}
+	return &c, nil
 }
 
 func fetchCartByUser(ctx context.Context, q DBTX, userID uuid.UUID) (*cartRow, error) {
-	return collectOne[cartRow](q.Query(ctx, sqlCartByUser, userID))
+	c, found, err := noRows(queries(q).StoreCartByUser(ctx, userID))
+	if err != nil || !found {
+		return nil, err
+	}
+	return ptr(cartRow(c)), nil
 }
 
 func insertCart(ctx context.Context, q DBTX, userID *uuid.UUID) (*cartRow, error) {
 	id := uuid.Must(uuid.NewV7())
 	// The token is a bearer secret (cookie): random v4, not time-ordered.
 	token := uuid.New()
-	if _, err := q.Exec(ctx, sqlInsertCart, id, token, userID); err != nil {
+	if err := queries(q).StoreInsertCart(ctx, sqlc.StoreInsertCartParams{ID: id, Token: token, UserID: userID}); err != nil {
 		return nil, err
 	}
 	return &cartRow{ID: id, Token: token, UserID: userID}, nil
@@ -158,41 +157,19 @@ func LoadOrCreateCart(ctx context.Context, q DBTX, cookieToken, userID *uuid.UUI
 	return CartRef{ID: c.ID, Token: c.Token}, true, nil
 }
 
-var sqlVariantAvailability = sqlText(`SELECT p.active,
-    COALESCE((
-        SELECT SUM(` + LiveAvailableSQL + `)::int
-        FROM inventory i
-        INNER JOIN warehouses w ON w.id = i.warehouse_id
-        WHERE i.variant_id = pv.id AND w.active = true
-    ), 0)::int AS available
-FROM product_variants pv
-INNER JOIN products p ON p.id = pv.product_id
-WHERE pv.id = $1`)
-
 // variantAvailability returns (active, live available, found).
 func variantAvailability(ctx context.Context, q DBTX, variantID uuid.UUID) (bool, int32, bool, error) {
-	var active bool
-	var available int32
-	err := q.QueryRow(ctx, sqlVariantAvailability, variantID).Scan(&active, &available)
-	found, err := optional(err)
-	return active, available, found, err
+	row, found, err := noRows(queries(q).StoreVariantAvailability(ctx, variantID))
+	return row.Active, row.Available, found, err
 }
 
-var (
-	sqlUpsertLooseLine = sqlText(`INSERT INTO cart_items (id, cart_id, variant_id, quantity)
-VALUES ($1, $2, $3, $4)
-ON CONFLICT (cart_id, variant_id) WHERE set_id IS NULL
-DO UPDATE SET
-    quantity = LEAST(cart_items.quantity + EXCLUDED.quantity, $5),
-    updated_at = now()`)
-	sqlUpsertSetLine = sqlText(`INSERT INTO cart_items (id, cart_id, variant_id, quantity, set_id)
-VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (cart_id, set_id, variant_id) WHERE set_id IS NOT NULL
-DO UPDATE SET
-    quantity = LEAST(cart_items.quantity + EXCLUDED.quantity, $6),
-    updated_at = now()`)
-	sqlTouchCart = sqlText(`UPDATE carts SET updated_at = now() WHERE id = $1`)
-)
+// upsertSetLine adds quantity of a set member line, capped at maxQuantity.
+func upsertSetLine(ctx context.Context, q DBTX, cartID, setID, variantID uuid.UUID, quantity, maxQuantity int32) error {
+	return queries(q).StoreUpsertSetLine(ctx, sqlc.StoreUpsertSetLineParams{
+		ID: uuid.Must(uuid.NewV7()), CartID: cartID, VariantID: variantID,
+		Quantity: quantity, SetID: &setID, MaxQuantity: maxQuantity,
+	})
+}
 
 // AddItem adds quantity (clamped to 1..available) of a variant as a loose
 // line (never touching set-member rows).
@@ -208,21 +185,13 @@ func AddItem(ctx context.Context, q DBTX, cartID, variantID uuid.UUID, quantity 
 		return ErrOutOfStock
 	}
 	add := min(max(quantity, 1), available)
-	if _, err := q.Exec(ctx, sqlUpsertLooseLine, uuid.Must(uuid.NewV7()), cartID, variantID, add, available); err != nil {
+	if err := queries(q).StoreUpsertLooseLine(ctx, sqlc.StoreUpsertLooseLineParams{
+		ID: uuid.Must(uuid.NewV7()), CartID: cartID, VariantID: variantID, Quantity: add, MaxQuantity: available,
+	}); err != nil {
 		return err
 	}
-	_, err = q.Exec(ctx, sqlTouchCart, cartID)
-	return err
+	return queries(q).StoreTouchCart(ctx, cartID)
 }
-
-var (
-	sqlSetForCart  = sqlText(`SELECT active, price_in_cents FROM sets WHERE id = $1`)
-	sqlSetVariants = sqlText(`SELECT o.variant_id
-FROM set_slot_options o
-INNER JOIN set_slots s ON s.id = o.slot_id
-WHERE s.set_id = $1
-ORDER BY s.sort_order ASC, o.variant_id ASC`)
-)
 
 // AddSetToCart adds a whole fixed-composition set: one row per slot
 // variant, all stamped with set_id and sharing one quantity clamped to
@@ -230,15 +199,13 @@ ORDER BY s.sort_order ASC, o.variant_id ASC`)
 // and inactive members are ErrInvalidVariant; a sold-out member is
 // ErrOutOfStock.
 func AddSetToCart(ctx context.Context, q DBTX, cartID, setID uuid.UUID, quantity int32) error {
-	var active bool
-	var price *int64
-	err := q.QueryRow(ctx, sqlSetForCart, setID).Scan(&active, &price)
-	if found, err := optional(err); err != nil {
+	set, found, err := noRows(queries(q).StoreSetForCart(ctx, setID))
+	if err != nil {
 		return err
-	} else if !found || !active || price == nil {
+	} else if !found || !set.Active || set.PriceInCents == nil {
 		return ErrInvalidVariant
 	}
-	variants, err := scalars[uuid.UUID](q.Query(ctx, sqlSetVariants, setID))
+	variants, err := queries(q).StoreSetVariants(ctx, setID)
 	if err != nil {
 		return err
 	}
@@ -261,23 +228,17 @@ func AddSetToCart(ctx context.Context, q DBTX, cartID, setID uuid.UUID, quantity
 	}
 	add := min(max(quantity, 1), minAvailable)
 	for _, v := range variants {
-		if _, err := q.Exec(ctx, sqlUpsertSetLine, uuid.Must(uuid.NewV7()), cartID, v, add, setID, minAvailable); err != nil {
+		if err := upsertSetLine(ctx, q, cartID, setID, v, add, minAvailable); err != nil {
 			return err
 		}
 	}
-	_, err = q.Exec(ctx, sqlTouchCart, cartID)
-	return err
+	return queries(q).StoreTouchCart(ctx, cartID)
 }
 
-var (
-	sqlSetLooseQuantity = sqlText(`UPDATE cart_items SET quantity = $3, updated_at = now()
-WHERE cart_id = $1 AND variant_id = $2 AND set_id IS NULL`)
-	sqlSetMemberVariants = sqlText(`SELECT variant_id FROM cart_items WHERE cart_id = $1 AND set_id = $2`)
-	sqlSetGroupQuantity  = sqlText(`UPDATE cart_items SET quantity = $3, updated_at = now() WHERE cart_id = $1 AND set_id = $2`)
-	sqlRemoveLoose       = sqlText(`DELETE FROM cart_items WHERE cart_id = $1 AND variant_id = $2 AND set_id IS NULL`)
-	sqlRemoveSet         = sqlText(`DELETE FROM cart_items WHERE cart_id = $1 AND set_id = $2`)
-	sqlClearItems        = sqlText(`DELETE FROM cart_items WHERE cart_id = $1`)
-)
+// setGroupQuantity sets every member line of one set group to quantity.
+func setGroupQuantity(ctx context.Context, q DBTX, cartID, setID uuid.UUID, quantity int32) error {
+	return queries(q).StoreSetGroupQuantity(ctx, sqlc.StoreSetGroupQuantityParams{CartID: cartID, SetID: setID, Quantity: quantity})
+}
 
 // SetQuantity sets a loose line's quantity (≤0 removes; clamped to stock;
 // unavailable variants are removed and reported).
@@ -302,11 +263,11 @@ func SetQuantity(ctx context.Context, q DBTX, cartID, variantID uuid.UUID, quant
 		return ErrOutOfStock
 	}
 	qty := min(quantity, available)
-	tag, err := q.Exec(ctx, sqlSetLooseQuantity, cartID, variantID, qty)
+	n, err := queries(q).StoreSetLooseQuantity(ctx, sqlc.StoreSetLooseQuantityParams{CartID: cartID, VariantID: variantID, Quantity: qty})
 	if err != nil {
 		return err
 	}
-	if tag.RowsAffected() == 0 {
+	if n == 0 {
 		return AddItem(ctx, q, cartID, variantID, qty)
 	}
 	return nil
@@ -318,7 +279,7 @@ func SetSetQuantity(ctx context.Context, q DBTX, cartID, setID uuid.UUID, quanti
 	if quantity <= 0 {
 		return RemoveSet(ctx, q, cartID, setID)
 	}
-	members, err := scalars[uuid.UUID](q.Query(ctx, sqlSetMemberVariants, cartID, setID))
+	members, err := queries(q).StoreSetMemberVariants(ctx, sqlc.StoreSetMemberVariantsParams{CartID: cartID, SetID: setID})
 	if err != nil || len(members) == 0 {
 		return err
 	}
@@ -342,32 +303,23 @@ func SetSetQuantity(ctx context.Context, q DBTX, cartID, setID uuid.UUID, quanti
 		}
 		minAvailable = min(minAvailable, available)
 	}
-	_, err = q.Exec(ctx, sqlSetGroupQuantity, cartID, setID, min(max(quantity, 1), minAvailable))
-	return err
+	return setGroupQuantity(ctx, q, cartID, setID, min(max(quantity, 1), minAvailable))
 }
 
 // RemoveItem removes a loose line (set-member rows survive).
 func RemoveItem(ctx context.Context, q DBTX, cartID, variantID uuid.UUID) error {
-	_, err := q.Exec(ctx, sqlRemoveLoose, cartID, variantID)
-	return err
+	return queries(q).StoreRemoveLoose(ctx, sqlc.StoreRemoveLooseParams{CartID: cartID, VariantID: variantID})
 }
 
 // RemoveSet removes every member line of one set group.
 func RemoveSet(ctx context.Context, q DBTX, cartID, setID uuid.UUID) error {
-	_, err := q.Exec(ctx, sqlRemoveSet, cartID, setID)
-	return err
+	return queries(q).StoreRemoveSet(ctx, sqlc.StoreRemoveSetParams{CartID: cartID, SetID: setID})
 }
 
 // ClearItems empties a cart.
 func ClearItems(ctx context.Context, q DBTX, cartID uuid.UUID) error {
-	_, err := q.Exec(ctx, sqlClearItems, cartID)
-	return err
+	return queries(q).StoreClearItems(ctx, cartID)
 }
-
-var sqlCartCountForToken = sqlText(`SELECT COALESCE(SUM(ci.quantity), 0)::int
-FROM cart_items ci
-INNER JOIN carts c ON c.id = ci.cart_id
-WHERE c.token = $1`)
 
 // CartItemCount is the header badge: sum of stored quantities for the
 // cookie token (0 without one; never creates a cart).
@@ -375,8 +327,8 @@ func CartItemCount(ctx context.Context, q DBTX, token *uuid.UUID) (int, error) {
 	if token == nil {
 		return 0, nil
 	}
-	var n int32
-	if err := q.QueryRow(ctx, sqlCartCountForToken, *token).Scan(&n); err != nil {
+	n, err := queries(q).StoreCartCountForToken(ctx, *token)
+	if err != nil {
 		return 0, err
 	}
 	return int(max(n, 0)), nil
@@ -399,66 +351,9 @@ func CartSubtotalCents(items []CartItem) (int64, bool) {
 	return total, true
 }
 
-type hydrateRow struct {
-	CartItemID    uuid.UUID  `db:"cart_item_id"`
-	VariantID     uuid.UUID  `db:"variant_id"`
-	Quantity      int32      `db:"quantity"`
-	ProductID     *uuid.UUID `db:"product_id"`
-	ProductSlug   *string    `db:"product_slug"`
-	ProductName   *string    `db:"product_name"`
-	ProductActive *bool      `db:"product_active"`
-	ProductPrice  *int64     `db:"product_price"`
-	Size          *string    `db:"size"`
-	Color         *string    `db:"color"`
-	VariantPrice  *int64     `db:"variant_price"`
-	Available     *int32     `db:"available"`
-	ImageURL      *string    `db:"image_url"`
-	SetID         *uuid.UUID `db:"set_id"`
-	SetName       *string    `db:"set_name"`
-}
-
-func hydrateSQL(available string) string {
-	return `SELECT
-    ci.id AS cart_item_id,
-    ci.variant_id,
-    ci.quantity,
-    p.id AS product_id,
-    p.slug AS product_slug,
-    p.name AS product_name,
-    p.active AS product_active,
-    p.price_in_cents AS product_price,
-    pv.size::text AS size,
-    pv.color,
-    pv.price_in_cents AS variant_price,
-    COALESCE((
-        SELECT SUM(` + available + `)::int
-        FROM inventory i
-        INNER JOIN warehouses w ON w.id = i.warehouse_id
-        WHERE i.variant_id = pv.id AND w.active = true
-    ), 0)::int AS available,
-    (
-        SELECT pi.url FROM product_images pi
-        WHERE pi.product_id = p.id
-        ORDER BY pi.sort_order ASC
-        LIMIT 1
-    ) AS image_url,
-    ci.set_id AS set_id,
-    s.name AS set_name
-FROM cart_items ci
-LEFT JOIN product_variants pv ON pv.id = ci.variant_id
-LEFT JOIN products p ON p.id = pv.product_id
-LEFT JOIN sets s ON s.id = ci.set_id
-WHERE ci.cart_id = $1
-FOR UPDATE OF ci`
-}
-
-var (
-	sqlHydrate           = sqlText(hydrateSQL(LiveAvailableSQL))
-	sqlQuote             = sqlText(hydrateSQL(`GREATEST(i.quantity - i.reserved, 0)`))
-	sqlCartToken         = sqlText(`SELECT token FROM carts WHERE id = $1`)
-	sqlDeleteCartItem    = sqlText(`DELETE FROM cart_items WHERE id = $1`)
-	sqlUpdateCartItemQty = sqlText(`UPDATE cart_items SET quantity = $2, updated_at = now() WHERE id = $1`)
-)
+// hydrateRow is one cart line joined with live product/stock data
+// (StoreHydrateCart; StoreQuoteCart returns the same columns).
+type hydrateRow = sqlc.StoreHydrateCartRow
 
 func setMemberLabel(base string, setName *string) string {
 	if setName != nil {
@@ -489,10 +384,10 @@ func displayItem(r hydrateRow) (CartItem, bool) {
 		ProductSlug:    deref(r.ProductSlug),
 		ProductName:    name,
 		VariantLabel:   label,
-		ImageURL:       r.ImageURL,
+		ImageURL:       r.ImageUrl,
 		UnitPriceCents: price,
 		Quantity:       r.Quantity,
-		MaxQuantity:    deref(r.Available),
+		MaxQuantity:    r.Available,
 		SetID:          r.SetID,
 		SetName:        r.SetName,
 	}, true
@@ -512,11 +407,12 @@ func HydrateCart(ctx context.Context, pool *pgxpool.Pool, cartID uuid.UUID) (*Hy
 
 // HydrateCartTx is HydrateCart inside the caller's transaction.
 func HydrateCartTx(ctx context.Context, tx DBTX, cartID uuid.UUID) (*HydratedCart, error) {
-	var token uuid.UUID
-	if err := tx.QueryRow(ctx, sqlCartToken, cartID).Scan(&token); err != nil {
+	q := queries(tx)
+	token, err := q.StoreCartToken(ctx, cartID)
+	if err != nil {
 		return nil, err
 	}
-	rows, err := collect[hydrateRow](tx.Query(ctx, sqlHydrate, cartID))
+	rows, err := q.StoreHydrateCart(ctx, cartID)
 	if err != nil {
 		return nil, err
 	}
@@ -529,9 +425,9 @@ func HydrateCartTx(ctx context.Context, tx DBTX, cartID uuid.UUID) (*HydratedCar
 		if r.ProductName != nil {
 			name = *r.ProductName
 		}
-		available := deref(r.Available)
+		available := r.Available
 		if r.ProductID == nil || !deref(r.ProductActive) || available <= 0 {
-			if _, err := tx.Exec(ctx, sqlDeleteCartItem, r.CartItemID); err != nil {
+			if err := q.StoreDeleteCartItem(ctx, r.CartItemID); err != nil {
 				return nil, err
 			}
 			if r.SetID != nil {
@@ -542,7 +438,7 @@ func HydrateCartTx(ctx context.Context, tx DBTX, cartID uuid.UUID) (*HydratedCar
 		}
 		if r.Quantity > available {
 			r.Quantity = available
-			if _, err := tx.Exec(ctx, sqlUpdateCartItemQty, r.CartItemID, available); err != nil {
+			if err := q.StoreUpdateCartItemQty(ctx, sqlc.StoreUpdateCartItemQtyParams{ID: r.CartItemID, Quantity: available}); err != nil {
 				return nil, err
 			}
 			h.Notices = append(h.Notices, CartNotice{ProductName: name, Quantity: available})
@@ -561,7 +457,7 @@ func HydrateCartTx(ctx context.Context, tx DBTX, cartID uuid.UUID) (*HydratedCar
 // different quantities is lowered to its smallest member quantity.
 func normalizeSetGroups(ctx context.Context, tx DBTX, h *HydratedCart, broken []uuid.UUID) error {
 	for _, setID := range sortedUnique(broken) {
-		if _, err := tx.Exec(ctx, sqlRemoveSet, h.CartID, setID); err != nil {
+		if err := RemoveSet(ctx, tx, h.CartID, setID); err != nil {
 			return err
 		}
 		var setName *string
@@ -606,7 +502,7 @@ func normalizeSetGroups(ctx context.Context, tx DBTX, h *HydratedCart, broken []
 		if !uneven {
 			continue
 		}
-		if _, err := tx.Exec(ctx, sqlSetGroupQuantity, h.CartID, setID, m); err != nil {
+		if err := setGroupQuantity(ctx, tx, h.CartID, setID, m); err != nil {
 			return err
 		}
 		var setName *string
@@ -627,14 +523,6 @@ func normalizeSetGroups(ctx context.Context, tx DBTX, h *HydratedCart, broken []
 	return nil
 }
 
-var (
-	sqlQuoteSet         = sqlText(`SELECT name, active, price_in_cents FROM sets WHERE id = $1`)
-	sqlQuoteSetVariants = sqlText(`SELECT o.variant_id
-FROM set_slot_options o
-INNER JOIN set_slots s ON s.id = o.slot_id
-WHERE s.set_id = $1`)
-)
-
 // QuoteCartForCheckout locks the cart's inventory (reclaiming expired
 // holds) and lines, then prices them; never deletes or clamps. Fails with
 // ErrCartEmpty or ErrInsufficientStock (unavailable, oversold across
@@ -645,10 +533,12 @@ func QuoteCartForCheckout(ctx context.Context, tx DBTX, cartID uuid.UUID) ([]Car
 	if err := LockCartInventory(ctx, tx, cartID); err != nil {
 		return nil, err
 	}
-	rows, err := collect[hydrateRow](tx.Query(ctx, sqlQuote, cartID))
+	q := queries(tx)
+	quoted, err := q.StoreQuoteCart(ctx, cartID)
 	if err != nil {
 		return nil, err
 	}
+	rows := mapSlice(quoted, func(r sqlc.StoreQuoteCartRow) hydrateRow { return hydrateRow(r) })
 	if len(rows) == 0 {
 		return nil, ErrCartEmpty
 	}
@@ -660,7 +550,7 @@ func QuoteCartForCheckout(ctx context.Context, tx DBTX, cartID uuid.UUID) ([]Car
 	groups := map[uuid.UUID][]int{}
 	var groupOrder []uuid.UUID
 	for _, r := range rows {
-		if r.ProductID == nil || !deref(r.ProductActive) || deref(r.Available) < totals[r.VariantID] {
+		if r.ProductID == nil || !deref(r.ProductActive) || r.Available < totals[r.VariantID] {
 			return nil, ErrInsufficientStock
 		}
 		item, _ := displayItem(r)
@@ -681,16 +571,14 @@ func QuoteCartForCheckout(ctx context.Context, tx DBTX, cartID uuid.UUID) ([]Car
 				return nil, ErrInsufficientStock
 			}
 		}
-		var name string
-		var active bool
-		var price *int64
-		err := tx.QueryRow(ctx, sqlQuoteSet, setID).Scan(&name, &active, &price)
-		if found, err := optional(err); err != nil {
+		set, found, err := noRows(q.StoreQuoteSet(ctx, setID))
+		if err != nil {
 			return nil, err
-		} else if !found || price == nil || !active {
+		} else if !found || set.PriceInCents == nil || !set.Active {
 			return nil, ErrInsufficientStock
 		}
-		expected, err := scalars[uuid.UUID](tx.Query(ctx, sqlQuoteSetVariants, setID))
+		name, price := set.Name, set.PriceInCents
+		expected, err := q.StoreQuoteSetVariants(ctx, setID)
 		if err != nil {
 			return nil, err
 		}
@@ -723,16 +611,10 @@ func QuoteCartForCheckout(ctx context.Context, tx DBTX, cartID uuid.UUID) ([]Car
 	return items, nil
 }
 
-var (
-	sqlCartCouponCode = sqlText(`SELECT coupon_code FROM carts WHERE id = $1`)
-	sqlSetCartCoupon  = sqlText(`UPDATE carts SET coupon_code = $2, updated_at = now() WHERE id = $1`)
-)
-
 // CartCouponCode is the coupon stored on the cart ("" when none).
 func CartCouponCode(ctx context.Context, q DBTX, cartID uuid.UUID) (string, error) {
-	var code *string
-	err := q.QueryRow(ctx, sqlCartCouponCode, cartID).Scan(&code)
-	if found, err := optional(err); err != nil || !found {
+	code, found, err := noRows(queries(q).StoreCartCouponCode(ctx, cartID))
+	if err != nil || !found {
 		return "", err
 	}
 	if code == nil || isBlank(*code) {
@@ -743,8 +625,7 @@ func CartCouponCode(ctx context.Context, q DBTX, cartID uuid.UUID) (string, erro
 
 // SetCartCoupon stores (or clears with "") the cart's coupon code.
 func SetCartCoupon(ctx context.Context, q DBTX, cartID uuid.UUID, code string) error {
-	_, err := q.Exec(ctx, sqlSetCartCoupon, cartID, nonEmpty(code))
-	return err
+	return queries(q).StoreSetCartCoupon(ctx, sqlc.StoreSetCartCouponParams{ID: cartID, CouponCode: nonEmpty(code)})
 }
 
 // CouponRateLimitedMessage is returned when the per-cart coupon budget is
@@ -815,19 +696,11 @@ func mergeSetMemberLine(ctx context.Context, q DBTX, cartID, setID, variantID uu
 		return ErrOutOfStock
 	}
 	add := min(max(quantity, 1), available)
-	if _, err := q.Exec(ctx, sqlUpsertSetLine, uuid.Must(uuid.NewV7()), cartID, variantID, add, setID, available); err != nil {
+	if err := upsertSetLine(ctx, q, cartID, setID, variantID, add, available); err != nil {
 		return err
 	}
-	_, err = q.Exec(ctx, sqlTouchCart, cartID)
-	return err
+	return queries(q).StoreTouchCart(ctx, cartID)
 }
-
-var (
-	sqlAttachCart = sqlText(`UPDATE carts SET user_id = $2, updated_at = now() WHERE id = $1`)
-	sqlCartOwner  = sqlText(`SELECT user_id FROM carts WHERE id = $1`)
-	sqlGuestLines = sqlText(`SELECT variant_id, quantity, set_id FROM cart_items WHERE cart_id = $1`)
-	sqlDeleteCart = sqlText(`DELETE FROM carts WHERE id = $1`)
-)
 
 // MergeGuestCart merges the guest cart of the cookie token (if any) into
 // the signed-in user's cart and returns the surviving token, which the
@@ -850,6 +723,7 @@ func MergeGuestCart(ctx context.Context, q DBTX, guestToken *uuid.UUID, userID u
 // stock) and deletes the guest cart; without a guest cart it ensures a
 // user cart exists. Returns the surviving token.
 func MergeCartsForUser(ctx context.Context, q DBTX, guestCartID *uuid.UUID, userID uuid.UUID) (uuid.UUID, error) {
+	qs := queries(q)
 	userCart, err := fetchCartByUser(ctx, q, userID)
 	if err != nil {
 		return uuid.Nil, err
@@ -864,11 +738,11 @@ func MergeCartsForUser(ctx context.Context, q DBTX, guestCartID *uuid.UUID, user
 		}
 		return c.Token, nil
 	case userCart == nil:
-		if _, err := q.Exec(ctx, sqlAttachCart, *guestCartID, userID); err != nil {
+		if err := qs.StoreAttachCart(ctx, sqlc.StoreAttachCartParams{ID: *guestCartID, UserID: userID}); err != nil {
 			return uuid.Nil, err
 		}
-		var token uuid.UUID
-		if err := q.QueryRow(ctx, sqlCartToken, *guestCartID).Scan(&token); err != nil {
+		token, err := qs.StoreCartToken(ctx, *guestCartID)
+		if err != nil {
 			return uuid.Nil, err
 		}
 		if _, err := HydrateCartTx(ctx, q, *guestCartID); err != nil {
@@ -879,19 +753,14 @@ func MergeCartsForUser(ctx context.Context, q DBTX, guestCartID *uuid.UUID, user
 	if *guestCartID == userCart.ID {
 		return userCart.Token, nil
 	}
-	var owner *uuid.UUID
-	if err := q.QueryRow(ctx, sqlCartOwner, *guestCartID).Scan(&owner); err != nil {
+	owner, err := qs.StoreCartOwner(ctx, *guestCartID)
+	if err != nil {
 		return uuid.Nil, err
 	}
 	if owner != nil && *owner != userID {
 		return userCart.Token, nil
 	}
-	type guestLine struct {
-		VariantID uuid.UUID  `db:"variant_id"`
-		Quantity  int32      `db:"quantity"`
-		SetID     *uuid.UUID `db:"set_id"`
-	}
-	lines, err := collect[guestLine](q.Query(ctx, sqlGuestLines, *guestCartID))
+	lines, err := qs.StoreGuestLines(ctx, *guestCartID)
 	if err != nil {
 		return uuid.Nil, err
 	}
@@ -906,7 +775,7 @@ func MergeCartsForUser(ctx context.Context, q DBTX, guestCartID *uuid.UUID, user
 			return uuid.Nil, err
 		}
 	}
-	if _, err := q.Exec(ctx, sqlDeleteCart, *guestCartID); err != nil {
+	if err := qs.StoreDeleteCart(ctx, *guestCartID); err != nil {
 		return uuid.Nil, err
 	}
 	if _, err := HydrateCartTx(ctx, q, userCart.ID); err != nil {

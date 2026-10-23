@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/wellington-vell/lindaflor/internal/audit"
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 	"github.com/wellington-vell/lindaflor/internal/payments"
 )
 
@@ -287,34 +288,12 @@ type applyOutcome struct {
 	tracking   *Tracking
 }
 
-var (
-	sqlApplyLock = sqlText(`SELECT status::text, paid_at IS NOT NULL,
-        COALESCE(reservation_expires_at < now(), false)
- FROM orders WHERE id = $1 FOR UPDATE`)
-	sqlOrderLines    = sqlText(`SELECT variant_id, quantity FROM order_items WHERE order_id = $1`)
-	sqlSetStatusPaid = sqlText(`UPDATE orders SET status = $2::text::order_status, paid_at = now(), updated_at = now() WHERE id = $1`)
-	sqlSetStatus     = sqlText(`UPDATE orders SET status = $2::text::order_status, updated_at = now() WHERE id = $1`)
-	sqlSetStatusShip = sqlText(`UPDATE orders SET status = $2::text::order_status, carrier = $3, tracking_code = $4,
-        shipped_at = now(),
-        access_token_expires_at = GREATEST(access_token_expires_at, now() + interval '90 days'),
-        updated_at = now()
- WHERE id = $1`)
-	sqlSetStatusDeliver = sqlText(`UPDATE orders SET status = $2::text::order_status, delivered_at = now(),
-        access_token_expires_at = GREATEST(access_token_expires_at, now() + interval '90 days'),
-        updated_at = now()
- WHERE id = $1`)
-)
-
 func orderLines(ctx context.Context, tx DBTX, orderID uuid.UUID) ([]ReserveLine, error) {
-	items, err := collect[itemQuantity](tx.Query(ctx, sqlOrderLines, orderID))
+	items, err := queries(tx).StoreOrderItemQuantities(ctx, orderID)
 	if err != nil {
 		return nil, err
 	}
-	lines := make([]ReserveLine, 0, len(items))
-	for _, it := range items {
-		lines = append(lines, ReserveLine(it))
-	}
-	return lines, nil
+	return mapSlice(items, func(it sqlc.StoreOrderItemQuantitiesRow) ReserveLine { return ReserveLine(it) }), nil
 }
 
 func reserveForReopen(ctx context.Context, tx DBTX, orderID uuid.UUID) error {
@@ -343,17 +322,17 @@ func Apply(ctx context.Context, tx DBTX, orderID uuid.UUID, event OrderEvent, op
 }
 
 func applyInner(ctx context.Context, tx DBTX, orderID uuid.UUID, event OrderEvent, opts ApplyOptions) (applyOutcome, error) {
-	var raw string
-	var paid, expired bool
+	q := queries(tx)
 	// expired is read before side effects: releasing the hold clears
 	// reservation_expires_at.
-	err := tx.QueryRow(ctx, sqlApplyLock, orderID).Scan(&raw, &paid, &expired)
-	if found, err := optional(err); err != nil {
+	locked, found, err := noRows(q.StoreApplyLock(ctx, orderID))
+	if err != nil {
 		return applyOutcome{}, err
 	} else if !found {
 		return applyOutcome{}, ErrOrderNotFound
 	}
-	from, ok := ParseOrderStatus(raw)
+	paid, expired := locked.Paid, locked.Expired
+	from, ok := ParseOrderStatus(locked.Status)
 	if !ok {
 		return applyOutcome{}, ErrOrderNotFound
 	}
@@ -366,13 +345,20 @@ func applyInner(ctx context.Context, tx DBTX, orderID uuid.UUID, event OrderEven
 		return applyOutcome{}, err
 	}
 	out := applyOutcome{from: from, next: next}
+	status := sqlc.OrderStatus(next)
+	setStatus := func() error {
+		return q.StoreSetStatus(ctx, sqlc.StoreSetStatusParams{Status: status, ID: orderID})
+	}
+	setPaid := func() error {
+		return q.StoreSetStatusPaid(ctx, sqlc.StoreSetStatusPaidParams{Status: status, ID: orderID})
+	}
 
 	switch {
 	case from == StatusPendingPayment && event == EventPay:
 		if err := ConvertReservation(ctx, tx, orderID); err != nil {
 			return out, err
 		}
-		_, err = tx.Exec(ctx, sqlSetStatusPaid, orderID, string(next))
+		err = setPaid()
 	case from == StatusCancelled && event == EventReopen:
 		if err := reserveForReopen(ctx, tx, orderID); err != nil {
 			return out, err
@@ -380,7 +366,7 @@ func applyInner(ctx context.Context, tx DBTX, orderID uuid.UUID, event OrderEven
 		if err := ReclaimRedemptionForOrder(ctx, tx, orderID); err != nil {
 			return out, err
 		}
-		_, err = tx.Exec(ctx, sqlSetStatus, orderID, string(next))
+		err = setStatus()
 	case from == StatusCancelled && event == EventReopenPay:
 		if err := reserveForReopen(ctx, tx, orderID); err != nil {
 			return out, err
@@ -391,7 +377,7 @@ func applyInner(ctx context.Context, tx DBTX, orderID uuid.UUID, event OrderEven
 		if err := ReclaimRedemptionForOrder(ctx, tx, orderID); err != nil {
 			return out, err
 		}
-		_, err = tx.Exec(ctx, sqlSetStatusPaid, orderID, string(next))
+		err = setPaid()
 	case from == StatusPendingPayment && event == EventCancel:
 		if err := ReleaseReservation(ctx, tx, orderID); err != nil {
 			return out, err
@@ -399,7 +385,7 @@ func applyInner(ctx context.Context, tx DBTX, orderID uuid.UUID, event OrderEven
 		if err := RestoreRedemptionForOrder(ctx, tx, orderID); err != nil {
 			return out, err
 		}
-		_, err = tx.Exec(ctx, sqlSetStatus, orderID, string(next))
+		err = setStatus()
 	case event == EventCancel || event == EventRefund:
 		out.restocked = opts.resolveRestock(from)
 		if out.restocked {
@@ -410,7 +396,7 @@ func applyInner(ctx context.Context, tx DBTX, orderID uuid.UUID, event OrderEven
 		if err := RestoreRedemptionForOrder(ctx, tx, orderID); err != nil {
 			return out, err
 		}
-		_, err = tx.Exec(ctx, sqlSetStatus, orderID, string(next))
+		err = setStatus()
 	case event == EventShip:
 		if opts.Tracking == nil {
 			return out, ErrTrackingRequired
@@ -420,12 +406,12 @@ func applyInner(ctx context.Context, tx DBTX, orderID uuid.UUID, event OrderEven
 			return out, terr
 		}
 		// The guest link keeps working for 90 days after shipping.
-		_, err = tx.Exec(ctx, sqlSetStatusShip, orderID, string(next), carrier, code)
+		err = q.StoreSetStatusShip(ctx, sqlc.StoreSetStatusShipParams{Status: status, Carrier: carrier, TrackingCode: code, ID: orderID})
 		out.tracking = &Tracking{Carrier: carrier, Code: code}
 	case event == EventDeliver:
-		_, err = tx.Exec(ctx, sqlSetStatusDeliver, orderID, string(next))
+		err = q.StoreSetStatusDeliver(ctx, sqlc.StoreSetStatusDeliverParams{Status: status, ID: orderID})
 	default:
-		_, err = tx.Exec(ctx, sqlSetStatus, orderID, string(next))
+		err = setStatus()
 	}
 	if err != nil {
 		return out, err
@@ -480,22 +466,9 @@ func ApplyWithAudit(ctx context.Context, tx DBTX, orderID uuid.UUID, event Order
 	return out.next, nil
 }
 
-var (
-	sqlExpiredPending = sqlText(`SELECT id FROM orders
-WHERE status = 'pending_payment'
-  AND reservation_expires_at IS NOT NULL
-  AND reservation_expires_at < now()
-ORDER BY id`)
-	sqlClaimExpiredOne = sqlText(`SELECT id FROM orders
-WHERE id = $1
-  AND status = 'pending_payment'
-  AND reservation_expires_at < now()
-FOR UPDATE SKIP LOCKED`)
-)
-
 // ExpiredPendingOrderIDs lists pending orders past their hold (sweeper scan).
 func ExpiredPendingOrderIDs(ctx context.Context, pool DBTX) ([]uuid.UUID, error) {
-	return scalars[uuid.UUID](pool.Query(ctx, sqlExpiredPending))
+	return queries(pool).StoreExpiredPending(ctx)
 }
 
 // ExpirePendingReservations is the store-only sweep: cancel every pending
@@ -525,9 +498,8 @@ func ExpirePendingReservations(ctx context.Context, pool *pgxpool.Pool) error {
 // pending and past its hold).
 func ExpireOne(ctx context.Context, pool *pgxpool.Pool, orderID uuid.UUID) error {
 	return withTx(ctx, pool, func(tx pgx.Tx) error {
-		var id uuid.UUID
-		err := tx.QueryRow(ctx, sqlClaimExpiredOne, orderID).Scan(&id)
-		if found, err := optional(err); err != nil || !found {
+		_, found, err := noRows(queries(tx).StoreClaimExpiredOne(ctx, orderID))
+		if err != nil || !found {
 			return err
 		}
 		_, err = Apply(ctx, tx, orderID, EventCancel, ApplyOptions{})

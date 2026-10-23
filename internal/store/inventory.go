@@ -8,6 +8,8 @@ import (
 	"slices"
 
 	"github.com/google/uuid"
+
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 )
 
 // Stock holds and movements on inventory rows (src/app/store/inventory.rs).
@@ -35,27 +37,9 @@ type ReserveLine struct {
 	Quantity  int32
 }
 
-type inventoryLockRow struct {
-	ID        uuid.UUID `db:"id"`
-	VariantID uuid.UUID `db:"variant_id"`
-	Quantity  int32     `db:"quantity"`
-	Reserved  int32     `db:"reserved"`
-	IsDefault bool      `db:"is_default"`
-}
-
-var sqlLockInventoryIDs = sqlText(`SELECT i.id, i.variant_id, i.quantity, i.reserved, w.is_default
-FROM inventory i
-INNER JOIN warehouses w ON w.id = i.warehouse_id
-WHERE i.id = ANY($1)
-ORDER BY i.id
-FOR UPDATE OF i`)
-
-var sqlLockVariantInventory = sqlText(`SELECT i.id, i.variant_id, i.quantity, i.reserved, w.is_default
-FROM inventory i
-INNER JOIN warehouses w ON w.id = i.warehouse_id
-WHERE i.variant_id = ANY($1) AND w.active = true
-ORDER BY i.id
-FOR UPDATE OF i`)
+// inventoryLockRow is one locked inventory row (StoreLockInventoryIDs and
+// StoreLockVariantInventory return the same columns).
+type inventoryLockRow = sqlc.StoreLockVariantInventoryRow
 
 func sortedUnique(ids []uuid.UUID) []uuid.UUID {
 	out := slices.Clone(ids)
@@ -81,7 +65,11 @@ func lockInventoryIDs(ctx context.Context, tx DBTX, ids []uuid.UUID) ([]inventor
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	return collect[inventoryLockRow](tx.Query(ctx, sqlLockInventoryIDs, ids))
+	rows, err := queries(tx).StoreLockInventoryIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(rows, func(r sqlc.StoreLockInventoryIDsRow) inventoryLockRow { return inventoryLockRow(r) }), nil
 }
 
 // lockVariantInventory locks every active-warehouse row of the variants.
@@ -90,32 +78,8 @@ func lockVariantInventory(ctx context.Context, tx DBTX, variantIDs []uuid.UUID) 
 	if len(variantIDs) == 0 {
 		return nil, nil
 	}
-	return collect[inventoryLockRow](tx.Query(ctx, sqlLockVariantInventory, variantIDs))
+	return queries(tx).StoreLockVariantInventory(ctx, variantIDs)
 }
-
-var (
-	sqlCartInventoryRows = sqlText(`SELECT i.id
-FROM inventory i
-INNER JOIN warehouses w ON w.id = i.warehouse_id
-INNER JOIN cart_items ci ON ci.variant_id = i.variant_id
-WHERE ci.cart_id = $1 AND w.active = true`)
-	sqlExpiredHolders = sqlText(`SELECT r.order_id, r.inventory_id
-FROM inventory_reservations r
-WHERE r.order_id IN (
-    SELECT r2.order_id
-    FROM inventory_reservations r2
-    INNER JOIN orders o ON o.id = r2.order_id
-    WHERE r2.inventory_id = ANY($1)
-      AND o.status = 'pending_payment'
-      AND o.reservation_expires_at < now()
-)`)
-	sqlClaimExpiredOrders = sqlText(`SELECT id FROM orders
-WHERE id = ANY($1)
-  AND status = 'pending_payment'
-  AND reservation_expires_at < now()
-ORDER BY id
-FOR UPDATE SKIP LOCKED`)
-)
 
 // LockCartInventory locks every active-warehouse inventory row of the cart,
 // plus every row held by an expired-but-unswept pending order that blocks
@@ -123,18 +87,15 @@ FOR UPDATE SKIP LOCKED`)
 // orders (skipping any another transaction is handling) so their holds are
 // free for this checkout.
 func LockCartInventory(ctx context.Context, tx DBTX, cartID uuid.UUID) error {
-	cartRows, err := scalars[uuid.UUID](tx.Query(ctx, sqlCartInventoryRows, cartID))
+	q := queries(tx)
+	cartRows, err := q.StoreCartInventoryRows(ctx, cartID)
 	if err != nil {
 		return err
 	}
 	if len(cartRows) == 0 {
 		return nil
 	}
-	type holder struct {
-		OrderID     uuid.UUID `db:"order_id"`
-		InventoryID uuid.UUID `db:"inventory_id"`
-	}
-	expired, err := collect[holder](tx.Query(ctx, sqlExpiredHolders, cartRows))
+	expired, err := q.StoreExpiredHolders(ctx, cartRows)
 	if err != nil {
 		return err
 	}
@@ -153,7 +114,7 @@ func LockCartInventory(ctx context.Context, tx DBTX, cartID uuid.UUID) error {
 	}
 	// SKIP LOCKED: never wait on an order row while holding inventory locks
 	// (Apply takes order → inventory).
-	claimed, err := scalars[uuid.UUID](tx.Query(ctx, sqlClaimExpiredOrders, orderIDs))
+	claimed, err := q.StoreClaimExpiredOrders(ctx, orderIDs)
 	if err != nil {
 		return err
 	}
@@ -167,13 +128,6 @@ func LockCartInventory(ctx context.Context, tx DBTX, cartID uuid.UUID) error {
 	}
 	return nil
 }
-
-var (
-	sqlReserveInventory  = sqlText(`UPDATE inventory SET reserved = reserved + $2, updated_at = now() WHERE id = $1`)
-	sqlInsertReservation = sqlText(`INSERT INTO inventory_reservations (id, order_id, inventory_id, quantity)
-VALUES ($1, $2, $3, $4)`)
-	sqlSetReservationExpiry = sqlText(`UPDATE orders SET reservation_expires_at = now() + interval '48 hours' WHERE id = $1`)
-)
 
 // ReserveForOrder holds stock for a pending PIX order: reserved += qty
 // across warehouses (default first) with one inventory_reservations row per
@@ -189,6 +143,7 @@ func ReserveForOrder(ctx context.Context, tx DBTX, orderID uuid.UUID, lines []Re
 	if err != nil {
 		return err
 	}
+	q := queries(tx)
 	// Default warehouse first, then id (locks were already taken in id order).
 	slices.SortStableFunc(rows, func(a, b inventoryLockRow) int {
 		if a.IsDefault != b.IsDefault {
@@ -225,10 +180,12 @@ func ReserveForOrder(ctx context.Context, tx DBTX, orderID uuid.UUID, lines []Re
 			if take <= 0 {
 				continue
 			}
-			if _, err := tx.Exec(ctx, sqlReserveInventory, r.ID, take); err != nil {
+			if err := q.StoreReserveInventory(ctx, sqlc.StoreReserveInventoryParams{ID: r.ID, Quantity: take}); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(ctx, sqlInsertReservation, uuid.Must(uuid.NewV7()), orderID, r.ID, take); err != nil {
+			if err := q.StoreInsertReservation(ctx, sqlc.StoreInsertReservationParams{
+				ID: uuid.Must(uuid.NewV7()), OrderID: orderID, InventoryID: r.ID, Quantity: take,
+			}); err != nil {
 				return err
 			}
 			r.Reserved += take
@@ -238,24 +195,18 @@ func ReserveForOrder(ctx context.Context, tx DBTX, orderID uuid.UUID, lines []Re
 			return ErrInsufficientStock
 		}
 	}
-	_, err = tx.Exec(ctx, sqlSetReservationExpiry, orderID)
-	return err
+	return q.StoreSetReservationExpiry(ctx, orderID)
 }
 
-type reservationRow struct {
-	InventoryID uuid.UUID `db:"inventory_id"`
-	Quantity    int32     `db:"quantity"`
-}
+type reservationRow = sqlc.StoreReservationRowsRow
 
-var (
-	sqlReservationRows     = sqlText(`SELECT inventory_id, quantity FROM inventory_reservations WHERE order_id = $1`)
-	sqlConvertInventory    = sqlText(`UPDATE inventory SET reserved = GREATEST(reserved - $2, 0), quantity = GREATEST(quantity - $2, 0), updated_at = now() WHERE id = $1`)
-	sqlReleaseInventory    = sqlText(`UPDATE inventory SET reserved = GREATEST(reserved - $2, 0), updated_at = now() WHERE id = $1`)
-	sqlClearReservations   = sqlText(`DELETE FROM inventory_reservations WHERE order_id = $1`)
-	sqlClearReservationAt  = sqlText(`UPDATE orders SET reservation_expires_at = NULL WHERE id = $1`)
-	sqlOrderItemQuantities = sqlText(`SELECT variant_id, quantity FROM order_items WHERE order_id = $1`)
-	sqlRestockInventory    = sqlText(`UPDATE inventory SET quantity = quantity + $2, updated_at = now() WHERE id = $1`)
-)
+// convertOrRelease sells (convert) or frees quantity units of a hold.
+func convertOrRelease(ctx context.Context, q *sqlc.Queries, inventoryID uuid.UUID, quantity int32, convert bool) error {
+	if convert {
+		return q.StoreConvertInventory(ctx, sqlc.StoreConvertInventoryParams{ID: inventoryID, Quantity: quantity})
+	}
+	return q.StoreReleaseInventory(ctx, sqlc.StoreReleaseInventoryParams{ID: inventoryID, Quantity: quantity})
+}
 
 func applyReservationRows(ctx context.Context, tx DBTX, orderID uuid.UUID, rows []reservationRow, convert bool) error {
 	ids := make([]uuid.UUID, 0, len(rows))
@@ -282,23 +233,17 @@ func applyReservationRows(ctx context.Context, tx DBTX, orderID uuid.UUID, rows 
 				}
 				onHand[r.InventoryID] = max(q-r.Quantity, 0)
 			}
-			if _, err := tx.Exec(ctx, sqlConvertInventory, r.InventoryID, r.Quantity); err != nil {
-				return err
-			}
-		} else if _, err := tx.Exec(ctx, sqlReleaseInventory, r.InventoryID, r.Quantity); err != nil {
+		}
+		if err := convertOrRelease(ctx, queries(tx), r.InventoryID, r.Quantity, convert); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-type itemQuantity struct {
-	VariantID uuid.UUID `db:"variant_id"`
-	Quantity  int32     `db:"quantity"`
-}
-
 func fallbackFromOrderItems(ctx context.Context, tx DBTX, orderID uuid.UUID, convert bool) error {
-	items, err := collect[itemQuantity](tx.Query(ctx, sqlOrderItemQuantities, orderID))
+	q := queries(tx)
+	items, err := q.StoreOrderItemQuantities(ctx, orderID)
 	if err != nil {
 		return err
 	}
@@ -327,13 +272,11 @@ func fallbackFromOrderItems(ctx context.Context, tx DBTX, orderID uuid.UUID, con
 			if take <= 0 {
 				continue
 			}
-			if convert {
-				if _, err := tx.Exec(ctx, sqlConvertInventory, r.ID, take); err != nil {
-					return err
-				}
-				r.Quantity -= take
-			} else if _, err := tx.Exec(ctx, sqlReleaseInventory, r.ID, take); err != nil {
+			if err := convertOrRelease(ctx, q, r.ID, take, convert); err != nil {
 				return err
+			}
+			if convert {
+				r.Quantity -= take
 			}
 			r.Reserved -= take
 			remaining -= take
@@ -343,7 +286,8 @@ func fallbackFromOrderItems(ctx context.Context, tx DBTX, orderID uuid.UUID, con
 }
 
 func settleReservation(ctx context.Context, tx DBTX, orderID uuid.UUID, convert bool) error {
-	rows, err := collect[reservationRow](tx.Query(ctx, sqlReservationRows, orderID))
+	q := queries(tx)
+	rows, err := q.StoreReservationRows(ctx, orderID)
 	if err != nil {
 		return err
 	}
@@ -352,14 +296,13 @@ func settleReservation(ctx context.Context, tx DBTX, orderID uuid.UUID, convert 
 	} else {
 		err = applyReservationRows(ctx, tx, orderID, rows, convert)
 		if err == nil {
-			_, err = tx.Exec(ctx, sqlClearReservations, orderID)
+			err = q.StoreClearReservations(ctx, orderID)
 		}
 	}
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, sqlClearReservationAt, orderID)
-	return err
+	return q.StoreClearReservationAt(ctx, orderID)
 }
 
 // ConvertReservation turns a hold into a sale using the stored rows.
@@ -375,14 +318,11 @@ func ReleaseReservation(ctx context.Context, tx DBTX, orderID uuid.UUID) error {
 // RestockSoldItems puts the order's sold units back on the default (or
 // first) active warehouse row.
 func RestockSoldItems(ctx context.Context, tx DBTX, orderID uuid.UUID) error {
-	items, err := collect[itemQuantity](tx.Query(ctx, sqlOrderItemQuantities, orderID))
+	items, err := queries(tx).StoreOrderItemQuantities(ctx, orderID)
 	if err != nil {
 		return err
 	}
-	lines := make([]ReserveLine, 0, len(items))
-	for _, it := range items {
-		lines = append(lines, ReserveLine(it))
-	}
+	lines := mapSlice(items, func(it sqlc.StoreOrderItemQuantitiesRow) ReserveLine { return ReserveLine(it) })
 	return RestockLines(ctx, tx, orderID, lines)
 }
 
@@ -422,36 +362,30 @@ func RestockLines(ctx context.Context, tx DBTX, orderID uuid.UUID, lines []Reser
 				"order_id", orderID, "variant_id", l.VariantID, "quantity", l.Quantity)
 			continue
 		}
-		if _, err := tx.Exec(ctx, sqlRestockInventory, target.ID, l.Quantity); err != nil {
+		if err := queries(tx).StoreRestockInventory(ctx, sqlc.StoreRestockInventoryParams{ID: target.ID, Quantity: l.Quantity}); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-var (
-	sqlAdjustLock   = sqlText(`SELECT quantity, reserved, warehouse_id FROM inventory WHERE id = $1 FOR UPDATE`)
-	sqlAdjustUpdate = sqlText(`UPDATE inventory SET quantity = $2, updated_at = now() WHERE id = $1`)
-)
-
 // AdjustStock changes the on-hand quantity by delta (may be negative),
 // refusing to go below zero or below the reserved units. Returns the
 // warehouse id (audit metadata).
 func AdjustStock(ctx context.Context, tx DBTX, inventoryID uuid.UUID, delta int32) (uuid.UUID, error) {
-	var quantity, reserved int32
-	var warehouseID uuid.UUID
-	err := tx.QueryRow(ctx, sqlAdjustLock, inventoryID).Scan(&quantity, &reserved, &warehouseID)
-	if found, err := optional(err); err != nil {
+	q := queries(tx)
+	row, found, err := noRows(q.StoreAdjustLock(ctx, inventoryID))
+	if err != nil {
 		return uuid.Nil, err
 	} else if !found {
 		return uuid.Nil, ErrInsufficientStock
 	}
-	next := int64(quantity) + int64(delta)
-	if next > math.MaxInt32 || next < 0 || int64(reserved) > next {
+	next := int64(row.Quantity) + int64(delta)
+	if next > math.MaxInt32 || next < 0 || int64(row.Reserved) > next {
 		return uuid.Nil, ErrInsufficientStock
 	}
-	if _, err := tx.Exec(ctx, sqlAdjustUpdate, inventoryID, int32(next)); err != nil {
+	if err := q.StoreAdjustUpdate(ctx, sqlc.StoreAdjustUpdateParams{ID: inventoryID, Quantity: int32(next)}); err != nil {
 		return uuid.Nil, err
 	}
-	return warehouseID, nil
+	return row.WarehouseID, nil
 }

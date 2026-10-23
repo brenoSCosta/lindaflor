@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 	"github.com/wellington-vell/lindaflor/internal/payments"
 	"github.com/wellington-vell/lindaflor/internal/payments/pix"
 )
@@ -234,21 +235,6 @@ type createParams struct {
 	provider  string
 }
 
-var (
-	sqlInsertOrder = sqlText(`INSERT INTO orders (id, user_id, guest_email, status, subtotal_cents, shipping_cents, discount_cents, pix_discount_cents, total_cents, shipping_address, notes, coupon_id, access_token, email_norm, cart_id)
-VALUES ($1, $2, $3, 'pending_payment', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`)
-	sqlInsertOrderItem = sqlText(`INSERT INTO order_items (id, order_id, variant_id, product_name, variant_label, quantity, unit_price_cents, set_id, set_name)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`)
-	sqlSetPaymentMeta  = sqlText(`UPDATE orders SET payment_meta = $1, payment_provider = $3 WHERE id = $2`)
-	sqlAdvisoryLock    = sqlText(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`)
-	sqlPendingForBuyer = sqlText(`SELECT id FROM orders
-WHERE status = 'pending_payment'
-  AND (reservation_expires_at IS NULL OR reservation_expires_at > now())
-  AND (email_norm = $1::text OR cart_id = $2
-       OR ($3::uuid IS NOT NULL AND user_id = $3::uuid))
-ORDER BY created_at DESC, id DESC`)
-)
-
 var errInvalidCart = userErr("Carrinho inválido. Atualize a página.")
 
 func createOrderInTx(ctx context.Context, tx pgx.Tx, settings StoreSettings, p createParams) error {
@@ -274,10 +260,11 @@ func createOrderInTx(ctx context.Context, tx pgx.Tx, settings StoreSettings, p c
 	}
 	shipping, _ := CalculateShipping(subtotal, p.uf, settings.FreeShippingThresholdCents)
 
+	q := queries(tx)
 	couponCode := p.in.CouponCode
 	if isBlank(couponCode) {
-		var stored *string
-		if err := tx.QueryRow(ctx, sqlCartCouponCode, p.cartID).Scan(&stored); err != nil {
+		stored, err := q.StoreCartCouponCode(ctx, p.cartID)
+		if err != nil {
 			return err
 		}
 		couponCode = deref(stored)
@@ -309,14 +296,22 @@ func createOrderInTx(ctx context.Context, tx pgx.Tx, settings StoreSettings, p c
 		return err
 	}
 	notes := nonEmpty(strings.TrimSpace(p.in.Notes))
-	if _, err := tx.Exec(ctx, sqlInsertOrder, p.order.ID, p.userID, p.in.GuestEmail, subtotal, shipping,
-		discount, pixDiscount, total, address, notes, couponID, p.order.AccessToken, emailNorm, p.cartID); err != nil {
+	if err := q.StoreInsertOrder(ctx, sqlc.StoreInsertOrderParams{
+		ID: p.order.ID, UserID: p.userID, GuestEmail: &p.in.GuestEmail,
+		SubtotalCents: subtotal, ShippingCents: shipping, DiscountCents: discount,
+		PixDiscountCents: pixDiscount, TotalCents: total, ShippingAddress: address,
+		Notes: notes, CouponID: couponID, AccessToken: p.order.AccessToken,
+		EmailNorm: emailNorm, CartID: &p.cartID,
+	}); err != nil {
 		return err
 	}
 	lines := make([]ReserveLine, 0, len(items))
 	for _, it := range items {
-		if _, err := tx.Exec(ctx, sqlInsertOrderItem, uuid.Must(uuid.NewV7()), p.order.ID, it.VariantID,
-			it.ProductName, it.VariantLabel, it.Quantity, it.UnitPriceCents, it.SetID, it.SetName); err != nil {
+		if err := q.StoreInsertOrderItem(ctx, sqlc.StoreInsertOrderItemParams{
+			ID: uuid.Must(uuid.NewV7()), OrderID: p.order.ID, VariantID: it.VariantID,
+			ProductName: it.ProductName, VariantLabel: it.VariantLabel, Quantity: it.Quantity,
+			UnitPriceCents: it.UnitPriceCents, SetID: it.SetID, SetName: it.SetName,
+		}); err != nil {
 			return err
 		}
 		lines = append(lines, ReserveLine{VariantID: it.VariantID, Quantity: it.Quantity})
@@ -357,7 +352,7 @@ func createOrderInTx(ctx context.Context, tx pgx.Tx, settings StoreSettings, p c
 	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, sqlSetPaymentMeta, meta, p.order.ID, p.provider); err != nil {
+	if err := q.StoreSetPaymentMeta(ctx, sqlc.StoreSetPaymentMetaParams{PaymentMeta: meta, PaymentProvider: p.provider, ID: p.order.ID}); err != nil {
 		return err
 	}
 	if err := ClearItems(ctx, tx, p.cartID); err != nil {
@@ -378,15 +373,16 @@ func orDefault(p *string, def string) string {
 // account). Transaction-scoped advisory locks on the email then the cart
 // serialize concurrent checkouts of the same buyer.
 func enforcePendingLimit(ctx context.Context, tx DBTX, emailNorm *string, cartID uuid.UUID, userID *uuid.UUID) error {
+	q := queries(tx)
 	if emailNorm != nil {
-		if _, err := tx.Exec(ctx, sqlAdvisoryLock, "checkout:email:"+*emailNorm); err != nil {
+		if err := q.StoreAdvisoryXactLock(ctx, "checkout:email:"+*emailNorm); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.Exec(ctx, sqlAdvisoryLock, "checkout:cart:"+cartID.String()); err != nil {
+	if err := q.StoreAdvisoryXactLock(ctx, "checkout:cart:"+cartID.String()); err != nil {
 		return err
 	}
-	pending, err := scalars[uuid.UUID](tx.Query(ctx, sqlPendingForBuyer, emailNorm, cartID, userID))
+	pending, err := q.StorePendingForBuyer(ctx, sqlc.StorePendingForBuyerParams{EmailNorm: emailNorm, CartID: cartID, UserID: userID})
 	if err != nil {
 		return err
 	}
