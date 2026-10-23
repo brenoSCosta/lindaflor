@@ -156,7 +156,7 @@ func AdjustStockWithAudit(ctx context.Context, pool *pgxpool.Pool, rawInventoryI
 		return userErr("informe um motivo (até 200 caracteres)")
 	}
 	return withTx(ctx, pool, func(tx pgx.Tx) error {
-		warehouseID, err := AdjustStock(ctx, tx, inventoryID, int32(delta))
+		warehouseID, err := AdjustStock(ctx, tx, inventoryID, int32(delta)) //nolint:gosec // ParseInt bitSize 32 bounds it
 		if err != nil {
 			if errors.Is(err, ErrInsufficientStock) {
 				return userErr(err.Error())
@@ -175,9 +175,14 @@ func AdjustStockWithAudit(ctx context.Context, pool *pgxpool.Pool, rawInventoryI
 
 // OrderStatusFilters are the /admin/pedidos filter buttons.
 var OrderStatusFilters = [][2]string{
-	{"all", "Todos"}, {"pending_payment", "Pendentes"}, {"paid", "Pagos"},
-	{"processing", "Em separação"}, {"shipped", "Enviados"}, {"delivered", "Entregues"},
-	{"cancelled", "Cancelados"}, {"refunded", "Estornados"},
+	{"all", "Todos"},
+	{"pending_payment", "Pendentes"},
+	{"paid", "Pagos"},
+	{"processing", "Em separação"},
+	{"shipped", "Enviados"},
+	{"delivered", "Entregues"},
+	{"cancelled", "Cancelados"},
+	{"refunded", "Estornados"},
 }
 
 // ClampOrderStatus keeps known statuses, else "all".
@@ -454,8 +459,13 @@ func AdminOrderErrorMessage(err error) string {
 
 // ReturnFilters are the /admin/trocas filter buttons.
 var ReturnFilters = [][2]string{
-	{"abertas", "Em aberto"}, {"requested", "Em análise"}, {"approved", "Aprovadas"},
-	{"received", "Recebidas"}, {"resolved", "Concluídas"}, {"rejected", "Recusadas"}, {"todas", "Todas"},
+	{"abertas", "Em aberto"},
+	{"requested", "Em análise"},
+	{"approved", "Aprovadas"},
+	{"received", "Recebidas"},
+	{"resolved", "Concluídas"},
+	{"rejected", "Recusadas"},
+	{"todas", "Todas"},
 }
 
 // ClampReturnFilter keeps a known filter, else "abertas".
@@ -505,7 +515,7 @@ func ListAdminReturns(ctx context.Context, q DBTX, filter string) ([]AdminReturn
 	}
 	out := make([]AdminReturnRow, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, AdminReturnRow{ReturnSummary: r.ReturnSummary, Email: r.Email, Units: r.Units})
+		out = append(out, AdminReturnRow(r))
 	}
 	return out, nil
 }
@@ -545,7 +555,10 @@ type AdminReturnDetail struct {
 // Kind / Status helpers for the action forms.
 func (d AdminReturnDetail) kind() (ReturnKind, bool) { return ParseReturnKind(d.Summary.Kind) }
 
-func (d AdminReturnDetail) status() ReturnStatus { s, _ := ParseReturnStatus(d.Summary.Status); return s }
+func (d AdminReturnDetail) status() ReturnStatus {
+	s, _ := ParseReturnStatus(d.Summary.Status)
+	return s
+}
 
 // CanApprove / CanReceive / CanReject / CanExchange / CanRefund drive the
 // buttons.
@@ -665,8 +678,10 @@ func LoadAdminReturn(ctx context.Context, q DBTX, returnID uuid.UUID) (*AdminRet
 		meta := map[string]any{}
 		_ = json.Unmarshal(raw, &meta)
 		action, _ := meta["action"].(string)
-		d.Audit = append(d.Audit, ReturnAuditEntry{OccurredAt: at, ActorName: actor, Action: action,
-			Label: ReturnActionLabel(action), Detail: returnAuditDetail(meta)})
+		d.Audit = append(d.Audit, ReturnAuditEntry{
+			OccurredAt: at, ActorName: actor, Action: action,
+			Label: ReturnActionLabel(action), Detail: returnAuditDetail(meta),
+		})
 		return nil
 	})
 	if err != nil {
@@ -686,9 +701,9 @@ func LoadAdminReturn(ctx context.Context, q DBTX, returnID uuid.UUID) (*AdminRet
 // or the Mercado Pago refund (handled with internal/payments, then
 // FinishMPRefund).
 type ReturnFormAction struct {
-	Local       *AdminReturnAction
-	MPRefund    bool
-	MPRestock   bool
+	Local     *AdminReturnAction
+	MPRefund  bool
+	MPRestock bool
 }
 
 // ParseReturnForm parses action/text/amount/restock.

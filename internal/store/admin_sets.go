@@ -52,8 +52,10 @@ func ListAdminSets(ctx context.Context, q DBTX, st storage.Store) ([]AdminSetRow
 	}
 	out := make([]AdminSetRow, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, AdminSetRow{ID: r.ID, Name: r.Name, Slug: r.Slug, Price: r.Price, Active: r.Active,
-			CoverURL: ResolveStorageURL(ctx, st, r.Cover), MemberCount: r.MemberCount, ImageCount: r.ImageCount})
+		out = append(out, AdminSetRow{
+			ID: r.ID, Name: r.Name, Slug: r.Slug, Price: r.Price, Active: r.Active,
+			CoverURL: ResolveStorageURL(ctx, st, r.Cover), MemberCount: r.MemberCount, ImageCount: r.ImageCount,
+		})
 	}
 	return out, nil
 }
@@ -71,7 +73,9 @@ func ValidateSetName(raw string) (string, error) {
 }
 
 // ValidateSetSlug is the set slug rule.
-func ValidateSetSlug(raw string) (string, error) { return validateSlug(raw, "Informe o slug do conjunto.") }
+func ValidateSetSlug(raw string) (string, error) {
+	return validateSlug(raw, "Informe o slug do conjunto.")
+}
 
 // ParseSetPrice is the optional bundle price.
 func ParseSetPrice(raw string) (*int64, error) {
@@ -163,9 +167,9 @@ var (
 	sqlSetSlugTaken = sqlText(`SELECT id FROM sets WHERE slug = $1 AND id != $2`)
 	sqlInsertSet    = sqlText(`INSERT INTO sets (id, name, slug, description, price_in_cents, compare_at_price_in_cents, active, created_at, updated_at)
  VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())`)
-	sqlToggleSet   = sqlText(`UPDATE sets SET active = NOT active, updated_at = now() WHERE id = $1`)
+	sqlToggleSet    = sqlText(`UPDATE sets SET active = NOT active, updated_at = now() WHERE id = $1`)
 	sqlSetImageKeys = sqlText(`SELECT url FROM set_images WHERE set_id = $1`)
-	sqlDeleteSet   = sqlText(`DELETE FROM sets WHERE id = $1`)
+	sqlDeleteSet    = sqlText(`DELETE FROM sets WHERE id = $1`)
 )
 
 // CreateSetResult mirrors CreateProductResult.
@@ -421,14 +425,14 @@ var (
  FROM unnest($2::uuid[]) WITH ORDINALITY AS ids(id, ord)
  INNER JOIN products p ON p.id = ids.id
  ON CONFLICT DO NOTHING`)
-	sqlDeleteSetSlots  = sqlText(`DELETE FROM set_slots WHERE set_id = $1`)
-	sqlInsertSetSlot   = sqlText(`INSERT INTO set_slots (id, set_id, label, sort_order) VALUES ($1, $2, $3, $4)`)
+	sqlDeleteSetSlots   = sqlText(`DELETE FROM set_slots WHERE set_id = $1`)
+	sqlInsertSetSlot    = sqlText(`INSERT INTO set_slots (id, set_id, label, sort_order) VALUES ($1, $2, $3, $4)`)
 	sqlInsertSlotOption = sqlText(`INSERT INTO set_slot_options (slot_id, variant_id) VALUES ($1, $2)`)
-	sqlCountVariants   = sqlText(`SELECT COUNT(*) FROM product_variants WHERE id = ANY($1)`)
-	sqlSetExists       = sqlText(`SELECT id FROM sets WHERE id = $1`)
-	sqlSetImgCount     = sqlText(`SELECT COUNT(*) FROM set_images WHERE set_id = $1`)
-	sqlSetImageOwner   = sqlText(`SELECT set_id FROM set_images WHERE id = $1`)
-	sqlNextSetImgOrder = sqlText(`SELECT (COALESCE(MAX(sort_order), -1) + 1)::int FROM set_images WHERE set_id = $1`)
+	sqlCountVariants    = sqlText(`SELECT COUNT(*) FROM product_variants WHERE id = ANY($1)`)
+	sqlSetExists        = sqlText(`SELECT id FROM sets WHERE id = $1`)
+	sqlSetImgCount      = sqlText(`SELECT COUNT(*) FROM set_images WHERE set_id = $1`)
+	sqlSetImageOwner    = sqlText(`SELECT set_id FROM set_images WHERE id = $1`)
+	sqlNextSetImgOrder  = sqlText(`SELECT (COALESCE(MAX(sort_order), -1) + 1)::int FROM set_images WHERE set_id = $1`)
 )
 
 // WriteSet rewrites a set's fields, members and slots in one transaction

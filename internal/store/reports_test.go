@@ -119,10 +119,14 @@ func TestReportMathOnFixture(t *testing.T) {
 	y := insertVariant(t, pool, insertProduct(t, pool, "Maiô Sol", 1000, true), "m", "azul")
 	couponID := newID()
 	exec(t, pool, `INSERT INTO coupons (id, code, discount_type, discount_value) VALUES ($1, 'verao', 'fixed', 1000)`, couponID)
-	reportOrder(t, pool, reportSeed{paid: true, total: 10000, discount: 1000, couponID: &couponID,
-		items: []reportItem{{x, "Biquíni Flor", 2, 4000}, {y, "Maiô Sol", 1, 3000}}})
-	b := reportOrder(t, pool, reportSeed{status: "delivered", provider: "mercadopago", at: "2026-01-11 23:30", paid: true, total: 5000,
-		items: []reportItem{{x, "Biquíni Flor", 1, 5000}}})
+	reportOrder(t, pool, reportSeed{
+		paid: true, total: 10000, discount: 1000, couponID: &couponID,
+		items: []reportItem{{x, "Biquíni Flor", 2, 4000}, {y, "Maiô Sol", 1, 3000}},
+	})
+	b := reportOrder(t, pool, reportSeed{
+		status: "delivered", provider: "mercadopago", at: "2026-01-11 23:30", paid: true, total: 5000,
+		items: []reportItem{{x, "Biquíni Flor", 1, 5000}},
+	})
 	reportOrder(t, pool, reportSeed{status: "processing", at: "2026-01-12 10:00", total: 2000, items: []reportItem{{y, "Maiô Sol", 1, 2000}}})
 	reportOrder(t, pool, reportSeed{status: "refunded", at: "2026-01-10 09:00", paid: true, total: 7000, items: []reportItem{{x, "Biquíni Flor", 1, 7000}}})
 	reportOrder(t, pool, reportSeed{status: "cancelled", at: "2026-01-10 10:00", total: 3000, items: []reportItem{{y, "Maiô Sol", 1, 3000}}})

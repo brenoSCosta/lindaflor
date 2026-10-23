@@ -141,7 +141,9 @@ func returnRequest(kind store.ReturnKind, lines ...store.ReturnLine) store.NewRe
 	return store.NewReturn{Kind: kind, Reason: "Ficou pequeno", DesiredSize: str("G"), Lines: lines}
 }
 
-func line(id uuid.UUID, qty int32) store.ReturnLine { return store.ReturnLine{OrderItemID: id, Quantity: qty} }
+func line(id uuid.UUID, qty int32) store.ReturnLine {
+	return store.ReturnLine{OrderItemID: id, Quantity: qty}
+}
 
 func returnStatusOf(t *testing.T, pool *pgxpool.Pool, id uuid.UUID) (string, *string, *int64) {
 	t.Helper()

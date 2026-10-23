@@ -169,7 +169,7 @@ func LockCartInventory(ctx context.Context, tx DBTX, cartID uuid.UUID) error {
 }
 
 var (
-	sqlReserveInventory = sqlText(`UPDATE inventory SET reserved = reserved + $2, updated_at = now() WHERE id = $1`)
+	sqlReserveInventory  = sqlText(`UPDATE inventory SET reserved = reserved + $2, updated_at = now() WHERE id = $1`)
 	sqlInsertReservation = sqlText(`INSERT INTO inventory_reservations (id, order_id, inventory_id, quantity)
 VALUES ($1, $2, $3, $4)`)
 	sqlSetReservationExpiry = sqlText(`UPDATE orders SET reservation_expires_at = now() + interval '48 hours' WHERE id = $1`)
@@ -248,13 +248,13 @@ type reservationRow struct {
 }
 
 var (
-	sqlReservationRows    = sqlText(`SELECT inventory_id, quantity FROM inventory_reservations WHERE order_id = $1`)
-	sqlConvertInventory   = sqlText(`UPDATE inventory SET reserved = GREATEST(reserved - $2, 0), quantity = GREATEST(quantity - $2, 0), updated_at = now() WHERE id = $1`)
-	sqlReleaseInventory   = sqlText(`UPDATE inventory SET reserved = GREATEST(reserved - $2, 0), updated_at = now() WHERE id = $1`)
-	sqlClearReservations  = sqlText(`DELETE FROM inventory_reservations WHERE order_id = $1`)
-	sqlClearReservationAt = sqlText(`UPDATE orders SET reservation_expires_at = NULL WHERE id = $1`)
+	sqlReservationRows     = sqlText(`SELECT inventory_id, quantity FROM inventory_reservations WHERE order_id = $1`)
+	sqlConvertInventory    = sqlText(`UPDATE inventory SET reserved = GREATEST(reserved - $2, 0), quantity = GREATEST(quantity - $2, 0), updated_at = now() WHERE id = $1`)
+	sqlReleaseInventory    = sqlText(`UPDATE inventory SET reserved = GREATEST(reserved - $2, 0), updated_at = now() WHERE id = $1`)
+	sqlClearReservations   = sqlText(`DELETE FROM inventory_reservations WHERE order_id = $1`)
+	sqlClearReservationAt  = sqlText(`UPDATE orders SET reservation_expires_at = NULL WHERE id = $1`)
 	sqlOrderItemQuantities = sqlText(`SELECT variant_id, quantity FROM order_items WHERE order_id = $1`)
-	sqlRestockInventory   = sqlText(`UPDATE inventory SET quantity = quantity + $2, updated_at = now() WHERE id = $1`)
+	sqlRestockInventory    = sqlText(`UPDATE inventory SET quantity = quantity + $2, updated_at = now() WHERE id = $1`)
 )
 
 func applyReservationRows(ctx context.Context, tx DBTX, orderID uuid.UUID, rows []reservationRow, convert bool) error {
@@ -381,7 +381,7 @@ func RestockSoldItems(ctx context.Context, tx DBTX, orderID uuid.UUID) error {
 	}
 	lines := make([]ReserveLine, 0, len(items))
 	for _, it := range items {
-		lines = append(lines, ReserveLine{VariantID: it.VariantID, Quantity: it.Quantity})
+		lines = append(lines, ReserveLine(it))
 	}
 	return RestockLines(ctx, tx, orderID, lines)
 }

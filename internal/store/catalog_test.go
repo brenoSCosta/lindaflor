@@ -384,10 +384,14 @@ func TestFailedSetSaveKeepsPreviousSet(t *testing.T) {
 	setID := newID()
 	slug := "conjunto-" + setID.String()
 	exec(t, pool, `INSERT INTO sets (id, name, slug, price_in_cents) VALUES ($1, 'Antes', $2, 15000)`, setID, slug)
-	mustNoErr(t, store.WriteSet(ctx, pool, setID, store.SetWrite{Name: "Antes", Slug: slug, Price: price(15000), Active: true,
-		MemberIDs: []uuid.UUID{productID}, Slots: []store.SetSlot{{Label: str("Top"), VariantID: variantID}}}))
-	err := store.WriteSet(ctx, pool, setID, store.SetWrite{Name: "Depois", Slug: slug, Description: str("nova"), Price: price(20000),
-		Slots: []store.SetSlot{{Label: str("Top novo"), VariantID: variantID}, {Label: str("Calcinha"), VariantID: newID()}}})
+	mustNoErr(t, store.WriteSet(ctx, pool, setID, store.SetWrite{
+		Name: "Antes", Slug: slug, Price: price(15000), Active: true,
+		MemberIDs: []uuid.UUID{productID}, Slots: []store.SetSlot{{Label: str("Top"), VariantID: variantID}},
+	}))
+	err := store.WriteSet(ctx, pool, setID, store.SetWrite{
+		Name: "Depois", Slug: slug, Description: str("nova"), Price: price(20000),
+		Slots: []store.SetSlot{{Label: str("Top novo"), VariantID: variantID}, {Label: str("Calcinha"), VariantID: newID()}},
+	})
 	if err == nil {
 		t.Fatal("save with a missing variant must fail")
 	}
@@ -435,8 +439,10 @@ func TestAdminProductCreateAndUpdate(t *testing.T) {
 	if q := scalar[int32](t, pool, `SELECT quantity FROM inventory i JOIN product_variants v ON v.id = i.variant_id WHERE v.sku = 'BN-P'`); q != 4 {
 		t.Fatal(q)
 	}
-	other, err := store.CreateProduct(ctx, pool, mem, store.ProductForm{Name: "Outro", Slug: "outro", Price: "10", Category: "maio",
-		Variants: []store.VariantForm{{SKU: "OUT-M", Size: "m", Color: "Preto", Quantity: "0"}}})
+	other, err := store.CreateProduct(ctx, pool, mem, store.ProductForm{
+		Name: "Outro", Slug: "outro", Price: "10", Category: "maio",
+		Variants: []store.VariantForm{{SKU: "OUT-M", Size: "m", Color: "Preto", Quantity: "0"}},
+	})
 	mustNoErr(t, err)
 	upd := store.ProductForm{
 		Name: "Biquíni Editado", Slug: "biquini-novo", Price: "150", Category: "biquini", Active: true,
@@ -487,12 +493,16 @@ func TestAdminSetsAndBanners(t *testing.T) {
 	if edit.PriceInput() != "100.00" || len(edit.Images) != 1 || len(edit.Slots) != 1 {
 		t.Fatalf("%+v", edit)
 	}
-	if err := store.UpdateSet(ctx, pool, mem, res.ID, store.SetForm{Name: "Verão", Slug: "verao", Price: "100",
-		Slots: []store.SetSlotForm{{Label: "Top", VariantID: "junk"}}}); userMsg(t, err) != "Variante inválida em uma das etapas." {
+	if err := store.UpdateSet(ctx, pool, mem, res.ID, store.SetForm{
+		Name: "Verão", Slug: "verao", Price: "100",
+		Slots: []store.SetSlotForm{{Label: "Top", VariantID: "junk"}},
+	}); userMsg(t, err) != "Variante inválida em uma das etapas." {
 		t.Fatal(err)
 	}
-	mustNoErr(t, store.UpdateSet(ctx, pool, mem, res.ID, store.SetForm{Name: "Verão 2", Slug: "verao", Price: "100", Active: true,
-		Slots: []store.SetSlotForm{{Label: "Top", VariantID: variantID.String()}, {}}, DeleteImageIDs: []string{edit.Images[0].ID.String()}}))
+	mustNoErr(t, store.UpdateSet(ctx, pool, mem, res.ID, store.SetForm{
+		Name: "Verão 2", Slug: "verao", Price: "100", Active: true,
+		Slots: []store.SetSlotForm{{Label: "Top", VariantID: variantID.String()}, {}}, DeleteImageIDs: []string{edit.Images[0].ID.String()},
+	}))
 	edit, _ = store.LoadAdminSet(ctx, pool, mem, res.ID)
 	if edit.Name != "Verão 2" || len(edit.Slots) != 2 || edit.Slots[0].VariantID != variantID.String() || len(edit.Images) != 0 {
 		t.Fatalf("%+v", edit)

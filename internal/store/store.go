@@ -20,7 +20,6 @@ package store
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -125,13 +124,6 @@ func optional(err error) (found bool, _ error) {
 		return false, err
 	}
 	return true, nil
-}
-
-func wrap(what string, err error) error {
-	if err == nil {
-		return nil
-	}
-	return fmt.Errorf("%s: %w", what, err)
 }
 
 // ptr returns a pointer to v.

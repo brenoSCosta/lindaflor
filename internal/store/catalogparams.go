@@ -226,12 +226,12 @@ func (p CatalogParams) filterHref(base string, drop dropKind, value string) stri
 	}
 	if drop != dropAllFacets {
 		for _, s := range p.Sizes {
-			if !(drop == dropSize && s == value) {
+			if drop != dropSize || s != value {
 				pairs = append(pairs, [2]string{"tamanho", s})
 			}
 		}
 		for _, c := range p.Colors {
-			if !(drop == dropColor && c == value) {
+			if drop != dropColor || c != value {
 				pairs = append(pairs, [2]string{"cor", c})
 			}
 		}

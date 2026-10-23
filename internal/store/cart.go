@@ -453,10 +453,10 @@ FOR UPDATE OF ci`
 }
 
 var (
-	sqlHydrate          = sqlText(hydrateSQL(LiveAvailableSQL))
-	sqlQuote            = sqlText(hydrateSQL(`GREATEST(i.quantity - i.reserved, 0)`))
-	sqlCartToken        = sqlText(`SELECT token FROM carts WHERE id = $1`)
-	sqlDeleteCartItem   = sqlText(`DELETE FROM cart_items WHERE id = $1`)
+	sqlHydrate           = sqlText(hydrateSQL(LiveAvailableSQL))
+	sqlQuote             = sqlText(hydrateSQL(`GREATEST(i.quantity - i.reserved, 0)`))
+	sqlCartToken         = sqlText(`SELECT token FROM carts WHERE id = $1`)
+	sqlDeleteCartItem    = sqlText(`DELETE FROM cart_items WHERE id = $1`)
 	sqlUpdateCartItemQty = sqlText(`UPDATE cart_items SET quantity = $2, updated_at = now() WHERE id = $1`)
 )
 
@@ -823,10 +823,10 @@ func mergeSetMemberLine(ctx context.Context, q DBTX, cartID, setID, variantID uu
 }
 
 var (
-	sqlAttachCart    = sqlText(`UPDATE carts SET user_id = $2, updated_at = now() WHERE id = $1`)
-	sqlCartOwner     = sqlText(`SELECT user_id FROM carts WHERE id = $1`)
-	sqlGuestLines    = sqlText(`SELECT variant_id, quantity, set_id FROM cart_items WHERE cart_id = $1`)
-	sqlDeleteCart    = sqlText(`DELETE FROM carts WHERE id = $1`)
+	sqlAttachCart = sqlText(`UPDATE carts SET user_id = $2, updated_at = now() WHERE id = $1`)
+	sqlCartOwner  = sqlText(`SELECT user_id FROM carts WHERE id = $1`)
+	sqlGuestLines = sqlText(`SELECT variant_id, quantity, set_id FROM cart_items WHERE cart_id = $1`)
+	sqlDeleteCart = sqlText(`DELETE FROM carts WHERE id = $1`)
 )
 
 // MergeGuestCart merges the guest cart of the cookie token (if any) into

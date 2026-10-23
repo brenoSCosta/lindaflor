@@ -20,22 +20,22 @@ const CheckoutRateLimitedMessage = "Muitos pedidos em pouco tempo. Aguarde algun
 
 // CheckoutSummary is the order summary panel.
 type CheckoutSummary struct {
-	Items              []CartItem
-	SubtotalCents      int64
-	ShippingCents      int64
-	FreeShipping       bool
-	CouponCode         string // the code shown in the coupon input
-	CouponDiscount     int64
-	CouponError        string // "" when the coupon is fine / absent
-	PixDiscountCents   int64
-	TotalCents         int64
-	PixAvailable       bool
-	Settings           StoreSettings
-	PreviewUF          string
-	SavedAddresses     []SavedAddress
-	SelectedAddressID  *uuid.UUID
-	Prefill            *CheckoutInput // saved-address prefill (GET only)
-	CanSaveAddress     bool
+	Items             []CartItem
+	SubtotalCents     int64
+	ShippingCents     int64
+	FreeShipping      bool
+	CouponCode        string // the code shown in the coupon input
+	CouponDiscount    int64
+	CouponError       string // "" when the coupon is fine / absent
+	PixDiscountCents  int64
+	TotalCents        int64
+	PixAvailable      bool
+	Settings          StoreSettings
+	PreviewUF         string
+	SavedAddresses    []SavedAddress
+	SelectedAddressID *uuid.UUID
+	Prefill           *CheckoutInput // saved-address prefill (GET only)
+	CanSaveAddress    bool
 }
 
 // CheckoutPageRequest is everything the handler knows.

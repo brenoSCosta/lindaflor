@@ -13,12 +13,12 @@ func TestMain(m *testing.M) { testutil.Main(m) }
 
 func TestSlugify(t *testing.T) {
 	for in, want := range map[string]string{
-		"Maré":           "mare",
-		"Off-white":      "off-white",
-		"  Azul  Céu! ":  "azul-ceu",
-		"Pêssego/Coral":  "pessego-coral",
-		"Verde Água 2":   "verde-agua-2",
-		"Ñandú Çaçador":  "nandu-cacador",
+		"Maré":          "mare",
+		"Off-white":     "off-white",
+		"  Azul  Céu! ": "azul-ceu",
+		"Pêssego/Coral": "pessego-coral",
+		"Verde Água 2":  "verde-agua-2",
+		"Ñandú Çaçador": "nandu-cacador",
 	} {
 		if got := slugify(in); got != want {
 			t.Errorf("slugify(%q) = %q, want %q", in, got, want)

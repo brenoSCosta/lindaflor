@@ -19,14 +19,14 @@ import (
 
 // Image limits and messages.
 const (
-	MaxImageBytes          = 2 * 1024 * 1024
-	MsgImageType           = "Apenas imagens JPG, PNG ou WebP são permitidas"
-	MsgImageSize           = "A imagem deve ter no máximo 2MB"
-	MsgStorageUnavailable  = "Serviço de arquivos temporariamente indisponível. Tente novamente mais tarde."
-	MaxImagesPerProduct    = 8
-	MaxImagesPerSet        = 8
-	MsgProductImageCount   = "O produto pode ter no máximo 8 imagens"
-	MsgSetImageCount       = "O conjunto pode ter no máximo 8 imagens"
+	MaxImageBytes         = 2 * 1024 * 1024
+	MsgImageType          = "Apenas imagens JPG, PNG ou WebP são permitidas"
+	MsgImageSize          = "A imagem deve ter no máximo 2MB"
+	MsgStorageUnavailable = "Serviço de arquivos temporariamente indisponível. Tente novamente mais tarde."
+	MaxImagesPerProduct   = 8
+	MaxImagesPerSet       = 8
+	MsgProductImageCount  = "O produto pode ter no máximo 8 imagens"
+	MsgSetImageCount      = "O conjunto pode ter no máximo 8 imagens"
 )
 
 // Upload is one uploaded file of a multipart form.

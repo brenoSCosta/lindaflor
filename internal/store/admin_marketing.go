@@ -95,8 +95,10 @@ func ListAdminBanners(ctx context.Context, q DBTX, st storage.Store) ([]AdminBan
 	}
 	out := make([]AdminBanner, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, AdminBanner{ID: r.ID, Title: r.Title, Subtitle: deref(r.Subtitle), LinkURL: deref(r.LinkURL),
-			SortOrder: r.SortOrder, Active: r.Active, ImageURL: ResolveStorageURL(ctx, st, &r.ImageURL)})
+		out = append(out, AdminBanner{
+			ID: r.ID, Title: r.Title, Subtitle: deref(r.Subtitle), LinkURL: deref(r.LinkURL),
+			SortOrder: r.SortOrder, Active: r.Active, ImageURL: ResolveStorageURL(ctx, st, &r.ImageURL),
+		})
 	}
 	return out, nil
 }
@@ -131,8 +133,8 @@ func ValidateBannerLink(raw string) (*string, error) {
 // BannerForm is the create form.
 type BannerForm struct {
 	Title, Subtitle, CTALabel, LinkURL, SortOrder string
-	Active                                         bool
-	Image                                          *Upload
+	Active                                        bool
+	Image                                         *Upload
 }
 
 var sqlInsertBanner = sqlText(`INSERT INTO home_banners (id, title, subtitle, cta_label, link_url, image_url, sort_order, active, created_at)
@@ -203,7 +205,9 @@ func DeleteBanner(ctx context.Context, q DBTX, st storage.Store, id uuid.UUID) e
 const couponQueryMax = 64
 
 // ClampCouponQuery trims and caps the coupon/user searches.
-func ClampCouponQuery(raw string) string { return truncateRunes(strings.TrimSpace(raw), couponQueryMax) }
+func ClampCouponQuery(raw string) string {
+	return truncateRunes(strings.TrimSpace(raw), couponQueryMax)
+}
 
 // AdminCouponRow is a coupon table row.
 type AdminCouponRow struct {
@@ -268,8 +272,10 @@ func ListAdminCoupons(ctx context.Context, q DBTX, query string) ([]AdminCouponR
 	}
 	out := make([]AdminCouponRow, 0, len(rows))
 	for _, r := range rows {
-		c := AdminCouponRow{ID: r.ID, Code: r.Code, Active: r.Active, UsesCount: r.UsesCount, AssigneeCount: r.AssigneeCount,
-			MinLabel: formatCents32(r.MinSubtotalCents), MaxLabel: "—", StatusLabel: "Inativo", StatusTone: ToneOutline}
+		c := AdminCouponRow{
+			ID: r.ID, Code: r.Code, Active: r.Active, UsesCount: r.UsesCount, AssigneeCount: r.AssigneeCount,
+			MinLabel: formatCents32(r.MinSubtotalCents), MaxLabel: "—", StatusLabel: "Inativo", StatusTone: ToneOutline,
+		}
 		if strings.EqualFold(r.DiscountType, "percent") {
 			c.DiscountLabel, c.DiscountTone = fmt.Sprintf("%d%%", r.DiscountValue), TonePrimary
 		} else {
@@ -325,7 +331,7 @@ type AssignedUser struct {
 }
 
 var (
-	sqlCouponAssignees  = sqlText(`SELECT u.id, u.name, u.email FROM coupon_assignments a INNER JOIN users u ON u.id = a.user_id WHERE a.coupon_id = $1 ORDER BY u.name ASC`)
+	sqlCouponAssignees   = sqlText(`SELECT u.id, u.name, u.email FROM coupon_assignments a INNER JOIN users u ON u.id = a.user_id WHERE a.coupon_id = $1 ORDER BY u.name ASC`)
 	sqlCouponAssigneeIDs = sqlText(`SELECT user_id FROM coupon_assignments WHERE coupon_id = $1`)
 )
 

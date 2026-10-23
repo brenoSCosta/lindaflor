@@ -83,9 +83,10 @@ func CartCountHTTP(r *http.Request, q DBTX, secure bool) (int, error) {
 // userID's cart and points the cookie at the surviving cart.
 func MergeGuestCartOnLogin(w http.ResponseWriter, r *http.Request, pool *pgxpool.Pool, userID uuid.UUID, secure bool) error {
 	var token uuid.UUID
-	err := db.WithTx(r.Context(), pool, func(tx pgx.Tx) error {
+	ctx := r.Context()
+	err := db.WithTx(ctx, pool, func(tx pgx.Tx) error {
 		var err error
-		token, err = MergeGuestCart(r.Context(), tx, CartToken(r, secure), userID)
+		token, err = MergeGuestCart(ctx, tx, CartToken(r, secure), userID)
 		return err
 	})
 	if err != nil {

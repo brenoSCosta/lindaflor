@@ -239,8 +239,8 @@ var (
 VALUES ($1, $2, $3, 'pending_payment', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`)
 	sqlInsertOrderItem = sqlText(`INSERT INTO order_items (id, order_id, variant_id, product_name, variant_label, quantity, unit_price_cents, set_id, set_name)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`)
-	sqlSetPaymentMeta = sqlText(`UPDATE orders SET payment_meta = $1, payment_provider = $3 WHERE id = $2`)
-	sqlAdvisoryLock   = sqlText(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`)
+	sqlSetPaymentMeta  = sqlText(`UPDATE orders SET payment_meta = $1, payment_provider = $3 WHERE id = $2`)
+	sqlAdvisoryLock    = sqlText(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`)
 	sqlPendingForBuyer = sqlText(`SELECT id FROM orders
 WHERE status = 'pending_payment'
   AND (reservation_expires_at IS NULL OR reservation_expires_at > now())

@@ -192,8 +192,8 @@ func CheckReturnEligibility(orderStatus string, kind ReturnKind, deliveredAt, sh
 
 // Return errors.
 var (
-	ErrReturnNotFound         = errors.New("Pedido não encontrado.")
-	ErrReturnAlreadyOpen      = errors.New("Já existe uma solicitação em andamento para este pedido.")
+	ErrReturnNotFound          = errors.New("Pedido não encontrado.")
+	ErrReturnAlreadyOpen       = errors.New("Já existe uma solicitação em andamento para este pedido.")
 	ErrReturnIllegalTransition = errors.New("Ação inválida para o status atual da solicitação.")
 )
 
@@ -516,13 +516,13 @@ type ReturnActionKind string
 
 // Admin actions (audit names).
 const (
-	ReturnActionApprove       ReturnActionKind = "approve"
-	ReturnActionReject        ReturnActionKind = "reject"
-	ReturnActionReceive       ReturnActionKind = "receive"
-	ReturnActionResolveSwap   ReturnActionKind = "resolve_exchanged"
-	ReturnActionRefundOrder   ReturnActionKind = "refund_order"
-	ReturnActionRecordRefund  ReturnActionKind = "record_refund"
-	ReturnActionNote          ReturnActionKind = "note"
+	ReturnActionApprove      ReturnActionKind = "approve"
+	ReturnActionReject       ReturnActionKind = "reject"
+	ReturnActionReceive      ReturnActionKind = "receive"
+	ReturnActionResolveSwap  ReturnActionKind = "resolve_exchanged"
+	ReturnActionRefundOrder  ReturnActionKind = "refund_order"
+	ReturnActionRecordRefund ReturnActionKind = "record_refund"
+	ReturnActionNote         ReturnActionKind = "note"
 )
 
 // AdminReturnAction is one admin step on a request.
@@ -557,8 +557,8 @@ func AdminReturnTransition(from ReturnStatus, kind ReturnKind, action ReturnActi
 }
 
 var (
-	sqlLockReturn       = sqlText(`SELECT order_id, kind, status FROM return_requests WHERE id = $1 FOR UPDATE`)
-	sqlReturnedLines    = sqlText(`SELECT oi.variant_id, ri.quantity, oi.unit_price_cents
+	sqlLockReturn    = sqlText(`SELECT order_id, kind, status FROM return_requests WHERE id = $1 FOR UPDATE`)
+	sqlReturnedLines = sqlText(`SELECT oi.variant_id, ri.quantity, oi.unit_price_cents
  FROM return_request_items ri
  JOIN order_items oi ON oi.id = ri.order_item_id
  WHERE ri.return_request_id = $1
@@ -577,13 +577,13 @@ var (
                   WHERE ri.return_request_id = r.id), 0)::bigint
  FROM return_requests r JOIN orders o ON o.id = r.order_id
  WHERE r.id = $1`)
-	sqlReturnTouch    = sqlText(`UPDATE return_requests SET updated_at = now() WHERE id = $1`)
-	sqlReturnApprove  = sqlText(`UPDATE return_requests SET status = 'approved', instructions = $2, approved_at = now(), updated_at = now() WHERE id = $1`)
-	sqlReturnReject   = sqlText(`UPDATE return_requests SET status = 'rejected', rejection_reason = $2, updated_at = now() WHERE id = $1`)
-	sqlReturnReceive  = sqlText(`UPDATE return_requests SET status = 'received', received_at = now(), updated_at = now() WHERE id = $1`)
-	sqlReturnResolve  = sqlText(`UPDATE return_requests SET status = 'resolved', resolution = $2, refund_cents = $3, resolved_at = now(), updated_at = now() WHERE id = $1`)
-	sqlOrderProvider  = sqlText(`SELECT payment_provider FROM orders WHERE id = $1`)
-	sqlOrderTotal     = sqlText(`SELECT total_cents FROM orders WHERE id = $1`)
+	sqlReturnTouch          = sqlText(`UPDATE return_requests SET updated_at = now() WHERE id = $1`)
+	sqlReturnApprove        = sqlText(`UPDATE return_requests SET status = 'approved', instructions = $2, approved_at = now(), updated_at = now() WHERE id = $1`)
+	sqlReturnReject         = sqlText(`UPDATE return_requests SET status = 'rejected', rejection_reason = $2, updated_at = now() WHERE id = $1`)
+	sqlReturnReceive        = sqlText(`UPDATE return_requests SET status = 'received', received_at = now(), updated_at = now() WHERE id = $1`)
+	sqlReturnResolve        = sqlText(`UPDATE return_requests SET status = 'resolved', resolution = $2, refund_cents = $3, resolved_at = now(), updated_at = now() WHERE id = $1`)
+	sqlOrderProvider        = sqlText(`SELECT payment_provider FROM orders WHERE id = $1`)
+	sqlOrderTotal           = sqlText(`SELECT total_cents FROM orders WHERE id = $1`)
 	sqlOrderStatusTotalLock = sqlText(`SELECT status::text, total_cents FROM orders WHERE id = $1 FOR UPDATE`)
 )
 
@@ -890,4 +890,3 @@ func ReturnErrorMessage(err error) string {
 	}
 	return ""
 }
-

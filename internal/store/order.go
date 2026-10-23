@@ -90,11 +90,11 @@ func (e OrderEvent) ActionName() string { return string(e) }
 
 // Apply errors.
 var (
-	ErrOrderNotFound       = errors.New("Pedido não encontrado.")
+	ErrOrderNotFound = errors.New("Pedido não encontrado.")
 	// ErrReopenInsufficient is payments.ErrInsufficientStock so the payments
 	// service can match a late approval without stock (errors.Is).
 	ErrReopenInsufficient = payments.ErrInsufficientStock
-	ErrTrackingRequired    = errors.New("Informe o código de rastreio para marcar como enviado.")
+	ErrTrackingRequired   = errors.New("Informe o código de rastreio para marcar como enviado.")
 )
 
 // IllegalTransitionError is an edge the FSM does not have.
@@ -291,10 +291,10 @@ var (
 	sqlApplyLock = sqlText(`SELECT status::text, paid_at IS NOT NULL,
         COALESCE(reservation_expires_at < now(), false)
  FROM orders WHERE id = $1 FOR UPDATE`)
-	sqlOrderLines     = sqlText(`SELECT variant_id, quantity FROM order_items WHERE order_id = $1`)
-	sqlSetStatusPaid  = sqlText(`UPDATE orders SET status = $2::text::order_status, paid_at = now(), updated_at = now() WHERE id = $1`)
-	sqlSetStatus      = sqlText(`UPDATE orders SET status = $2::text::order_status, updated_at = now() WHERE id = $1`)
-	sqlSetStatusShip  = sqlText(`UPDATE orders SET status = $2::text::order_status, carrier = $3, tracking_code = $4,
+	sqlOrderLines    = sqlText(`SELECT variant_id, quantity FROM order_items WHERE order_id = $1`)
+	sqlSetStatusPaid = sqlText(`UPDATE orders SET status = $2::text::order_status, paid_at = now(), updated_at = now() WHERE id = $1`)
+	sqlSetStatus     = sqlText(`UPDATE orders SET status = $2::text::order_status, updated_at = now() WHERE id = $1`)
+	sqlSetStatusShip = sqlText(`UPDATE orders SET status = $2::text::order_status, carrier = $3, tracking_code = $4,
         shipped_at = now(),
         access_token_expires_at = GREATEST(access_token_expires_at, now() + interval '90 days'),
         updated_at = now()
@@ -312,7 +312,7 @@ func orderLines(ctx context.Context, tx DBTX, orderID uuid.UUID) ([]ReserveLine,
 	}
 	lines := make([]ReserveLine, 0, len(items))
 	for _, it := range items {
-		lines = append(lines, ReserveLine{VariantID: it.VariantID, Quantity: it.Quantity})
+		lines = append(lines, ReserveLine(it))
 	}
 	return lines, nil
 }

@@ -167,12 +167,12 @@ var (
    street = $6, number = $7, complement = $8, neighborhood = $9, city = $10,
    state = $11, phone = $12, is_default = $13, updated_at = now()
  WHERE id = $1 AND user_id = $2`)
-	sqlDeleteAddress  = sqlText(`DELETE FROM user_addresses WHERE id = $1 AND user_id = $2 RETURNING is_default`)
-	sqlPromoteLatest  = sqlText(`UPDATE user_addresses SET is_default = true, updated_at = now()
+	sqlDeleteAddress = sqlText(`DELETE FROM user_addresses WHERE id = $1 AND user_id = $2 RETURNING is_default`)
+	sqlPromoteLatest = sqlText(`UPDATE user_addresses SET is_default = true, updated_at = now()
  WHERE id = (SELECT id FROM user_addresses WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1)`)
-	sqlAddressOwned   = sqlText(`SELECT id FROM user_addresses WHERE id = $1 AND user_id = $2`)
-	sqlSetDefault     = sqlText(`UPDATE user_addresses SET is_default = true, updated_at = now() WHERE id = $1 AND user_id = $2`)
-	sqlCheckoutDupe   = sqlText(`SELECT COUNT(*),
+	sqlAddressOwned = sqlText(`SELECT id FROM user_addresses WHERE id = $1 AND user_id = $2`)
+	sqlSetDefault   = sqlText(`UPDATE user_addresses SET is_default = true, updated_at = now() WHERE id = $1 AND user_id = $2`)
+	sqlCheckoutDupe = sqlText(`SELECT COUNT(*),
         COALESCE(bool_or(zip_code = $2
                          AND lower(street) = lower($3)
                          AND lower(number) = lower($4)

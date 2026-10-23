@@ -23,7 +23,9 @@ import (
 const adminProductQueryMax = 80
 
 // ClampAdminQuery trims and caps a directory search.
-func ClampAdminQuery(raw string, maxChars int) string { return truncateRunes(strings.TrimSpace(raw), maxChars) }
+func ClampAdminQuery(raw string, maxChars int) string {
+	return truncateRunes(strings.TrimSpace(raw), maxChars)
+}
 
 // ClampProductActive is "true" | "false" | "all".
 func ClampProductActive(raw string) string {
@@ -115,7 +117,7 @@ func validateSlug(raw, emptyMsg string) (string, error) {
 	}
 	valid := !strings.HasPrefix(s, "-") && !strings.HasSuffix(s, "-") && !strings.Contains(s, "--")
 	for _, c := range s {
-		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
 			valid = false
 		}
 	}
@@ -126,7 +128,9 @@ func validateSlug(raw, emptyMsg string) (string, error) {
 }
 
 // ValidateProductSlug lowercases and checks [a-z0-9-], no edge/double dash.
-func ValidateProductSlug(raw string) (string, error) { return validateSlug(raw, "Informe o slug do produto.") }
+func ValidateProductSlug(raw string) (string, error) {
+	return validateSlug(raw, "Informe o slug do produto.")
+}
 
 // ValidateCategory checks the product_category enum.
 func ValidateCategory(raw string) (string, error) {
@@ -354,9 +358,9 @@ func validateUploads(images []Upload) error {
 }
 
 var (
-	sqlProductIDBySlug    = sqlText(`SELECT id FROM products WHERE slug = $1`)
-	sqlProductSlugTaken   = sqlText(`SELECT id FROM products WHERE slug = $1 AND id != $2`)
-	sqlInsertProduct      = sqlText(`INSERT INTO products (id, name, slug, description, price_in_cents, compare_at_price_in_cents, category, active, featured, created_at, updated_at)
+	sqlProductIDBySlug  = sqlText(`SELECT id FROM products WHERE slug = $1`)
+	sqlProductSlugTaken = sqlText(`SELECT id FROM products WHERE slug = $1 AND id != $2`)
+	sqlInsertProduct    = sqlText(`INSERT INTO products (id, name, slug, description, price_in_cents, compare_at_price_in_cents, category, active, featured, created_at, updated_at)
  VALUES ($1, $2, $3, $4, $5, $6, $7::text::product_category, true, $8, now(), now())`)
 	sqlInsertVariant = sqlText(`INSERT INTO product_variants (id, product_id, sku, size, color, color_hex, price_in_cents, low_stock_threshold, created_at, updated_at)
  VALUES ($1, $2, $3, $4::text::product_size, $5, $6, NULL, $7, now(), now())`)
@@ -517,7 +521,7 @@ type LookOption struct {
 }
 
 var (
-	sqlAdminProduct = sqlText(`SELECT id, name, slug, description, price_in_cents, compare_at_price_in_cents, category::text, featured, active FROM products WHERE id = $1`)
+	sqlAdminProduct  = sqlText(`SELECT id, name, slug, description, price_in_cents, compare_at_price_in_cents, category::text, featured, active FROM products WHERE id = $1`)
 	sqlAdminVariants = sqlText(`SELECT id, sku, size::text AS size, color, color_hex, price_in_cents, low_stock_threshold FROM product_variants WHERE product_id = $1 ORDER BY created_at`)
 	sqlAdminImages   = sqlText(`SELECT id, url FROM product_images WHERE product_id = $1 ORDER BY sort_order ASC`)
 	sqlLookOptions   = sqlText(`SELECT id, name, category::text AS category FROM products WHERE active = true AND id != $1 ORDER BY name`)
@@ -561,9 +565,9 @@ func LoadAdminProduct(ctx context.Context, q DBTX, st storage.Store, id uuid.UUI
 }
 
 var (
-	sqlProductExists  = sqlText(`SELECT id FROM products WHERE id = $1`)
+	sqlProductExists   = sqlText(`SELECT id FROM products WHERE id = $1`)
 	sqlProductImgCount = sqlText(`SELECT COUNT(*) FROM product_images WHERE product_id = $1`)
-	sqlUpdateProduct  = sqlText(`UPDATE products SET name = $2, slug = $3, description = $4, price_in_cents = $5, compare_at_price_in_cents = $6,
+	sqlUpdateProduct   = sqlText(`UPDATE products SET name = $2, slug = $3, description = $4, price_in_cents = $5, compare_at_price_in_cents = $6,
  category = $7::text::product_category, featured = $8, active = $9, updated_at = now() WHERE id = $1`)
 	sqlExistingVariantSKUs = sqlText(`SELECT id, sku FROM product_variants WHERE product_id = $1`)
 	sqlUpdateVariant       = sqlText(`UPDATE product_variants SET size = $2::text::product_size, color = $3, color_hex = $4,
@@ -571,9 +575,9 @@ var (
 	sqlInsertEmptyInventory = sqlText(`INSERT INTO inventory (id, variant_id, warehouse_id, quantity, reserved, updated_at)
  VALUES ($1, $2, $3, 0, 0, now())
  ON CONFLICT (variant_id, warehouse_id) DO NOTHING`)
-	sqlDeleteVariant   = sqlText(`DELETE FROM product_variants WHERE id = $1`)
-	sqlDeleteLooks     = sqlText(`DELETE FROM product_looks WHERE product_id = $1`)
-	sqlInsertLooks     = sqlText(`INSERT INTO product_looks (product_id, related_product_id, sort_order)
+	sqlDeleteVariant = sqlText(`DELETE FROM product_variants WHERE id = $1`)
+	sqlDeleteLooks   = sqlText(`DELETE FROM product_looks WHERE product_id = $1`)
+	sqlInsertLooks   = sqlText(`INSERT INTO product_looks (product_id, related_product_id, sort_order)
  SELECT $1, p.id, (ids.ord - 1)::int
  FROM unnest($2::uuid[]) WITH ORDINALITY AS ids(id, ord)
  INNER JOIN products p ON p.id = ids.id

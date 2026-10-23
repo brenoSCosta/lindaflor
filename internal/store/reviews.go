@@ -488,9 +488,9 @@ var (
           CASE WHEN r.status = 'pending' THEN r.created_at END ASC,
           r.moderated_at DESC NULLS LAST, r.created_at DESC
  LIMIT $1`)
-	sqlPendingReviews  = sqlText(`SELECT COUNT(*) FROM product_reviews WHERE status = 'pending'`)
-	sqlReviewLock      = sqlText(`SELECT status::text, product_id FROM product_reviews WHERE id = $1 FOR UPDATE`)
-	sqlModerateReview  = sqlText(`UPDATE product_reviews SET status = $2::text::review_status, moderated_at = now(), moderated_by = $3 WHERE id = $1`)
+	sqlPendingReviews = sqlText(`SELECT COUNT(*) FROM product_reviews WHERE status = 'pending'`)
+	sqlReviewLock     = sqlText(`SELECT status::text, product_id FROM product_reviews WHERE id = $1 FOR UPDATE`)
+	sqlModerateReview = sqlText(`UPDATE product_reviews SET status = $2::text::review_status, moderated_at = now(), moderated_by = $3 WHERE id = $1`)
 )
 
 // ListReviewsForAdmin is the moderation queue: pending first (FIFO), then

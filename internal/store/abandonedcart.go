@@ -22,9 +22,9 @@ import (
 
 // Reminder windows.
 const (
-	RemindEveryDays          = 7
-	MaxIdleDays              = 7
-	abandonedCartSweepBatch  = 100
+	RemindEveryDays         = 7
+	MaxIdleDays             = 7
+	abandonedCartSweepBatch = 100
 )
 
 var sqlRememberCheckoutEmail = sqlText(`UPDATE carts SET contact_email = $2

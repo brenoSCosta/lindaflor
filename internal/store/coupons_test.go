@@ -18,8 +18,10 @@ import (
 // Port of the src/app/store/coupons.rs tests.
 
 func coupon(discountType string, value, minSubtotal int64, maxDiscount *int64) *store.Coupon {
-	return &store.Coupon{ID: newID(), Code: "TEST", DiscountType: discountType, DiscountValue: value,
-		MinSubtotalCents: minSubtotal, MaxDiscountCents: maxDiscount, Active: true, UsageType: "unlimited", PerUserLimit: 1}
+	return &store.Coupon{
+		ID: newID(), Code: "TEST", DiscountType: discountType, DiscountValue: value,
+		MinSubtotalCents: minSubtotal, MaxDiscountCents: maxDiscount, Active: true, UsageType: "unlimited", PerUserLimit: 1,
+	}
 }
 
 func TestFixedIsCappedAtSubtotal(t *testing.T) {
@@ -74,13 +76,13 @@ func TestNormalizeEmailFoldsAliases(t *testing.T) {
 		t.Fatal("blank")
 	}
 	for in, want := range map[string]string{
-		" Maria@Example.COM ":        "maria@example.com",
-		"maria+promo@example.com":    "maria@example.com",
-		"ma.ria@example.com":         "ma.ria@example.com",
-		"Ma.Ria+x@Gmail.com":         "maria@gmail.com",
-		"m.a.r.i.a@googlemail.com":   "maria@gmail.com",
-		"+tag@example.com":           "+tag@example.com",
-		"NoAt":                       "noat",
+		" Maria@Example.COM ":      "maria@example.com",
+		"maria+promo@example.com":  "maria@example.com",
+		"ma.ria@example.com":       "ma.ria@example.com",
+		"Ma.Ria+x@Gmail.com":       "maria@gmail.com",
+		"m.a.r.i.a@googlemail.com": "maria@gmail.com",
+		"+tag@example.com":         "+tag@example.com",
+		"NoAt":                     "noat",
 	} {
 		if got, _ := store.NormalizeEmail(in); got != want {
 			t.Errorf("%q → %q, want %q", in, got, want)

@@ -35,12 +35,12 @@ func ValidateEmail(raw string) (string, bool) {
 		return "", false
 	}
 	for _, c := range local {
-		if !(isASCIIAlnum(c) || c == '.' || c == '_' || c == '%' || c == '+' || c == '-') {
+		if !isASCIIAlnum(c) && c != '.' && c != '_' && c != '%' && c != '+' && c != '-' {
 			return "", false
 		}
 	}
 	for _, c := range domain {
-		if !(isASCIIAlnum(c) || c == '.' || c == '-') {
+		if !isASCIIAlnum(c) && c != '.' && c != '-' {
 			return "", false
 		}
 	}
