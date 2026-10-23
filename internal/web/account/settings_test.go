@@ -304,11 +304,12 @@ func TestHTMLEnableShowsSecretOnceThenConfirmAndDisable(t *testing.T) {
 	}
 	res = u.c.Get("/settings/two-factor")
 	wantStatus(t, res, http.StatusOK)
-	wantContains(t, res, "data:image/svg+xml", "Códigos de recuperação", `value="confirm_2fa"`)
+	wantContains(t, res, "data:image/svg+xml", "Códigos de recuperação", `value="confirm_2fa"`,
+		"Segredo para digitar manualmente", groupedSecret(pendingSecret(t, s, u.id)))
 	wantMissing(t, res, "otpauth://")
 	res = u.c.Get("/settings/two-factor")
 	wantStatus(t, res, http.StatusOK)
-	wantMissing(t, res, "otpauth://", "data:image/svg+xml", "Códigos de recuperação")
+	wantMissing(t, res, "otpauth://", "data:image/svg+xml", "Códigos de recuperação", "Segredo para digitar manualmente")
 	wantContains(t, res, "O segredo já foi exibido.")
 	res = u.c.Get("/settings?tab=security")
 	wantMissing(t, res, "otpauth://", "data:image/svg+xml")
@@ -494,4 +495,16 @@ func TestSettingsStepUpRateLimitedMessage(t *testing.T) {
 	settingsPost(u.c, "account", url.Values{"action": {"change_password"}, "current_password": {"x"}, "new_password": {newPW}, "confirm_password": {newPW}})
 	res := settingsPost(u.c, "account", url.Values{"action": {"change_password"}, "current_password": {"x"}, "new_password": {newPW}, "confirm_password": {newPW}})
 	wantToast(t, res, toast.ErrorType, "Muitas tentativas. Aguarde um momento e tente novamente.")
+}
+
+// groupedSecret formats a base32 secret as the setup page shows it.
+func groupedSecret(secret string) string {
+	var b strings.Builder
+	for i, r := range strings.ToUpper(secret) {
+		if i > 0 && i%4 == 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }

@@ -445,6 +445,12 @@ templ twoFactorSetupPage(v twoFactorView) {
 								</div>
 							</div>
 						}
+						if secret := v.ManualSecret(); secret != "" {
+							<div class="flex flex-col items-center gap-1 text-center">
+								<p class="text-xs text-muted-foreground">Segredo para digitar manualmente</p>
+								<code class="rounded-md bg-muted px-3 py-1.5 font-mono text-sm tracking-wider break-all select-all">{ secret }</code>
+							</div>
+						}
 						<div class="flex flex-col gap-2">
 							<p class="text-sm font-medium">Códigos de recuperação</p>
 							<p class="text-xs text-muted-foreground">

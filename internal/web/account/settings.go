@@ -448,6 +448,27 @@ type twoFactorView struct {
 	Factors auth.StepUpFactors
 }
 
+// ManualSecret is the base32 secret from the otpauth URI, grouped in
+// blocks of four for typing into an authenticator ("" when unavailable).
+func (v twoFactorView) ManualSecret() string {
+	if v.Flash == nil {
+		return ""
+	}
+	u, err := url.Parse(v.Flash.TOTPURI)
+	if err != nil {
+		return ""
+	}
+	secret := strings.ToUpper(u.Query().Get("secret"))
+	var b strings.Builder
+	for i, r := range secret {
+		if i > 0 && i%4 == 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 // GET /settings/two-factor: consumes the enrollment flash (a second GET
 // cannot re-read the encrypted secret).
 func (h *handlers) twoFactorSetup(w http.ResponseWriter, r *http.Request) {

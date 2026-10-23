@@ -56,6 +56,21 @@ func TestNotFoundIsBrandedAndNoindex(t *testing.T) {
 	}
 }
 
+func TestFavicon(t *testing.T) {
+	s := testutil.NewServer(t, testutil.Options{})
+	c := s.Client(t)
+	page := c.Get("/")
+	if !strings.Contains(page.Body, `<link rel="icon" type="image/svg+xml" href="`+static.URL(static.FaviconName)+`"`) {
+		t.Fatal("missing icon link")
+	}
+	for _, path := range []string{"/favicon.ico", static.URL(static.FaviconName)} {
+		res := c.Get(path)
+		if res.StatusCode != http.StatusOK || res.Header.Get("Content-Type") != "image/svg+xml" || !strings.HasPrefix(res.Body, "<svg") {
+			t.Fatalf("%s: %d %q", path, res.StatusCode, res.Header.Get("Content-Type"))
+		}
+	}
+}
+
 func TestProdHeadersAndOriginCheck(t *testing.T) {
 	s := testutil.NewServer(t, testutil.Options{Prod: true})
 	c := s.Client(t)

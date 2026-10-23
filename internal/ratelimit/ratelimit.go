@@ -72,7 +72,8 @@ const RetryAfterSecs = 60
 // GlobalOverridePrefixes are skipped by the global limiter: paths owned by
 // scoped limiters (true override), /metrics scrapes, embedded static assets
 // (immutable, content-hashed: CGNAT/mobile networks sharing few IPs must
-// not burn the global budget on cacheable files) and /robots.txt.
+// not burn the global budget on cacheable files), /robots.txt and
+// /favicon.ico.
 var GlobalOverridePrefixes = []string{
 	"/api/auth/sign-in",
 	"/api/auth/sign-up",
@@ -88,6 +89,7 @@ var GlobalOverridePrefixes = []string{
 	"/metrics",
 	"/static",
 	"/robots.txt",
+	"/favicon.ico",
 }
 
 // FormLimit is a MutationsOnly budget on an HTML form path.

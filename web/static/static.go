@@ -17,7 +17,7 @@ import (
 	"sync"
 )
 
-//go:embed css js vendor
+//go:embed css img js vendor
 var files embed.FS
 
 // Prefix is the URL path the files are served under.
@@ -79,4 +79,20 @@ func Handler() http.Handler {
 		}
 		fileServer.ServeHTTP(w, r)
 	})
+}
+
+// FaviconName is the embedded favicon, linked from the root layout.
+const FaviconName = "img/favicon.svg"
+
+// Favicon serves the SVG favicon at /favicon.ico for clients that request
+// the conventional path without reading the <link rel="icon">.
+func Favicon(w http.ResponseWriter, _ *http.Request) {
+	b, err := files.ReadFile(FaviconName)
+	if err != nil {
+		http.Error(w, "Não encontrado.", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write(b)
 }
