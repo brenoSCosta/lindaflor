@@ -98,8 +98,18 @@ func TestValidSignaturePasses(t *testing.T) {
 	if err := payments.VerifySignature(sigSecret, "v1="+v1+", ts="+ts, "r", "987", sigNow); err != nil {
 		t.Fatal("spaced / reordered parts:", err)
 	}
+}
+
+// Port of src/payments/signature.rs millisecond_ts_is_accepted: Mercado
+// Pago may send ts in milliseconds; it is normalized before the skew check
+// and signed as sent.
+func TestMillisecondTSIsAccepted(t *testing.T) {
 	if err := payments.VerifySignature(sigSecret, headerFor("5", "r", sigNow*1000), "r", "5", sigNow); err != nil {
-		t.Fatal("millisecond ts:", err)
+		t.Fatal(err)
+	}
+	stale := (sigNow - payments.MaxSignatureSkew - 1) * 1000
+	if err := payments.VerifySignature(sigSecret, headerFor("5", "r", stale), "r", "5", sigNow); !errors.Is(err, payments.ErrSignatureStale) {
+		t.Fatalf("stale millisecond ts: %v", err)
 	}
 }
 

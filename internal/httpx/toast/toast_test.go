@@ -120,3 +120,45 @@ func TestSetOnHTMXUsesHeader(t *testing.T) {
 		t.Fatalf("header: %q", rec.Header().Get(Header))
 	}
 }
+
+// Equivalent of the src/components/toast.rs same-path tests: the Rust
+// promise submit kept the in-page card for a same-pathname redirect and
+// only wrote the cookie when leaving the page. Here an htmx redirect never
+// navigates the document (HX-Location swaps in place), so the toast rides
+// the X-Toast header for any target — same pathname with a query or
+// another pathname — and a full (no-JS) redirect always uses the cookie.
+func TestRedirectKeepsToastAcrossSameAndOtherPaths(t *testing.T) {
+	for _, loc := range []string{"/login?mode=signin", "?mode=signup", "/login#erro", "/dashboard"} {
+		h := Middleware(false)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			Set(w, r, Info("Verifique seu e-mail"))
+			Redirect(w, r, loc)
+		}))
+
+		req := httptest.NewRequest(http.MethodPost, "/login", nil)
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || rec.Header().Get("HX-Location") != loc {
+			t.Fatalf("%s htmx: %d %v", loc, rec.Code, rec.Header())
+		}
+		if q := DecodeQueue(rec.Header().Get(Header)); len(q) != 1 || q[0].Title != "Verifique seu e-mail" {
+			t.Fatalf("%s htmx X-Toast: %q", loc, rec.Header().Get(Header))
+		}
+		if len(rec.Result().Cookies()) != 0 {
+			t.Fatalf("%s htmx wrote a cookie", loc)
+		}
+
+		rec = httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/login", nil))
+		if rec.Code != http.StatusSeeOther || rec.Header().Get(Header) != "" {
+			t.Fatalf("%s full: %d %v", loc, rec.Code, rec.Header())
+		}
+		cookies := rec.Result().Cookies()
+		if len(cookies) != 1 || cookies[0].Name != CookieName(false) {
+			t.Fatalf("%s full cookies: %+v", loc, cookies)
+		}
+		if q := DecodeQueue(cookies[0].Value); len(q) != 1 || q[0].Title != "Verifique seu e-mail" {
+			t.Fatalf("%s full cookie value: %q", loc, cookies[0].Value)
+		}
+	}
+}

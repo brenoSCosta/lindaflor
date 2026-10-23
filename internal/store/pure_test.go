@@ -510,6 +510,19 @@ func TestSubscribedMessageMentionsFirstPurchaseCoupon(t *testing.T) {
 	}
 }
 
+// Port of src/app/newsletter.rs newsletter_uses_strict_email_validation:
+// the old check (contains '@' and '.') accepted these.
+func TestNewsletterUsesStrictEmailValidation(t *testing.T) {
+	for _, bad := range []string{"a.b@", "@x.com", "a b@x.com", "a@b@c.com", "a@x..com"} {
+		if _, _, msg := store.ValidateNewsletterForm(bad, ""); msg != "E-mail inválido" {
+			t.Errorf("%q: msg = %q", bad, msg)
+		}
+	}
+	if email, _, msg := store.ValidateNewsletterForm(" Ana@Example.COM ", ""); msg != "" || email != "ana@example.com" {
+		t.Fatalf("email = %q, msg = %q", email, msg)
+	}
+}
+
 func TestOrderCodeIsFirstEightHex(t *testing.T) {
 	id := uuid.MustParse("0192f3a4-b5c6-7d8e-9f00-112233445566")
 	if store.OrderCode(id) != "0192F3A4" {

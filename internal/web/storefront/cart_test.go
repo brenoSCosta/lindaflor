@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/wellington-vell/lindaflor/internal/httpx/toast"
+	"github.com/wellington-vell/lindaflor/internal/ratelimit"
+	"github.com/wellington-vell/lindaflor/internal/testutil"
 )
 
 func TestCartFlowHTMX(t *testing.T) {
@@ -118,4 +120,23 @@ func TestSetCartGroup(t *testing.T) {
 	res = h.PostForm("/conjuntos/adicionar", form("set_id", "x", "quantity", "1"))
 	wantStatus(t, res, http.StatusUnprocessableEntity)
 	wantContains(t, res.Body, "Conjunto inválido.")
+}
+
+// Port of tests/security_misc.rs coupon_apply_has_a_scoped_budget: coupon
+// POSTs spend their own per-IP budget; pages from the same IP still load.
+func TestCouponApplyHasAScopedBudget(t *testing.T) {
+	// Other tests relax every budget process-wide; pin this one explicitly.
+	t.Setenv("RATE_LIMIT_COUPON_APPLY_PER_MIN", "2")
+	ratelimit.Reset()
+	t.Cleanup(ratelimit.Reset)
+	s := testutil.NewServer(t, testutil.Options{KeepRateLimits: true})
+	c := s.Client(t)
+	for i := range 2 {
+		if res := c.PostForm("/carrinho/cupom", form("code", "x")); res.StatusCode == http.StatusTooManyRequests {
+			t.Fatalf("request %d limited early", i+1)
+		}
+	}
+	wantStatus(t, c.PostForm("/carrinho/cupom", form("code", "x")), http.StatusTooManyRequests)
+	wantStatus(t, c.Get("/carrinho/sheet"), http.StatusOK)
+	wantStatus(t, c.Get("/"), http.StatusOK)
 }

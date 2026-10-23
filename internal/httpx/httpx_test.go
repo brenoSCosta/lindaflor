@@ -70,6 +70,31 @@ func TestSecurityHeadersMiddlewareAppliesOnErrors(t *testing.T) {
 	}
 }
 
+// Port of tests/security_headers.rs (handler-error case): a handler that
+// panics is turned into a 500 by Recover, and the response still carries
+// the security headers (same middleware order as internal/web/router.go).
+func TestSecurityHeadersPresentOnPanic500(t *testing.T) {
+	h := Recover(SecurityHeaders("production")(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		panic("boom")
+	})))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/explode", nil))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	for k, want := range map[string]string{
+		"X-Content-Type-Options": "nosniff", "Referrer-Policy": "strict-origin-when-cross-origin",
+		"Content-Security-Policy": CSPProduction, "Strict-Transport-Security": HSTSValue,
+	} {
+		if got := rec.Header().Get(k); got != want {
+			t.Fatalf("%s = %q", k, got)
+		}
+	}
+	if strings.Contains(rec.Body.String(), "boom") {
+		t.Fatal("panic value leaked into the response")
+	}
+}
+
 func ip(s string) netip.Addr { return netip.MustParseAddr(s) }
 
 func resolve(t *testing.T, tp TrustedProxies, remote string, xff ...string) string {
