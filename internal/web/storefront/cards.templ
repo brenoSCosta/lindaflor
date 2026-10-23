@@ -1,0 +1,139 @@
+package storefront
+
+import (
+	"strconv"
+
+	"github.com/google/uuid"
+
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+)
+
+// ProductCard is src/app/store/product_card.rs.
+templ ProductCard(p store.ProductSummary, c CardCtx) {
+	<article class="group relative">
+		<a href={ templ.SafeURL(productPath(p.Slug)) } class="block">
+			<div class="relative overflow-hidden bg-foreground/5 rounded-lg">
+				<div class="aspect-[3/4] overflow-hidden relative">
+					if p.ImageURL != nil {
+						<img
+							src={ *p.ImageURL }
+							alt={ p.Name }
+							class="h-full w-full object-cover transition-transform duration-700 group-hover:scale-[1.04]"
+						/>
+						if p.SecondaryImageURL != nil {
+							<img
+								src={ *p.SecondaryImageURL }
+								alt={ p.Name }
+								class="absolute inset-0 h-full w-full object-cover opacity-0 transition-opacity duration-700 group-hover:opacity-100"
+							/>
+						}
+					} else {
+						<div class="h-full w-full bg-foreground/5 flex items-center justify-center">
+							@components.Icon("image", "")
+						</div>
+					}
+				</div>
+				if badge := p.DiscountBadge(); badge != "" {
+					@components.Badge(components.BadgeProps{Variant: components.BadgePrimary, Class: "absolute left-4 top-4"}) {
+						{ badge }
+					}
+				}
+				if p.SoldOut() {
+					@components.Badge(components.BadgeProps{Variant: components.BadgePrimary, Class: "absolute bottom-4 left-4"}) {
+						Esgotado
+					}
+				}
+			</div>
+			<div class="space-y-2 pt-4">
+				<p class="text-[10px] tracking-wide uppercase text-muted-foreground">{ p.CategoryLabel() }</p>
+				<h3 class="font-serif text-xl leading-tight text-foreground">{ p.Name }</h3>
+				if rating, ok := c.Ratings[p.ID]; ok {
+					@CardRating(rating)
+				}
+				if len(p.Colors) > 0 {
+					<div class="flex gap-2 items-center">
+						{{ dots, extra := colorDots(p.Colors) }}
+						for _, color := range dots {
+							if color.Hex != nil {
+								<div class="w-4 h-4 rounded-full border-2 border-border" style={ swatchStyle(color.Hex) } title={ color.Name }></div>
+							} else {
+								<div class="w-4 h-4 rounded-full border-2 border-border bg-foreground/10" title={ color.Name }></div>
+							}
+						}
+						if extra > 0 {
+							<span class="text-xs text-muted-foreground">{ "+" + strconv.Itoa(extra) }</span>
+						}
+					</div>
+				}
+				<div class="space-y-1">
+					if p.CompareAtPriceInCents != nil {
+						<p class="text-xs text-muted-foreground line-through">{ price(*p.CompareAtPriceInCents) }</p>
+					}
+					if c.PixPercent > 0 {
+						<p class="text-sm font-bold text-primary">{ pixText(store.PixPrice(p.PriceInCents, c.PixPercent)) }</p>
+						<p class="text-xs text-muted-foreground">ou { price(p.PriceInCents) }</p>
+					} else {
+						<p class="text-sm font-medium text-primary">{ price(p.PriceInCents) }</p>
+					}
+				</div>
+			</div>
+		</a>
+		<div class="absolute right-4 top-4 z-10">
+			@WishlistButton(p.ID, c.liked(p.ID), "")
+		</div>
+	</article>
+}
+
+// ProductGrid renders cards in the given grid classes.
+templ productGrid(class string, products []store.ProductSummary, c CardCtx) {
+	<div class={ class }>
+		for _, p := range products {
+			@ProductCard(p, c)
+		}
+	</div>
+}
+
+// WishlistButton is the heart toggle (src/app/store/wishlist.rs): a no-JS
+// form POST to /favoritos/alternar, enhanced by htmx to
+// /favoritos/alternar-proc, which answers with the re-rendered button.
+templ WishlistButton(productID uuid.UUID, liked bool, next string) {
+	<form
+		method="post"
+		action="/favoritos/alternar"
+		hx-post="/favoritos/alternar-proc"
+		hx-target="this"
+		hx-swap="outerHTML"
+		data-toast-loading="Salvando…"
+	>
+		<input type="hidden" name="product_id" value={ productID.String() }/>
+		<input type="hidden" name="next" value={ next }/>
+		<button
+			type="submit"
+			data-wishlist-id={ productID.String() }
+			title={ wishlistLabel(liked) }
+			aria-label={ wishlistLabel(liked) }
+			aria-pressed={ boolStr(liked) }
+			class={ wishlistClass(liked) }
+		>
+			@components.Icon("heart", "")
+		</button>
+	</form>
+}
+
+// StarRating is five stars, the rating rounded to whole stars.
+templ StarRating(rating float64, small bool) {
+	<span class="inline-flex items-center gap-0.5" role="img" aria-label={ store.StarsAriaLabel(rating) }>
+		for i := range 5 {
+			@components.Icon("star", starClass(i < store.StarsFilled(rating), small))
+		}
+	</span>
+}
+
+// CardRating is the compact rating of a product card.
+templ CardRating(r store.CardRating) {
+	<div class="flex items-center gap-1 text-xs text-muted-foreground">
+		@StarRating(r.Average, true)
+		<span>({ strconv.FormatInt(r.Count, 10) })</span>
+	</div>
+}

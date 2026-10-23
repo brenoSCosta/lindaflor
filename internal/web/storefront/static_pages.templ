@@ -1,0 +1,220 @@
+package storefront
+
+import "github.com/wellington-vell/lindaflor/internal/web/components"
+
+templ staticBreadcrumb(label string) {
+	@components.Breadcrumb(components.Props{}) {
+		@components.BreadcrumbList(components.Props{}) {
+			@components.BreadcrumbItem(components.Props{}) {
+				@components.BreadcrumbLink("/", components.Props{}) {
+					Início
+				}
+			}
+			@components.BreadcrumbSeparator(components.Props{})
+			@components.BreadcrumbItem(components.Props{}) {
+				@components.BreadcrumbPage(components.Props{}) {
+					{ label }
+				}
+			}
+		}
+	}
+}
+
+templ textCard(title, body string) {
+	@components.Card(components.Props{}) {
+		@components.CardHeader(components.Props{}) {
+			@components.CardTitle(components.Props{}) {
+				{ title }
+			}
+		}
+		@components.CardContent(components.Props{}) {
+			<p class="text-sm leading-relaxed text-muted-foreground">{ body }</p>
+		}
+	}
+}
+
+// termosPage is src/app/termos.rs.
+templ termosPage() {
+	@components.Container(components.ContainerProps{Variant: components.ContainerNarrow}) {
+		@staticBreadcrumb("Termos de Uso")
+		<h1 class="mt-6 text-4xl font-bold tracking-tight">Termos de Uso</h1>
+		<p class="mt-4 text-sm leading-relaxed text-muted-foreground">
+			Ao utilizar o site da Linda Flor Moda Praia, você concorda com estes termos. Os preços, disponibilidade e descrições dos produtos podem ser alterados sem aviso prévio.
+		</p>
+		<p class="mt-2 text-sm leading-relaxed text-muted-foreground">
+			Pedidos estão sujeitos à confirmação de pagamento e disponibilidade em estoque. Reservamo-nos o direito de cancelar pedidos em caso de inconsistências ou suspeita de fraude.
+		</p>
+		<p class="mt-2 text-sm leading-relaxed text-muted-foreground">
+			Imagens são ilustrativas. Pequenas variações de cor podem ocorrer devido à calibração de tela e processo de fabricação têxtil.
+		</p>
+		@components.Separator(false, components.Props{Class: "my-8"})
+		@textCard("1. Aceitação dos Termos", "Ao acessar e utilizar este site, você declara que leu, compreendeu e aceita todos os termos e condições aqui descritos. Se você não concorda com estes termos, por favor, não utilize este site.")
+		@textCard("2. Uso do Site", "Este site é destinado à venda de produtos de moda praia. Você concorda em utilizar este site apenas para fins lícitos e de acordo com todos os termos e condições aqui descritos.")
+		@textCard("3. Produtos e Preços", "Empenhamo-nos em fornecer descrições e imagens precisas dos produtos. No entanto, não garantimos que as descrições, imagens ou outros conteúdos do site sejam completos, precisos, confiáveis, atuais ou livres de erros.")
+		@textCard("4. Pagamentos", "Aceitamos pagamentos via PIX e cartão de crédito. O processamento do pagamento é realizado por terceiros e está sujeito aos termos e condições desses provedores de pagamento.")
+		@textCard("5. Envio e Entrega", "O prazo de entrega varia de acordo com a localização e o método de envio selecionado. Não nos responsabilizamos por atrasos causados por terceiros, como transportadoras e correios.")
+		@textCard("6. Trocas e Devoluções", "Você pode solicitar troca ou devolução em até 7 dias corridos após o recebimento do pedido, conforme o Código de Defesa do Consumidor. Consulte nossa página de Trocas e Devoluções para mais detalhes.")
+		@textCard("7. Limitação de Responsabilidade", "Em nenhuma circunstância a Linda Flor será responsável por quaisquer danos diretos, indiretos, incidentais, especiais ou consequenciais que resultem do uso ou da incapacidade de usar este site ou seus conteúdos.")
+	}
+}
+
+// privacidadePage is src/app/politica_privacidade.rs.
+templ privacidadePage() {
+	@components.Container(components.ContainerProps{Variant: components.ContainerNarrow}) {
+		@staticBreadcrumb("Política de Privacidade")
+		<h1 class="text-4xl font-bold tracking-tight">Política de Privacidade</h1>
+		<p class="text-sm leading-relaxed text-muted-foreground">
+			A Linda Flor Moda Praia respeita sua privacidade. Coletamos apenas os dados necessários para processar pedidos, enviar comunicações sobre compras e melhorar sua experiência na loja.
+		</p>
+		<p class="text-sm leading-relaxed text-muted-foreground">
+			Informações como nome, e-mail, endereço e telefone são utilizadas exclusivamente para entrega, suporte e cumprimento de obrigações legais. Não vendemos seus dados a terceiros.
+		</p>
+		<p class="text-sm leading-relaxed text-muted-foreground">
+			Utilizamos cookies essenciais para manter sua sessão e preferências. Você pode solicitar acesso, correção ou exclusão dos seus dados entrando em contato pelos nossos canais de atendimento.
+		</p>
+		@components.Separator(false, components.Props{Class: "my-8"})
+		@textCard("1. Coleta de Dados", "Coletamos informações pessoais que você nos fornece voluntariamente ao realizar um pedido, criar uma conta ou entrar em contato conosco. Isso inclui nome, e-mail, endereço, telefone e informações de pagamento.")
+		@textCard("2. Uso dos Dados", "Utilizamos seus dados para processar pedidos, enviar comunicações sobre compras, melhorar nossos produtos e serviços, e cumprir obrigações legais. Não utilizamos seus dados para fins de marketing sem seu consentimento.")
+		@textCard("3. Compartilhamento de Dados", "Não vendemos, alugamos ou compartilhamos seus dados pessoais com terceiros, exceto quando necessário para processar pagamentos, realizar entregas ou cumprir obrigações legais.")
+		@textCard("4. Cookies", "Utilizamos cookies essenciais para manter sua sessão e preferências. Você pode desativar os cookies nas configurações do seu navegador, mas isso pode afetar a funcionalidade do site.")
+		@textCard("5. Seus Direitos", "Você tem direito a solicitar acesso, correção ou exclusão dos seus dados pessoais. Para exercer esses direitos, entre em contato conosco pelos nossos canais de atendimento.")
+	}
+}
+
+// trocasPage is src/app/trocas_devolucoes.rs.
+templ trocasPage() {
+	@components.Container(components.ContainerProps{Variant: components.ContainerNarrow}) {
+		@staticBreadcrumb("Trocas e Devoluções")
+		<h1 class="text-4xl font-bold tracking-tight">Trocas e Devoluções</h1>
+		<p class="text-sm leading-relaxed text-muted-foreground">
+			Você pode solicitar troca ou devolução em até 7 dias corridos após o recebimento do pedido, conforme o Código de Defesa do Consumidor.
+		</p>
+		<p class="text-sm leading-relaxed text-muted-foreground">
+			A peça deve estar sem uso, com etiquetas e na embalagem original. Para iniciar o processo, abra a página do pedido (link enviado por e-mail ou em Minha conta → Pedidos) e toque em "Solicitar troca ou devolução".
+		</p>
+		<p class="text-sm leading-relaxed text-muted-foreground">
+			O frete de devolução por arrependimento é por conta do cliente, exceto em casos de defeito ou erro no envio. Após análise, o reembolso será feito via PIX em até 10 dias úteis.
+		</p>
+		@components.Separator(false, components.Props{Class: "my-4"})
+		@components.Card(components.Props{}) {
+			@components.CardHeader(components.Props{}) {
+				@components.CardTitle(components.Props{}) {
+					Como Solicitar uma Troca ou Devolução
+				}
+			}
+			@components.CardContent(components.Props{}) {
+				<ol class="list-decimal space-y-2 pl-5 text-sm leading-relaxed text-muted-foreground">
+					<li>Na página do pedido, toque em "Solicitar troca ou devolução"</li>
+					<li>Escolha as peças, o tipo (troca de tamanho, devolução ou defeito) e o motivo</li>
+					<li>Após a aprovação, envie a peça seguindo as instruções recebidas por e-mail, na embalagem original e com todas as etiquetas</li>
+					<li>Após análise, o reembolso será feito via PIX em até 10 dias úteis</li>
+				</ol>
+			}
+		}
+		@components.Card(components.Props{}) {
+			@components.CardHeader(components.Props{}) {
+				@components.CardTitle(components.Props{}) {
+					Condições para Troca ou Devolução
+				}
+			}
+			@components.CardContent(components.Props{}) {
+				<ul class="list-disc space-y-2 pl-5 text-sm leading-relaxed text-muted-foreground">
+					<li>A peça deve estar sem uso</li>
+					<li>Todas as etiquetas devem estar presentes</li>
+					<li>A embalagem original deve estar intacta</li>
+					<li>O prazo de 7 dias deve ser respeitado</li>
+				</ul>
+			}
+		}
+		@textCard("Reembolso", "O reembolso será feito via PIX em até 10 dias úteis após a análise da peça devolvida. O valor do reembolso inclui o valor do produto, mas não o frete de devolução por arrependimento.")
+	}
+}
+
+type sizeRow []string
+
+templ sizeTable(title string, head []string, rows []sizeRow) {
+	<section class="space-y-4">
+		@components.Card(components.Props{}) {
+			@components.CardHeader(components.Props{}) {
+				@components.CardTitle(components.Props{}) {
+					{ title }
+				}
+			}
+			@components.CardContent(components.Props{}) {
+				@components.Table(components.Props{}) {
+					@components.TableHeader(components.Props{}) {
+						@components.TableRow(components.Props{}) {
+							for _, h := range head {
+								@components.TableHead(components.Props{}) {
+									{ h }
+								}
+							}
+						}
+					}
+					@components.TableBody(components.Props{}) {
+						for _, row := range rows {
+							@components.TableRow(components.Props{}) {
+								for _, cell := range row {
+									@components.TableCell(components.Props{}) {
+										{ cell }
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	</section>
+}
+
+var (
+	topsRows      = []sizeRow{{"PP", "76 - 82"}, {"P", "82 - 88"}, {"M", "88 - 94"}, {"G", "94 - 100"}, {"GG", "100 - 106"}}
+	calcinhasRows = []sizeRow{{"PP", "62 - 66", "88 - 92"}, {"P", "66 - 70", "92 - 96"}, {"M", "70 - 74", "96 - 100"}, {"G", "74 - 78", "100 - 104"}, {"GG", "78 - 82", "104 - 108"}}
+	maiosRows     = []sizeRow{{"PP", "76 - 82", "62 - 66", "88 - 92"}, {"P", "82 - 88", "66 - 70", "92 - 96"}, {"M", "88 - 94", "70 - 74", "96 - 100"}, {"G", "94 - 100", "74 - 78", "100 - 104"}, {"GG", "100 - 106", "78 - 82", "104 - 108"}}
+)
+
+// guiaPage is src/app/guia_de_medidas.rs.
+templ guiaPage() {
+	@components.Container(components.ContainerProps{Variant: components.ContainerNarrow}) {
+		@staticBreadcrumb("Guia de medidas")
+		<h1 class="text-4xl font-bold tracking-tight">Guia de medidas</h1>
+		<section class="space-y-4">
+			@components.Card(components.Props{}) {
+				@components.CardHeader(components.Props{}) {
+					@components.CardTitle(components.Props{}) {
+						Como medir
+					}
+				}
+				@components.CardContent(components.Props{}) {
+					<div class="space-y-4 text-sm text-muted-foreground">
+						<div>
+							<p class="font-semibold text-foreground">Busto</p>
+							<p>Meça ao redor da parte mais larga do tórax, mantendo a fita métrica paralela ao chão. Não aperte muito a fita.</p>
+						</div>
+						<div>
+							<p class="font-semibold text-foreground">Cintura</p>
+							<p>Meça na parte mais estreita da cintura, entre as costelas e o quadril. A fita deve estar confortável, sem apertar.</p>
+						</div>
+						<div>
+							<p class="font-semibold text-foreground">Quadril</p>
+							<p>Meça ao redor da parte mais larga das nádegas, mantendo a fita métrica paralela ao chão.</p>
+						</div>
+					</div>
+				}
+			}
+		</section>
+		@sizeTable("Tops", []string{"Tamanho", "Busto (cm)"}, topsRows)
+		@sizeTable("Calcinhas", []string{"Tamanho", "Cintura (cm)", "Quadril (cm)"}, calcinhasRows)
+		@sizeTable("Maiôs", []string{"Tamanho", "Busto (cm)", "Cintura (cm)", "Quadril (cm)"}, maiosRows)
+		<section>
+			@components.Card(components.Props{}) {
+				@components.CardContent(components.Props{}) {
+					<p class="text-sm text-muted-foreground">
+						<strong>Dica:</strong> Se você está entre dois tamanhos, recomendamos escolher o tamanho maior para mais conforto.
+					</p>
+				}
+			}
+		</section>
+	}
+}

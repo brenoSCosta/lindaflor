@@ -1,0 +1,132 @@
+package storefront
+
+import "github.com/wellington-vell/lindaflor/internal/web/components"
+
+// stockAlertForm is the "Avise-me quando chegar" card for a sold-out
+// variant (src/app/avise_me.rs stock_alert_form).
+templ stockAlertForm(variantID string, email string) {
+	@components.Card(components.Props{}) {
+		@components.CardHeader(components.Props{}) {
+			@components.CardTitle(components.Props{}) {
+				Avise-me quando chegar
+			}
+			@components.CardDescription(components.Props{}) {
+				Esta variação está esgotada. Deixe seu e-mail e avisamos uma única vez quando ela voltar ao estoque.
+			}
+		}
+		@components.CardContent(components.Props{}) {
+			<form method="post" action="/avise-me" class="space-y-3">
+				<input type="hidden" name="variant_id" value={ variantID }/>
+				<div class="hidden" aria-hidden="true">
+					<input type="text" name="website" tabindex="-1" autocomplete="off"/>
+				</div>
+				<div class="space-y-2">
+					@components.Label(components.LabelProps{For: "stock-alert-email"}) {
+						E-mail
+					}
+					@components.Input(components.InputProps{Attrs: templ.Attributes{
+						"type":         "email",
+						"name":         "email",
+						"id":           "stock-alert-email",
+						"autocomplete": "email",
+						"placeholder":  "seu@email.com",
+						"required":     true,
+						"value":        email,
+					}})
+				</div>
+				@components.Button(components.ButtonProps{Variant: components.ButtonOutline, Size: components.ButtonLg, Class: "w-full", Attrs: templ.Attributes{"type": "submit"}}) {
+					Avise-me quando chegar
+				}
+			</form>
+		}
+	}
+}
+
+// emailLinkPage is the shared layout of the one-click mail link pages
+// (stock alert cancel, newsletter unsubscribe).
+templ emailLinkPage() {
+	@components.Container(components.ContainerProps{Variant: components.ContainerCentered}) {
+		<div class="w-full">
+			<div class="mb-8 text-center">
+				<a href="/" class="text-2xl font-bold text-primary">Linda Flor</a>
+			</div>
+			@components.Card(components.Props{}) {
+				{ children... }
+				@components.CardFooter(components.Props{}) {
+					<a href="/" class="text-sm text-primary">Voltar para a loja</a>
+				}
+			}
+		</div>
+	}
+}
+
+templ emailLinkHeader(title, description string) {
+	@components.CardHeader(components.Props{}) {
+		@components.CardTitle(components.Props{}) {
+			{ title }
+		}
+		@components.CardDescription(components.Props{}) {
+			{ description }
+		}
+	}
+}
+
+templ emailLinkConfirm(v emailLinkView, action, button string) {
+	@components.CardContent(components.Props{}) {
+		<p class="mb-4 text-sm text-muted-foreground">{ v.Email }</p>
+		<form method="post" action={ templ.SafeURL(action) } class="flex flex-col gap-4">
+			<input type="hidden" name="email" value={ v.Email }/>
+			<input type="hidden" name="token" value={ v.Token }/>
+			<button type="submit" class={ components.ButtonVariants(components.ButtonPrimary, components.ButtonMd) }>
+				{ button }
+			</button>
+		</form>
+	}
+}
+
+templ stockAlertCancelView(v emailLinkView) {
+	@emailLinkPage() {
+		if v.Done {
+			@emailLinkHeader("Avisos cancelados", "Você não vai mais receber avisos de volta ao estoque para este e-mail.")
+		} else if v.Valid {
+			@emailLinkHeader("Cancelar avisos de estoque", "Confirme para cancelar todos os avisos \"Avise-me quando chegar\" pendentes deste e-mail.")
+			@emailLinkConfirm(v, "/avise-me/cancelar", "Cancelar avisos")
+		} else {
+			@emailLinkHeader("Link inválido", "Este link de cancelamento não é válido. Use o link do e-mail de aviso mais recente.")
+		}
+	}
+}
+
+templ unsubscribeView(v emailLinkView) {
+	@emailLinkPage() {
+		if v.Done {
+			@emailLinkHeader("Inscrição cancelada", "Você não vai mais receber a newsletter. Se mudar de ideia, é só se inscrever de novo no rodapé da loja.")
+		} else if v.Valid {
+			@emailLinkHeader("Cancelar newsletter", "Confirme para parar de receber nossos e-mails de novidades e promoções.")
+			@emailLinkConfirm(v, "/newsletter/cancelar", "Cancelar inscrição")
+		} else {
+			@emailLinkHeader("Link inválido", "Este link de cancelamento não é válido. Use o link do e-mail mais recente da newsletter.")
+		}
+	}
+}
+
+// NewsletterForm is src/app/store/newsletter_form.rs (POST /newsletter).
+templ NewsletterForm() {
+	<form action="/newsletter" method="POST" class="space-y-4">
+		<div class="space-y-2">
+			@components.Label(components.LabelProps{For: "email"}) {
+				E-mail
+			}
+			@components.Input(components.InputProps{Attrs: templ.Attributes{"type": "email", "name": "email", "id": "email", "placeholder": "seu@email.com", "required": true}})
+		</div>
+		<div class="space-y-2">
+			@components.Label(components.LabelProps{For: "name"}) {
+				Nome (opcional)
+			}
+			@components.Input(components.InputProps{Attrs: templ.Attributes{"type": "text", "name": "name", "id": "name", "placeholder": "Seu nome"}})
+		</div>
+		@components.Button(components.ButtonProps{Attrs: templ.Attributes{"type": "submit"}}) {
+			Inscrever
+		}
+	</form>
+}

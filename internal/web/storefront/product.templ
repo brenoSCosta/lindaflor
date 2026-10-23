@@ -1,0 +1,343 @@
+package storefront
+
+import (
+	"strconv"
+
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+)
+
+templ productNotFound() {
+	@components.Container(components.ContainerProps{Class: "py-24 text-center"}) {
+		<p class="text-2xl font-bold">Produto não encontrado</p>
+		<a href="/produtos" class={ components.ButtonVariants(components.ButtonPrimary, components.ButtonMd, "mx-auto mt-6 w-fit") }>
+			Voltar ao catálogo
+		</a>
+	}
+}
+
+func variantVariant(selected bool) components.ButtonVariant {
+	if selected {
+		return components.ButtonPrimary
+	}
+	return components.ButtonOutline
+}
+
+func colorHidden(selectedColor, variantColor string) bool {
+	return selectedColor != "" && selectedColor != variantColor
+}
+
+func colorLabel(c string) string {
+	if c == "" {
+		return "Todas"
+	}
+	return c
+}
+
+// addToCartFeedback is the add-form message region (also an htmx partial
+// target of /carrinho/adicionar and /conjuntos/adicionar).
+templ addToCartFeedback(added bool, errMsg string) {
+	<div id="add-to-cart-feedback" class="space-y-1">
+		if added {
+			<p class="text-sm text-primary">Adicionado ao carrinho!</p>
+		}
+		if errMsg != "" {
+			<p class="text-sm text-destructive">{ errMsg }</p>
+		}
+	</div>
+}
+
+// productGallery is the image stack + thumbnails (Alpine `img` state; the
+// thumbnails are ?img= links without JS).
+templ productGallery(images []store.ProductImage, initial string, name string, base string, keep map[string][]string, wishlist templ.Component, listLabel string) {
+	<div class="space-y-4">
+		<div class="relative overflow-hidden rounded-xl border border-border">
+			<div class="relative aspect-[4/5] bg-foreground/5">
+				if len(images) == 0 {
+					<div class="flex h-full w-full items-center justify-center">
+						@components.Icon("image", "")
+					</div>
+				} else {
+					for _, image := range images {
+						<img
+							src={ image.URL }
+							alt={ imgAlt(image.Alt, name) }
+							data-img={ image.ID.String() }
+							class={ stateClass(layerBase, layerOn, layerOff, image.ID.String() == initial) }
+							x-bind:class={ xClass(layerOn, layerOff, imgSelectedExpr) }
+							aria-hidden={ boolStr(image.ID.String() != initial) }
+							x-bind:aria-hidden={ imgSelectedExpr + " ? 'false' : 'true'" }
+						/>
+					}
+				}
+			</div>
+			if wishlist != nil {
+				<div class="absolute right-4 top-4 z-20">
+					@wishlist
+				</div>
+			}
+		</div>
+		if len(images) > 1 {
+			<div class="grid grid-cols-4 gap-3" role="listbox" aria-label={ listLabel }>
+				for _, image := range images {
+					<a
+						href={ templ.SafeURL(galleryHref(base, keep, image.ID)) }
+						role="option"
+						data-img={ image.ID.String() }
+						aria-selected={ boolStr(image.ID.String() == initial) }
+						x-bind:aria-selected={ imgSelectedExpr + " ? 'true' : 'false'" }
+						class={ stateClass(thumbBase, thumbOn, thumbOff, image.ID.String() == initial) }
+						x-bind:class={ xClass(thumbOn, thumbOff, imgSelectedExpr) }
+						x-on:click.prevent="img = $el.dataset.img; const u = new URL(window.location.href); u.searchParams.set('img', img); history.replaceState(null, '', u.pathname + u.search)"
+					>
+						<img src={ image.URL } alt={ imgAlt(image.Alt, name) } class="h-full w-full object-cover"/>
+					</a>
+				}
+			</div>
+		}
+	</div>
+}
+
+templ productPageView(v productView) {
+	@components.Container(components.ContainerProps{}) {
+		@components.Breadcrumb(components.Props{}) {
+			@components.BreadcrumbList(components.Props{}) {
+				@components.BreadcrumbItem(components.Props{}) {
+					@components.BreadcrumbLink("/", components.Props{}) {
+						Início
+					}
+				}
+				@components.BreadcrumbSeparator(components.Props{})
+				@components.BreadcrumbItem(components.Props{}) {
+					@components.BreadcrumbLink("/produtos", components.Props{}) {
+						Catálogo
+					}
+				}
+				@components.BreadcrumbSeparator(components.Props{})
+				@components.BreadcrumbItem(components.Props{}) {
+					@components.BreadcrumbPage(components.Props{}) {
+						{ v.P.Name }
+					}
+				}
+			}
+		}
+		<div
+			class="grid gap-4 @3xl/page:grid-cols-2"
+			x-data={ "{ img: '" + v.InitialImg + "', color: '' }" }
+			data-initial-color={ v.selectedColor() }
+			x-init="color = $el.dataset.initialColor"
+		>
+			@productGallery(v.P.Images, v.InitialImg, v.P.Name, productPath(v.P.Slug), variantQuery(v.Selected), WishlistButton(v.P.ID, v.Cards.liked(v.P.ID), ""), "Imagens do produto")
+			<div class="space-y-4">
+				@components.Card(components.Props{}) {
+					@components.CardHeader(components.Props{}) {
+						<div class="flex items-start justify-between">
+							<div class="space-y-2">
+								@components.Badge(components.BadgeProps{Variant: components.BadgeSecondary}) {
+									{ store.CategoryLabel(v.P.Category) }
+								}
+								@components.CardTitle(components.Props{}) {
+									{ v.P.Name }
+								}
+								@ratingSummaryLine(v.Reviews.Summary)
+							</div>
+							if pct, ok := store.DiscountPercent(v.P.CompareAtPriceInCents, v.P.PriceInCents); ok {
+								@components.Badge(components.BadgeProps{Variant: components.BadgePrimary}) {
+									{ "-" + strconv.Itoa(pct) + "%" }
+								}
+							}
+						</div>
+					}
+					@components.CardContent(components.Props{}) {
+						<div class="space-y-2">
+							if v.P.CompareAtPriceInCents != nil {
+								<p class="text-sm text-muted-foreground line-through">{ price(*v.P.CompareAtPriceInCents) }</p>
+							}
+							if v.Settings.PixDiscountPercent > 0 {
+								<p class="text-2xl font-bold text-primary">{ pixText(v.pixPrice()) }</p>
+								<p class="text-sm text-muted-foreground">ou { price(v.Price) }</p>
+							} else {
+								<p class="text-2xl font-medium text-primary">{ price(v.Price) }</p>
+							}
+						</div>
+						if v.P.Description != nil {
+							<p class="text-muted-foreground mt-4">{ *v.P.Description }</p>
+						}
+					}
+				}
+				if len(v.P.Colors) > 0 {
+					@components.Card(components.Props{}) {
+						@components.CardHeader(components.Props{}) {
+							@components.CardTitle(components.Props{}) {
+								Selecione a cor
+							}
+						}
+						@components.CardContent(components.Props{}) {
+							<div class="flex gap-3 flex-wrap items-center" role="radiogroup" aria-label="Cores disponíveis">
+								for i, color := range v.P.Colors {
+									if i < 12 {
+										<button
+											type="button"
+											role="radio"
+											title={ color.Name }
+											aria-label={ color.Name }
+											data-color={ color.Name }
+											aria-checked={ boolStr(v.selectedColor() == color.Name) }
+											x-bind:aria-checked={ colorMatchExpr + " ? 'true' : 'false'" }
+											class={ stateClass(swatchBase, swatchOn, swatchOff, v.selectedColor() == color.Name) }
+											x-bind:class={ xClass(swatchOn, swatchOff, colorMatchExpr) }
+											x-on:click="color = $el.dataset.color"
+										>
+											if color.Hex != nil {
+												<span class="block h-full w-full rounded-full" style={ swatchStyle(color.Hex) }></span>
+											} else {
+												<span class="block h-full w-full rounded-full bg-foreground/10"></span>
+											}
+										</button>
+									}
+								}
+								if len(v.P.Colors) > 12 {
+									<span class="text-sm text-muted-foreground">{ "+" + strconv.Itoa(len(v.P.Colors)-12) + " cores" }</span>
+								}
+								<button type="button" class="text-xs text-primary hover:underline" x-on:click="color = ''">
+									Todas
+								</button>
+							</div>
+						}
+					}
+				}
+				@components.Card(components.Props{}) {
+					@components.CardHeader(components.Props{}) {
+						<div class="flex items-center justify-between">
+							@components.CardTitle(components.Props{}) {
+								Selecione o tamanho
+							}
+							<a href="/guia-de-medidas" class="text-xs text-primary hover:underline">Guia de medidas</a>
+						</div>
+					}
+					@components.CardContent(components.Props{}) {
+						<p class="mb-2 text-sm text-muted-foreground">
+							Cor selecionada:
+							<span class="font-medium" x-text="color === '' ? 'Todas' : color">{ colorLabel(v.selectedColor()) }</span>
+						</p>
+						<div class="grid gap-2">
+							for _, variant := range v.P.Variants {
+								<a
+									href={ templ.SafeURL(productVariantHref(v.P.Slug, variant.ID)) }
+									data-color={ variant.Color }
+									hidden?={ colorHidden(v.selectedColor(), variant.Color) }
+									x-bind:hidden="color !== '' && color !== $el.dataset.color"
+									class={ components.ButtonVariants(variantVariant(v.Selected != nil && v.Selected.ID == variant.ID), components.ButtonMd, "w-full justify-between", components.If(variant.Available == 0, "opacity-50")) }
+								>
+									<span class="font-medium">{ variant.Label() }</span>
+									<span class="text-sm">
+										if variant.Available > 0 {
+											{ strconv.Itoa(int(variant.Available)) } disponíveis
+										} else {
+											Esgotado
+										}
+									</span>
+								</a>
+							}
+						</div>
+					}
+				}
+				@components.Card(components.Props{}) {
+					@components.CardContent(components.Props{}) {
+						<form
+							method="post"
+							action={ templ.SafeURL(productPath(v.P.Slug)) }
+							hx-post="/carrinho/adicionar"
+							hx-target="#cart-sheet-body"
+							hx-swap="innerHTML"
+							class="space-y-3"
+						>
+							if v.Selected != nil {
+								<input type="hidden" name="variant_id" value={ v.Selected.ID.String() }/>
+							} else {
+								<input type="hidden" name="variant_id" value=""/>
+							}
+							@components.Button(components.ButtonProps{Size: components.ButtonLg, Class: "w-full", Attrs: templ.Attributes{"type": "submit", "disabled": v.selectedAvailable() == 0}}) {
+								if v.selectedAvailable() > 0 {
+									Adicionar ao carrinho
+								} else {
+									Indisponível
+								}
+							}
+							if v.WhatsappURL != "" {
+								<a
+									href={ templ.SafeURL(v.WhatsappURL) }
+									target="_blank"
+									rel="noreferrer"
+									class={ components.ButtonVariants(components.ButtonOutline, components.ButtonLg, "w-full") }
+								>
+									Comprar pelo WhatsApp
+								</a>
+							}
+							@addToCartFeedback(v.Added, v.AddError)
+							if v.selectedAvailable() > 0 {
+								@components.Badge(components.BadgeProps{Variant: components.BadgePrimary}) {
+									Em estoque
+								}
+							} else {
+								@components.Badge(components.BadgeProps{Variant: components.BadgeDestructive}) {
+									Esgotado
+								}
+							}
+						</form>
+					}
+				}
+				if v.selectedAvailable() == 0 && v.Selected != nil {
+					@stockAlertForm(v.Selected.ID.String(), v.AlertEmail)
+				}
+				@components.Separator(false, components.Props{Class: "my-4"})
+				@components.Accordion(components.Props{}) {
+					@components.AccordionItem(components.Props{Attrs: templ.Attributes{"open": true}}) {
+						@components.AccordionTrigger(components.Props{}) {
+							Frete e entrega
+						}
+						@components.AccordionContent(components.Props{}) {
+							<p>{ v.ShippingCopy }</p>
+						}
+					}
+					@components.AccordionItem(components.Props{}) {
+						@components.AccordionTrigger(components.Props{}) {
+							Trocas e devoluções
+						}
+						@components.AccordionContent(components.Props{}) {
+							<p>
+								Você tem até 7 dias após o recebimento para solicitar troca ou devolução. Consulte nossa
+								<a href="/trocas-devolucoes" class="text-primary underline">política completa</a>.
+							</p>
+						}
+					}
+					@components.AccordionItem(components.Props{}) {
+						@components.AccordionTrigger(components.Props{}) {
+							Cuidados com a peça
+						}
+						@components.AccordionContent(components.Props{}) {
+							<p>Lave à mão com água fria. Não use alvejante. Seque à sombra para preservar cores e elasticidade.</p>
+						}
+					}
+				}
+			</div>
+		</div>
+		@productReviews(v.P.ID, v.P.Slug, v.Reviews)
+		if len(v.Looks) > 0 {
+			<section>
+				@components.Separator(false, components.Props{Class: "my-4"})
+				<p class="text-sm font-medium tracking-tight text-primary uppercase">Complementos</p>
+				<h2 class="mt-2 mb-4 text-4xl font-bold tracking-tight">Complete o look</h2>
+				@productGrid("grid gap-8 @sm/page:grid-cols-2 @lg/page:grid-cols-4", v.Looks, v.Cards)
+			</section>
+		}
+		if len(v.Related) > 0 {
+			<section>
+				@components.Separator(false, components.Props{Class: "my-4"})
+				<p class="text-sm font-medium tracking-tight text-primary uppercase">Você também pode gostar</p>
+				<h2 class="mt-2 mb-4 text-4xl font-bold tracking-tight">Produtos relacionados</h2>
+				@productGrid("grid gap-8 @sm/page:grid-cols-2 @lg/page:grid-cols-4", v.Related, v.Cards)
+			</section>
+		}
+	}
+}

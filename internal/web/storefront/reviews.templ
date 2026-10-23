@@ -1,0 +1,179 @@
+package storefront
+
+import (
+	"strconv"
+
+	"github.com/google/uuid"
+
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+	"github.com/wellington-vell/lindaflor/internal/web/format"
+)
+
+// ratingSummaryLine is the product header rating (links to #avaliacoes).
+templ ratingSummaryLine(s store.RatingSummary) {
+	if s.Count > 0 {
+		<a href="#avaliacoes" class="flex flex-wrap items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+			@StarRating(s.Average, false)
+			<span class="font-medium text-foreground">{ s.AverageLabel() }</span>
+			<span>({ s.CountLabel() })</span>
+			if label, pct, ok := s.FitMajority(); ok {
+				<span>· { label } para { strconv.FormatInt(pct, 10) }%</span>
+			}
+		</a>
+	}
+}
+
+// productReviews is the review section of the product page
+// (src/app/store/reviews.rs product_reviews).
+templ productReviews(productID uuid.UUID, slug string, sec store.ReviewSection) {
+	<section id="avaliacoes" class="scroll-mt-24">
+		@components.Separator(false, components.Props{Class: "my-4"})
+		<p class="text-sm font-medium tracking-tight text-primary uppercase">Avaliações</p>
+		<h2 class="mt-2 mb-4 text-4xl font-bold tracking-tight">O que dizem as clientes</h2>
+		<div class="grid gap-6 @3xl/page:grid-cols-[1fr_2fr]">
+			<div class="space-y-4">
+				if sec.Summary.Count > 0 {
+					<div class="space-y-1">
+						<p class="text-4xl font-semibold">{ sec.Summary.AverageLabel() }</p>
+						@StarRating(sec.Summary.Average, false)
+						<p class="text-sm text-muted-foreground">{ sec.Summary.CountLabel() }</p>
+						if label, pct, ok := sec.Summary.FitMajority(); ok {
+							<p class="text-sm text-muted-foreground">Caimento: { label } para { strconv.FormatInt(pct, 10) }% das clientes</p>
+						}
+					</div>
+				} else {
+					<p class="text-sm text-muted-foreground">Este produto ainda não tem avaliações.</p>
+				}
+				if sec.ReviewedNote != "" {
+					<p class="text-sm text-muted-foreground">{ sec.ReviewedNote }</p>
+				}
+				if sec.ShowForm {
+					@reviewForm(productID)
+				}
+			</div>
+			<div id="review-list">
+				if sec.Summary.Count > 0 {
+					@reviewList(productID, slug, sec)
+				}
+			</div>
+		</div>
+	</section>
+}
+
+func reviewsPageHref(slug string, page int64) string {
+	return productPath(slug) + "?avaliacoes=" + strconv.FormatInt(page, 10) + "#avaliacoes"
+}
+
+func reviewsFragmentHref(productID uuid.UUID, page int64) string {
+	return "/avaliacoes/lista?product_id=" + productID.String() + "&page=" + strconv.FormatInt(page, 10)
+}
+
+func reviewDate(r store.PublicReview) string {
+	s := format.DateTimeBR(r.CreatedAt)
+	if rs := []rune(s); len(rs) > 10 {
+		return string(rs[:10])
+	}
+	return s
+}
+
+// reviewList is the /avaliacoes/lista shard: one page of approved reviews.
+templ reviewList(productID uuid.UUID, slug string, sec store.ReviewSection) {
+	<ul class="divide-y divide-border">
+		for _, review := range sec.Reviews {
+			<li class="space-y-2 py-4">
+				<div class="flex flex-wrap items-center gap-2">
+					@StarRating(float64(review.Rating), true)
+					<h3 class="font-medium">{ review.Title }</h3>
+				</div>
+				<p class="whitespace-pre-line text-sm text-muted-foreground">{ review.Body }</p>
+				<p class="text-xs text-muted-foreground">
+					{ review.Author() }
+					{ " · " + reviewDate(review) }
+					if fit := review.FitLabel(); fit != "" {
+						{ " · " + fit }
+					}
+					{ " · Compra verificada" }
+				</p>
+			</li>
+		}
+	</ul>
+	if sec.Pager.TotalPages > 1 {
+		@components.Pagination(components.Props{}) {
+			@components.PaginationContent(components.Props{}) {
+				if sec.Pager.HasPrev() {
+					@components.PaginationItem(components.Props{}) {
+						<a
+							href={ templ.SafeURL(reviewsPageHref(slug, sec.Pager.Page-1)) }
+							hx-get={ reviewsFragmentHref(productID, sec.Pager.Page-1) }
+							hx-target="#review-list"
+							class={ components.ButtonVariants(components.ButtonGhost, components.ButtonMd) }
+						>Anteriores</a>
+					}
+				}
+				@components.PaginationItem(components.Props{}) {
+					<span class="px-3 text-sm text-muted-foreground">{ sec.Pager.Label() }</span>
+				}
+				if sec.Pager.HasNext() {
+					@components.PaginationItem(components.Props{}) {
+						<a
+							href={ templ.SafeURL(reviewsPageHref(slug, sec.Pager.Page+1)) }
+							hx-get={ reviewsFragmentHref(productID, sec.Pager.Page+1) }
+							hx-target="#review-list"
+							class={ components.ButtonVariants(components.ButtonGhost, components.ButtonMd) }
+						>Mais avaliações</a>
+					}
+				}
+			}
+		}
+	}
+}
+
+templ reviewForm(productID uuid.UUID) {
+	@components.Card(components.Props{Attrs: templ.Attributes{"id": "avaliar"}}) {
+		@components.CardHeader(components.Props{}) {
+			@components.CardTitle(components.Props{}) {
+				Avalie sua compra
+			}
+			@components.CardDescription(components.Props{}) {
+				Sua avaliação é publicada após moderação.
+			}
+		}
+		@components.CardContent(components.Props{}) {
+			<form method="post" action="/avaliacoes/enviar" class="space-y-4">
+				<input type="hidden" name="product_id" value={ productID.String() }/>
+				<fieldset class="space-y-2">
+					<legend class="text-sm font-medium">Nota</legend>
+					<div class="flex flex-wrap gap-3">
+						for v := 5; v >= 1; v-- {
+							<label class="flex items-center gap-1 text-sm">
+								<input type="radio" name="rating" value={ strconv.Itoa(v) } required/>
+								{ strconv.Itoa(v) } ★
+							</label>
+						}
+					</div>
+				</fieldset>
+				<label class="block space-y-1 text-sm font-medium">
+					<span>Título</span>
+					@components.Input(components.InputProps{Attrs: templ.Attributes{"name": "title", "required": true, "maxlength": "80"}})
+				</label>
+				<label class="block space-y-1 text-sm font-medium">
+					<span>Comentário</span>
+					@components.Textarea(components.InputProps{Attrs: templ.Attributes{"name": "body", "required": true, "maxlength": "2000", "rows": "4"}}, "")
+				</label>
+				<label class="block space-y-1 text-sm font-medium">
+					<span>Caimento (opcional)</span>
+					@components.Select(components.InputProps{Attrs: templ.Attributes{"name": "fit"}}) {
+						<option value="">Não informar</option>
+						<option value="pequeno">Veste pequeno</option>
+						<option value="ideal">Tamanho ideal</option>
+						<option value="grande">Veste grande</option>
+					}
+				</label>
+				@components.Button(components.ButtonProps{Class: "w-full", Attrs: templ.Attributes{"type": "submit"}}) {
+					Enviar avaliação
+				}
+			</form>
+		}
+	}
+}
