@@ -1,0 +1,122 @@
+package admin
+
+import (
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+	"github.com/wellington-vell/lindaflor/internal/web/format"
+)
+
+// starRating is the read-only 0–5 stars (port of reviews::star_rating,
+// small size).
+templ starRating(rating float64) {
+	{{ filled := store.StarsFilled(rating) }}
+	<span class="inline-flex items-center gap-0.5" role="img" aria-label={ store.StarsAriaLabel(rating) }>
+		for i := range 5 {
+			if i < filled {
+				@components.Icon("star", "size-3.5 text-amber-500 fill-current")
+			} else {
+				@components.Icon("star", "size-3.5 text-muted-foreground/40")
+			}
+		}
+	</span>
+}
+
+func reviewFitLabel(fit *string) string {
+	if fit == nil {
+		return ""
+	}
+	if f, ok := store.ParseFit(*fit); ok {
+		return f.Label()
+	}
+	return ""
+}
+
+templ reviewStatusBadge(r store.AdminReview) {
+	{{ tone, label := r.StatusBadge() }}
+	@components.Badge(components.BadgeProps{Variant: variant(tone)}) {
+		{ label }
+	}
+}
+
+func rejectVariant(status string) components.ButtonVariant {
+	if status == "pending" {
+		return components.ButtonOutline
+	}
+	return components.ButtonGhost
+}
+
+templ reviewsPage(d reviewsData) {
+	@components.Container(components.ContainerProps{}) {
+		<div>
+			<h1 class="text-2xl font-semibold tracking-tight">Avaliações</h1>
+			<p class="text-muted-foreground">{ itoa(d.Pending) + " pendentes de moderação. Só avaliações aprovadas aparecem na loja." }</p>
+		</div>
+		if len(d.Reviews) == 0 {
+			<div class="py-12 text-center text-muted-foreground">Nenhuma avaliação ainda</div>
+		} else {
+			@components.Table(components.Props{}) {
+				@components.TableHeader(components.Props{}) {
+					@components.TableRow(components.Props{}) {
+						@th("Produto")
+						@th("Cliente")
+						@th("Avaliação")
+						@th("Status")
+						@th("Data")
+						@th("Ações")
+					}
+				}
+				@components.TableBody(components.Props{}) {
+					for _, rv := range d.Reviews {
+						@components.TableRow(components.Props{}) {
+							@components.TableCell(components.Props{}) {
+								<a href={ templ.SafeURL("/produtos/" + rv.ProductSlug) } class="text-primary hover:underline">{ rv.ProductName }</a>
+							}
+							@components.TableCell(components.Props{}) {
+								<div class="text-sm">{ rv.AuthorName }</div>
+								<div class="text-xs text-muted-foreground">{ rv.AuthorEmail }</div>
+							}
+							@components.TableCell(components.Props{}) {
+								<div class="max-w-md space-y-1 whitespace-normal">
+									@starRating(float64(rv.Rating))
+									<p class="font-medium">{ rv.Title }</p>
+									<p class="whitespace-pre-line text-sm text-muted-foreground">{ rv.Body }</p>
+									if fit := reviewFitLabel(rv.Fit); fit != "" {
+										<p class="text-xs text-muted-foreground">{ "Caimento: " + fit }</p>
+									}
+								</div>
+							}
+							@components.TableCell(components.Props{}) {
+								@reviewStatusBadge(rv)
+							}
+							@components.TableCell(components.Props{}) {
+								<span class="text-muted-foreground">{ format.DateTimeBR(rv.CreatedAt) }</span>
+							}
+							@components.TableCell(components.Props{}) {
+								<div class="flex flex-wrap gap-2">
+									if rv.Status != "approved" {
+										<form method="post" action="/admin/avaliacoes">
+											@hidden("review_id", rv.ID.String())
+											@hidden("action", "approve")
+											@submit(components.ButtonPrimary, components.ButtonSm) {
+												Aprovar
+											}
+										</form>
+									}
+									if rv.Status != "rejected" {
+										<form method="post" action="/admin/avaliacoes">
+											@hidden("review_id", rv.ID.String())
+											@hidden("action", "reject")
+											@submit(rejectVariant(rv.Status), components.ButtonSm) {
+												Rejeitar
+											}
+										</form>
+									}
+								</div>
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}

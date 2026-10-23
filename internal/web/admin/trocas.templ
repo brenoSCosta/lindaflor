@@ -1,0 +1,265 @@
+package admin
+
+import (
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+	"github.com/wellington-vell/lindaflor/internal/web/format"
+)
+
+templ returnStatusBadge(s store.ReturnSummary) {
+	@components.Badge(components.BadgeProps{Variant: variant(s.StatusTone())}) {
+		{ s.StatusLabel() }
+	}
+}
+
+templ returnsPage(d returnsData) {
+	@components.Container(components.ContainerProps{}) {
+		@pageTitle("Trocas e devoluções", "Solicitações abertas pelos clientes na página do pedido.")
+		<div class="flex flex-wrap items-center gap-2">
+			for _, f := range d.Filters {
+				<a href={ templ.SafeURL(f.Page) } class={ filterClass(f.Selected) }>{ f.Label }</a>
+			}
+		</div>
+		if len(d.Rows) == 0 {
+			<p class="text-sm text-muted-foreground">Nenhuma solicitação encontrada.</p>
+		} else {
+			@components.Table(components.Props{}) {
+				@components.TableHeader(components.Props{}) {
+					@components.TableRow(components.Props{}) {
+						@th("Data")
+						@th("Pedido")
+						@th("Cliente")
+						@th("Tipo")
+						@th("Peças")
+						@th("Status")
+					}
+				}
+				@components.TableBody(components.Props{}) {
+					for _, row := range d.Rows {
+						@components.TableRow(components.Props{}) {
+							@components.TableCell(components.Props{}) {
+								<a href={ templ.SafeURL("/admin/trocas/" + row.ID.String()) } class="text-primary hover:underline">{ format.DateTimeBR(row.CreatedAt) }</a>
+							}
+							@components.TableCell(components.Props{}) {
+								<span class="font-mono text-sm">{ "#" + store.OrderCode(row.OrderID) }</span>
+							}
+							@td(deref(row.Email))
+							@td(row.KindLabel())
+							@td(itoa(row.Units))
+							@components.TableCell(components.Props{}) {
+								@returnStatusBadge(row.ReturnSummary)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// orderReturnsCard lists an order's return requests on the admin order
+// page (nothing without requests).
+templ orderReturnsCard(requests []store.ReturnSummary) {
+	if len(requests) > 0 {
+		@cardTitled("Trocas e devoluções") {
+			<ul class="flex flex-col gap-2 text-sm">
+				for _, req := range requests {
+					<li class="flex flex-wrap items-center gap-2">
+						<a href={ templ.SafeURL("/admin/trocas/" + req.ID.String()) } class="text-primary hover:underline">{ req.KindLabel() + " · " + format.DateTimeBR(req.CreatedAt) }</a>
+						@returnStatusBadge(req)
+					</li>
+				}
+			</ul>
+		}
+	}
+}
+
+func fullRefundLabel(mp bool) string {
+	if mp {
+		return "Estornar no Mercado Pago"
+	}
+	return "Estornar pedido (PIX devolvido)"
+}
+
+func fullRefundAction(mp bool) string {
+	if mp {
+		return "mp_refund"
+	}
+	return "refund_order"
+}
+
+func partialRefundHint(o *store.RefundOptions) string {
+	switch {
+	case o.OrderRefunded:
+		return "O pedido já foi estornado; registre o valor para concluir a solicitação."
+	case o.MercadoPago:
+		return "Devolução parcial: faça o reembolso parcial no painel do Mercado Pago e registre o valor aqui."
+	}
+	return "Devolução parcial: faça o PIX ao cliente e registre o valor aqui. O status do pedido não muda."
+}
+
+func auditActor(s *string) string {
+	if s == nil {
+		return "sistema"
+	}
+	return *s
+}
+
+templ returnPage(d *store.AdminReturnDetail) {
+	{{ s := d.Summary }}
+	{{ action := "/admin/trocas/" + s.ID.String() }}
+	@components.Container(components.ContainerProps{}) {
+		<div class="flex flex-wrap items-center gap-3">
+			<h1 class="text-2xl font-semibold tracking-tight">{ s.KindLabel() }</h1>
+			@returnStatusBadge(s)
+		</div>
+		<p class="text-sm text-muted-foreground">
+			Pedido
+			<a href={ templ.SafeURL("/admin/pedidos/" + s.OrderID.String()) } class="font-mono text-primary hover:underline">{ "#" + store.OrderCode(s.OrderID) }</a>
+			{ " · " + d.OrderStatus + " · " + price(d.OrderTotalCents) + " · aberta em " + format.DateTimeBR(s.CreatedAt) }
+		</p>
+		@cardTitled("Solicitação") {
+			<div class="flex flex-col gap-2 text-sm">
+				<p>{ "Cliente: " + deref(d.Email) }</p>
+				if d.DesiredSize != nil {
+					<p>
+						Tamanho desejado:
+						<strong>{ *d.DesiredSize }</strong>
+					</p>
+				}
+				<p class="whitespace-pre-line">{ "Motivo: " + d.Reason }</p>
+				if s.Instructions != nil {
+					<p class="whitespace-pre-line text-muted-foreground">{ "Instruções enviadas: " + *s.Instructions }</p>
+				}
+				if s.RejectionReason != nil {
+					<p class="text-muted-foreground">{ "Motivo da recusa: " + *s.RejectionReason }</p>
+				}
+				if s.RefundCents != nil {
+					<p>{ "Reembolso: " + price(*s.RefundCents) }</p>
+				}
+			</div>
+			@components.Table(components.Props{}) {
+				@components.TableHeader(components.Props{}) {
+					@components.TableRow(components.Props{}) {
+						@th("Produto")
+						@th("Variação")
+						@th("Qtd. (pedido)")
+						@th("Valor")
+					}
+				}
+				@components.TableBody(components.Props{}) {
+					for _, it := range d.Items {
+						@components.TableRow(components.Props{}) {
+							@td(it.ProductName)
+							@td(it.VariantLabel)
+							@td(itoa(it.Quantity) + " (" + itoa(it.Ordered) + ")")
+							@td(price(it.UnitPriceCents * int64(it.Quantity)))
+						}
+					}
+				}
+			}
+		}
+		if d.CanReject() {
+			@cardTitled("Ações") {
+				<div class="flex flex-col gap-4">
+					if d.CanApprove() {
+						<form method="post" action={ templ.SafeURL(action) } class="flex flex-col gap-2">
+							@hidden("action", "approve")
+							@fieldLabel("approve-text", "Instruções de envio para o cliente (logística reversa / código de postagem)")
+							@components.Textarea(components.InputProps{Attrs: templ.Attributes{"id": "approve-text", "name": "text", "required": true, "maxlength": "2000"}}, store.DefaultReturnInstructions)
+							<div>
+								@submit(components.ButtonPrimary, components.ButtonMd) {
+									Aprovar e enviar instruções
+								}
+							</div>
+						</form>
+					}
+					if d.CanReceive() {
+						<form method="post" action={ templ.SafeURL(action) }>
+							@hidden("action", "receive")
+							@submit(components.ButtonPrimary, components.ButtonMd) {
+								Marcar peça como recebida
+							}
+						</form>
+					}
+					if d.CanExchange() {
+						<form method="post" action={ templ.SafeURL(action) }>
+							@hidden("action", "exchange")
+							@submit(components.ButtonPrimary, components.ButtonMd) {
+								Concluir troca (nova peça enviada)
+							}
+						</form>
+					}
+					if d.FullRefund() {
+						<form method="post" action={ templ.SafeURL(action) } class="flex flex-wrap items-center gap-2">
+							@hidden("action", fullRefundAction(d.Refund.MercadoPago))
+							@components.Checkbox(components.Props{Attrs: templ.Attributes{"id": "restock-full", "name": "restock", "value": "1", "checked": true}})
+							@fieldLabel("restock-full", "Devolver ao estoque")
+							@submit(components.ButtonDestructive, components.ButtonMd) {
+								{ fullRefundLabel(d.Refund.MercadoPago) }
+							}
+						</form>
+						<p class="text-xs text-muted-foreground">
+							{ "A solicitação cobre o pedido inteiro: o estorno é do pedido todo (" + price(d.OrderTotalCents) + ")." }
+						</p>
+					}
+					if d.PartialRefund() {
+						<form method="post" action={ templ.SafeURL(action) } class="flex flex-col gap-2">
+							@hidden("action", "record_refund")
+							<p class="text-xs text-muted-foreground">{ partialRefundHint(d.Refund) }</p>
+							<div class="flex flex-wrap items-end gap-2">
+								<div class="flex flex-col gap-1.5">
+									@fieldLabel("amount", "Valor reembolsado (máx. "+price(d.Refund.MaxManualCents)+")")
+									@components.Input(components.InputProps{Attrs: templ.Attributes{"id": "amount", "name": "amount", "required": true, "inputmode": "decimal", "placeholder": "49,90"}})
+								</div>
+								if !d.Refund.OrderRefunded {
+									<div class="flex items-center gap-2">
+										@components.Checkbox(components.Props{Attrs: templ.Attributes{"id": "restock-partial", "name": "restock", "value": "1", "checked": true}})
+										@fieldLabel("restock-partial", "Devolver peças ao estoque")
+									</div>
+								}
+								@submit(components.ButtonDestructive, components.ButtonMd) {
+									Registrar reembolso
+								}
+							</div>
+						</form>
+					}
+					<form method="post" action={ templ.SafeURL(action) } class="flex flex-col gap-2">
+						@hidden("action", "reject")
+						@fieldLabel("reject-text", "Recusar — motivo enviado ao cliente")
+						@components.Input(components.InputProps{Attrs: templ.Attributes{"id": "reject-text", "name": "text", "required": true, "maxlength": "2000"}})
+						<div>
+							@submit(components.ButtonOutline, components.ButtonMd) {
+								Recusar solicitação
+							}
+						</div>
+					</form>
+				</div>
+			}
+		}
+		@cardTitled("Histórico") {
+			<ul class="flex flex-col gap-2 text-sm">
+				for _, e := range d.Audit {
+					<li>
+						<span class="text-muted-foreground">{ format.DateTimeBR(e.OccurredAt) + " · " }</span>
+						<span class="font-medium">{ e.Label }</span>
+						{ " — " + auditActor(e.ActorName) }
+						if e.Detail != "" {
+							<span class="block whitespace-pre-line text-muted-foreground">{ e.Detail }</span>
+						}
+					</li>
+				}
+			</ul>
+			<form method="post" action={ templ.SafeURL(action) } class="mt-4 flex flex-col gap-2">
+				@hidden("action", "note")
+				@fieldLabel("note-text", "Adicionar observação interna")
+				@components.Textarea(components.InputProps{Attrs: templ.Attributes{"id": "note-text", "name": "text", "required": true, "maxlength": "2000"}}, "")
+				<div>
+					@submit(components.ButtonOutline, components.ButtonMd) {
+						Salvar observação
+					}
+				</div>
+			</form>
+		}
+	}
+}

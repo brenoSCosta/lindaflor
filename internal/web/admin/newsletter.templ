@@ -1,0 +1,61 @@
+package admin
+
+import (
+	"time"
+
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+)
+
+// isoDateTime matches the Rust ISO 8601 display (UTC, nanoseconds).
+func isoDateTime(t time.Time) string {
+	return t.UTC().Format("2006-01-02T15:04:05.000000000Z07:00")
+}
+
+func dashIfEmpty(s *string) string {
+	if s == nil {
+		return "-"
+	}
+	return *s
+}
+
+templ newsletterPage(d store.NewsletterAdmin) {
+	@components.Container(components.ContainerProps{}) {
+		<div class="space-y-6">
+			<div class="flex items-center justify-between">
+				<div>
+					<h1 class="text-2xl font-bold">Newsletter</h1>
+					<p class="text-sm text-muted-foreground">Gerencie inscritos da newsletter</p>
+					<p class="text-sm text-muted-foreground">
+						{ itoa(d.Active) + " ativas · " + itoa(d.Cancelled) + " canceladas (a exportação inclui só as ativas)" }
+					</p>
+				</div>
+				<a href="/admin/newsletter/export-csv" class="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:opacity-90" download="newsletter.csv">Exportar CSV (ativas)</a>
+			</div>
+			if len(d.Subscribers) == 0 {
+				<div class="text-center py-12 text-muted-foreground">Nenhum inscritor ainda</div>
+			} else {
+				@components.Table(components.Props{}) {
+					@components.TableHeader(components.Props{}) {
+						@components.TableRow(components.Props{}) {
+							@th("E-mail")
+							@th("Nome")
+							@th("Data de Inscrição")
+							@th("Status")
+						}
+					}
+					@components.TableBody(components.Props{}) {
+						for _, s := range d.Subscribers {
+							@components.TableRow(components.Props{}) {
+								@td(s.Email)
+								@td(dashIfEmpty(s.Name))
+								@td(isoDateTime(s.CreatedAt))
+								@td(s.StatusLabel())
+							}
+						}
+					}
+				}
+			}
+		</div>
+	}
+}

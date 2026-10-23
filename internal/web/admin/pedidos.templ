@@ -1,0 +1,350 @@
+package admin
+
+import (
+	"strconv"
+
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+	"github.com/wellington-vell/lindaflor/internal/web/format"
+)
+
+const orderResultsID = "order-results"
+
+templ orderResults(d orderDirectory) {
+	<div id={ orderResultsID } class="contents">
+		<input type="hidden" name="status" value={ d.Status } form="order-search-form"/>
+		@filterBar("#"+orderResultsID, d.Filters)
+		if len(d.Orders) == 0 {
+			<p class="text-sm text-muted-foreground">Nenhum pedido encontrado.</p>
+		} else {
+			@components.Table(components.Props{}) {
+				@components.TableHeader(components.Props{}) {
+					@components.TableRow(components.Props{}) {
+						@th("ID")
+						@th("Cliente")
+						@th("Status")
+						@th("Itens")
+						@th("Rastreio")
+						@th("Total")
+						@th("Data")
+					}
+				}
+				@components.TableBody(components.Props{}) {
+					for _, o := range d.Orders {
+						@components.TableRow(components.Props{}) {
+							@components.TableCell(components.Props{}) {
+								<a href={ templ.SafeURL("/admin/pedidos/" + o.ID.String()) } class="font-mono text-sm text-primary hover:underline">{ o.ID.String() }</a>
+							}
+							@td(deref(o.GuestEmail))
+							@td(o.Status)
+							@td(itoa(o.ItemCount))
+							@components.TableCell(components.Props{}) {
+								if o.TrackingCode != nil {
+									<span class="font-mono text-xs">{ o.Carrier + " " + *o.TrackingCode }</span>
+								} else {
+									<span class="text-muted-foreground">—</span>
+								}
+							}
+							@td(reais(o.TotalCents))
+							@components.TableCell(components.Props{}) {
+								<span class="text-muted-foreground">{ format.DateTimeBR(o.CreatedAt) }</span>
+							}
+						}
+					}
+				}
+			}
+		}
+		@pager("#"+orderResultsID, d.Pager)
+	</div>
+}
+
+templ ordersPage(d orderDirectory) {
+	@components.Container(components.ContainerProps{}) {
+		@pageTitle("Pedidos", "Acompanhe pedidos da loja e status de pagamento.")
+		@searchForm(searchBox{
+			FormID: "order-search-form", InputID: "order-search", Action: ordersPath, Fragment: ordersListPath,
+			Target: "#" + orderResultsID, Value: d.Query, Placeholder: "Buscar por e-mail ou rastreio", AriaLabel: "Buscar pedidos",
+		})
+		@orderResults(d)
+	}
+}
+
+// statusForm is a one-button status change form.
+templ statusForm(action, status string, v components.ButtonVariant, label string) {
+	<form method="post" action={ templ.SafeURL(action) }>
+		@hidden("status", status)
+		@submit(v, components.ButtonMd) {
+			{ label }
+		}
+	</form>
+}
+
+// restockForm is a status change with the "Devolver ao estoque" checkbox.
+templ restockForm(action, status, checkboxID string, checked bool, label string) {
+	<form method="post" action={ templ.SafeURL(action) } class="flex items-center gap-2">
+		@hidden("status", status)
+		@components.Checkbox(components.Props{Attrs: templ.Attributes{"id": checkboxID, "name": "restock", "value": "1", "checked": checked}})
+		@fieldLabel(checkboxID, "Devolver ao estoque")
+		@submit(components.ButtonOutline, components.ButtonMd) {
+			{ label }
+		}
+	</form>
+}
+
+templ cardTitled(title string) {
+	@components.Card(components.Props{}) {
+		@components.CardHeader(components.Props{}) {
+			@components.CardTitle(components.Props{}) {
+				{ title }
+			}
+		}
+		@components.CardContent(components.Props{}) {
+			{ children... }
+		}
+	}
+}
+
+func mpPaymentID(id *int64) string {
+	if id == nil {
+		return "não criado"
+	}
+	return strconv.FormatInt(*id, 10)
+}
+
+func orDashStr(s *string) string {
+	if s == nil {
+		return "—"
+	}
+	return *s
+}
+
+templ orderPage(v orderView) {
+	{{ o := v.O }}
+	{{ action := v.action() }}
+	@components.Container(components.ContainerProps{}) {
+		<div class="flex flex-wrap items-center gap-3">
+			<h1 class="text-2xl font-semibold tracking-tight">Pedido</h1>
+			@components.Badge(components.BadgeProps{Variant: variant(store.AdminOrderStatusTone(o.Status))}) {
+				{ store.OrderStatusLabel(o.Status) }
+			}
+		</div>
+		<p class="font-mono text-sm text-muted-foreground">{ o.ID.String() }</p>
+		<p class="text-sm text-muted-foreground">{ "Criado em " + o.CreatedAt }</p>
+		switch o.Status {
+			case "pending_payment":
+				<div class="mt-2 flex flex-wrap gap-3">
+					if v.ManualMoney {
+						@statusForm(action, "paid", components.ButtonPrimary, "Marcar como pago")
+					}
+					@statusForm(action, "cancelled", components.ButtonOutline, "Cancelar")
+				</div>
+			case "paid":
+				<div class="mt-2 flex flex-wrap items-center gap-3">
+					@statusForm(action, "processing", components.ButtonPrimary, "Em separação")
+					@restockForm(action, "cancelled", "restock-cancel", true, "Cancelar")
+					if v.ManualMoney {
+						@restockForm(action, "refunded", "restock-refund", true, "Estornar")
+					}
+				</div>
+			case "processing":
+				<div class="mt-2 flex flex-wrap items-center gap-3">
+					@restockForm(action, "cancelled", "restock-cancel", true, "Cancelar")
+					if v.ManualMoney {
+						@restockForm(action, "refunded", "restock-refund", true, "Estornar")
+					}
+				</div>
+			case "shipped":
+				<div class="mt-2 flex flex-wrap items-center gap-3">
+					@statusForm(action, "delivered", components.ButtonPrimary, "Marcar como entregue")
+					@restockForm(action, "cancelled", "restock-cancel", false, "Cancelar")
+					if v.ManualMoney {
+						@restockForm(action, "refunded", "restock-refund", false, "Estornar")
+					}
+				</div>
+			case "delivered":
+				<div class="mt-2 flex flex-wrap items-center gap-3">
+					if v.ManualMoney {
+						@restockForm(action, "refunded", "restock-refund", false, "Estornar")
+					}
+				</div>
+		}
+		if o.Reopenable() {
+			<div class="mt-2 flex flex-wrap items-center gap-3">
+				@statusForm(action, "reopen", components.ButtonPrimary, "Reabrir pedido")
+				if v.ManualMoney {
+					@statusForm(action, "reopen_pay", components.ButtonOutline, "Recebido após expirar")
+				}
+			</div>
+		}
+		if o.CanShip() {
+			@cardTitled("Envio") {
+				<form method="post" action={ templ.SafeURL(action) } class="grid gap-3 @sm/page:grid-cols-[12rem_1fr_auto] @sm/page:items-end">
+					@hidden("status", "shipped")
+					<div class="flex flex-col gap-1.5">
+						@fieldLabel("carrier", "Transportadora")
+						@components.Input(components.InputProps{Attrs: components.Attr("id", "carrier", "name", "carrier", "value", store.DefaultCarrier, "maxlength", "40")})
+					</div>
+					<div class="flex flex-col gap-1.5">
+						@fieldLabel("tracking_code", "Código de rastreio")
+						@components.Input(components.InputProps{Attrs: templ.Attributes{"id": "tracking_code", "name": "tracking_code", "placeholder": "AA123456789BR", "required": true, "maxlength": "40", "autocomplete": "off"}})
+					</div>
+					@submit(components.ButtonPrimary, components.ButtonMd) {
+						Marcar como enviado
+					}
+				</form>
+			}
+		}
+		if o.TrackingCode != nil {
+			@cardTitled("Rastreamento") {
+				<p class="text-sm">
+					{ o.Carrier + ": " }
+					<span class="font-mono">{ *o.TrackingCode }</span>
+				</p>
+				if link := o.TrackingLink(); link != "" {
+					<a href={ templ.SafeURL(link) } target="_blank" rel="noreferrer" class="text-sm text-primary hover:underline">Abrir rastreamento</a>
+				}
+				if o.ShippedAt != nil {
+					<p class="text-sm text-muted-foreground">{ "Enviado em " + *o.ShippedAt }</p>
+				}
+				if o.DeliveredAt != nil {
+					<p class="text-sm text-muted-foreground">{ "Entregue em " + *o.DeliveredAt }</p>
+				}
+			}
+		}
+		@orderReturnsCard(o.Returns)
+		if v.Payment != nil {
+			@cardTitled("Mercado Pago") {
+				<p class="text-sm">
+					Pagamento:
+					<span class="font-mono">{ mpPaymentID(v.Payment.MPPaymentID) }</span>
+				</p>
+				<p class="text-sm">
+					{ "Status MP: " + orDashStr(v.Payment.MPStatus) }
+					if v.Payment.MPStatusDetail != nil {
+						{ " (" + *v.Payment.MPStatusDetail + ")" }
+					}
+				</p>
+				if v.Payment.SyncedAt != "" {
+					<p class="text-sm text-muted-foreground">{ "Última sincronização: " + v.Payment.SyncedAt }</p>
+				}
+				if v.Payment.MPPaymentID != nil {
+					<div class="mt-2 flex flex-wrap gap-3">
+						@statusForm(action, "mp_sync", components.ButtonOutline, "Sincronizar com Mercado Pago")
+						if v.MPRefundable {
+							@statusForm(action, "mp_refund", components.ButtonDestructive, "Estornar no Mercado Pago")
+						}
+					</div>
+				}
+			}
+		}
+		if v.Override != nil {
+			<details class="rounded-lg border border-destructive/40 p-4">
+				<summary class="cursor-pointer text-sm font-medium">Ações manuais (avançado)</summary>
+				<div class="mt-3 flex flex-col gap-3">
+					<p class="text-sm text-muted-foreground">
+						Use só quando a sincronização com o Mercado Pago falhar. A alteração é local: nenhum dinheiro é cobrado ou devolvido no Mercado Pago, e a ação fica registrada na auditoria com o motivo.
+					</p>
+					<form method="post" action={ templ.SafeURL(action) } class="flex flex-col gap-3">
+						@hidden("status", v.Override.Status)
+						if v.Override.Restock {
+							<div class="flex items-center gap-2">
+								@components.Checkbox(components.Props{Attrs: components.Attr("id", "restock-override", "name", "restock", "value", "1")})
+								@fieldLabel("restock-override", "Devolver ao estoque")
+							</div>
+						}
+						<div class="flex flex-col gap-1.5">
+							@fieldLabel("override_reason", "Motivo")
+							@components.Input(components.InputProps{Attrs: templ.Attributes{"id": "override_reason", "name": "override_reason", "required": true, "minlength": "10", "maxlength": "500", "autocomplete": "off"}})
+						</div>
+						<div class="flex flex-col gap-1.5">
+							@fieldLabel("override_confirm", "Para confirmar, digite o código do pedido: "+o.Code())
+							@components.Input(components.InputProps{Attrs: templ.Attributes{"id": "override_confirm", "name": "override_confirm", "required": true, "maxlength": "9", "autocomplete": "off"}})
+						</div>
+						<div>
+							@submit(components.ButtonDestructive, components.ButtonMd) {
+								{ v.Override.Label }
+							}
+						</div>
+					</form>
+				</div>
+			</details>
+		}
+		@cardTitled("Cliente") {
+			if o.GuestEmail != "" {
+				<p class="text-sm">{ "E-mail: " + o.GuestEmail }</p>
+			}
+			if o.Address != nil && o.Address.Phone != "" {
+				<p class="text-sm">{ "WhatsApp: " + o.Address.Phone }</p>
+			}
+			if addr := o.Address.Display(); addr != "" {
+				<p class="text-sm text-muted-foreground">{ addr }</p>
+			}
+		}
+		if o.Status == "pending_payment" {
+			@cardTitled("Pagamento PIX") {
+				if o.ReservationExpiresAt != "" {
+					<p class="text-sm text-muted-foreground">{ "Reserva de estoque até " + o.ReservationExpiresAt }</p>
+				}
+				if pix := o.Meta.Pix(); pix != "" {
+					<p class="text-sm text-muted-foreground">PIX copia e cola:</p>
+					<code class="block overflow-x-auto rounded-lg border border-border bg-background p-3 text-xs">{ pix }</code>
+				}
+			}
+		}
+		@cardTitled("Itens") {
+			@components.Table(components.Props{}) {
+				@components.TableHeader(components.Props{}) {
+					@components.TableRow(components.Props{}) {
+						@th("Produto")
+						@th("Variação")
+						@th("Qtd.")
+						@th("Preço")
+					}
+				}
+				@components.TableBody(components.Props{}) {
+					for _, it := range o.Items {
+						@components.TableRow(components.Props{}) {
+							@td(it.ProductName)
+							@td(it.VariantLabel)
+							@td(itoa(it.Quantity))
+							@td(price(it.LineTotalCents()))
+						}
+					}
+				}
+			}
+		}
+		@cardTitled("Totais") {
+			<div class="flex flex-col gap-2 text-sm">
+				<div class="flex justify-between">
+					<span class="text-muted-foreground">Subtotal</span>
+					<span>{ price(o.SubtotalCents) }</span>
+				</div>
+				<div class="flex justify-between">
+					<span class="text-muted-foreground">Frete</span>
+					if o.ShippingCents == 0 {
+						<span>Grátis</span>
+					} else {
+						<span>{ price(o.ShippingCents) }</span>
+					}
+				</div>
+				if o.DiscountCents > 0 {
+					<div class="flex justify-between">
+						<span class="text-muted-foreground">
+							if code := o.Meta.Coupon(); code != "" {
+								{ "Desconto (" + code + ")" }
+							} else {
+								Desconto
+							}
+						</span>
+						<span>{ "-" + price(o.DiscountCents) }</span>
+					</div>
+				}
+				@components.Separator(false, components.Props{Class: "my-1"})
+				<div class="flex justify-between text-base font-medium">
+					<span>Total</span>
+					<span class="text-primary">{ price(o.TotalCents) }</span>
+				</div>
+			</div>
+		}
+	}
+}

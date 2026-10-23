@@ -1,0 +1,334 @@
+package admin
+
+import "github.com/wellington-vell/lindaflor/internal/web/components"
+
+const menuItem = "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm whitespace-nowrap outline-none hover:bg-foreground/5 focus-visible:bg-foreground/5 active:bg-foreground/10"
+
+const menuItemDestructive = "text-destructive hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10"
+
+const usersResultsID = "user-results"
+
+func userSearch(q string) searchBox {
+	return searchBox{
+		FormID: "user-search-form", InputID: "user-search", Action: usersPath, Fragment: usersListPath,
+		Target: "#" + usersResultsID, Value: q,
+		Placeholder: "Buscar por nome ou e-mail", AriaLabel: "Buscar usuários",
+	}
+}
+
+templ userActions(row userRow) {
+	@components.DropdownMenu(components.Props{}) {
+		@components.DropdownMenuTrigger(components.Props{
+			Class: components.ButtonVariants(components.ButtonGhost, components.ButtonIcon),
+			Attrs: components.Attr("aria-label", "Abrir menu"),
+		}) {
+			@components.Icon("more-horizontal", "")
+		}
+		@components.DropdownMenuContent(components.DropdownMenuContentProps{Align: components.MenuStart, Side: components.MenuLeft}) {
+			<a href={ templ.SafeURL(row.HrefRole) } class={ menuItem }>Definir papel</a>
+			<a href={ templ.SafeURL(row.HrefEdit) } class={ menuItem }>Atualizar usuário</a>
+			if row.ShowUnban || row.ShowBan {
+				@components.DropdownMenuSeparator(components.Props{})
+				if row.ShowUnban {
+					<a href={ templ.SafeURL(row.HrefUnban) } class={ menuItem }>Revogar banimento</a>
+				} else {
+					<a href={ templ.SafeURL(row.HrefBan) } class={ menuItem }>Banir usuário</a>
+				}
+			}
+			<a href={ templ.SafeURL(row.HrefSess) } class={ menuItem }>Listar sessões</a>
+			<a href={ templ.SafeURL(row.HrefRevokeAll) } class={ menuItem }>Revogar todas as sessões</a>
+			if row.ShowImpersonate {
+				@components.DropdownMenuSeparator(components.Props{})
+				<form { toastForm("/admin/usuarios/atuar", "Entrando…")... }>
+					@hidden("user_id", row.ID)
+					@hidden("q", row.Q)
+					@hidden("page", row.Page)
+					<button type="submit" class={ menuItem }>Atuar como usuário</button>
+				</form>
+			}
+			if row.ShowRemove {
+				@components.DropdownMenuSeparator(components.Props{})
+				<a href={ templ.SafeURL(row.HrefRemove) } class={ components.Cn(menuItem, menuItemDestructive) }>Remover usuário</a>
+			}
+		}
+	}
+}
+
+templ userResults(d userDirectory) {
+	<div id={ usersResultsID } class="contents">
+		if len(d.Rows) == 0 {
+			<p class="text-sm text-muted-foreground">Nenhum usuário encontrado.</p>
+		} else {
+			@components.Table(components.Props{}) {
+				@components.TableHeader(components.Props{}) {
+					@components.TableRow(components.Props{}) {
+						@th("Nome")
+						@th("Email")
+						@th("Papel")
+						@th("Banido")
+						@th("Ações")
+					}
+				}
+				@components.TableBody(components.Props{}) {
+					for _, row := range d.Rows {
+						@components.TableRow(components.Props{}) {
+							@components.TableCell(components.Props{}) {
+								<span class="font-medium">{ row.Name }</span>
+							}
+							@components.TableCell(components.Props{}) {
+								<span class="text-muted-foreground">{ row.Email }</span>
+							}
+							@components.TableCell(components.Props{}) {
+								@components.Badge(components.BadgeProps{Variant: row.RoleVariant}) {
+									{ row.RoleLabel }
+								}
+							}
+							@components.TableCell(components.Props{}) {
+								if row.Banned {
+									@components.Badge(components.BadgeProps{Variant: components.BadgeDestructive}) {
+										Banido
+									}
+								} else {
+									<span class="text-muted-foreground">Não</span>
+								}
+							}
+							@components.TableCell(components.Props{}) {
+								@userActions(row)
+							}
+						}
+					}
+				}
+			}
+		}
+		@pager("#"+usersResultsID, d.Pager)
+	</div>
+}
+
+templ th(label string) {
+	@components.TableHead(components.Props{}) {
+		{ label }
+	}
+}
+
+templ td(value string) {
+	@components.TableCell(components.Props{}) {
+		{ value }
+	}
+}
+
+templ panelHidden(p *usersPanel) {
+	@hidden("user_id", p.UserID)
+	@hidden("q", p.Q)
+	@hidden("page", p.Page)
+}
+
+templ cancelLink(href, label string) {
+	<a href={ templ.SafeURL(href) } class={ components.ButtonVariants(components.ButtonOutline, components.ButtonMd) }>{ label }</a>
+}
+
+templ usersDialog(p *usersPanel) {
+	switch p.Kind {
+		case "papel":
+			@components.Dialog(components.OverlayProps{Open: true, Attrs: components.Attr("aria-label", "Definir papel")}) {
+				@components.DialogContent(components.Props{}) {
+					@components.DialogHeader(components.Props{}) {
+						@components.DialogTitle(components.Props{}) {
+							Definir papel
+						}
+					}
+					<form { toastForm("/admin/usuarios/papel", "Salvando…")... } class="flex flex-col gap-4">
+						@panelHidden(p)
+						<div class="space-y-2">
+							@fieldLabel("role", "Papel")
+							@components.Select(components.InputProps{Attrs: components.Attr("name", "role", "id", "role")}) {
+								<option value="admin" selected?={ p.Role == "admin" }>Administrador</option>
+								<option value="moderator" selected?={ p.Role == "moderator" }>Moderador</option>
+								<option value="user" selected?={ p.Role != "admin" && p.Role != "moderator" }>Usuário</option>
+							}
+						</div>
+						@components.DialogFooter(components.Props{}) {
+							@cancelLink(p.CancelURL, "Cancelar")
+							@submit(components.ButtonPrimary, components.ButtonMd) {
+								Salvar
+							}
+						}
+					</form>
+				}
+			}
+		case "editar":
+			@components.Dialog(components.OverlayProps{Open: true, Attrs: components.Attr("aria-label", "Atualizar usuário")}) {
+				@components.DialogContent(components.Props{}) {
+					@components.DialogHeader(components.Props{}) {
+						@components.DialogTitle(components.Props{}) {
+							Atualizar usuário
+						}
+					}
+					<form { toastForm("/admin/usuarios/nome", "Salvando…")... } class="flex flex-col gap-4">
+						@panelHidden(p)
+						<div class="space-y-2">
+							@fieldLabel("name", "Nome")
+							@components.Input(components.InputProps{Attrs: templ.Attributes{"type": "text", "name": "name", "id": "name", "value": p.Name, "placeholder": "Nome do usuário", "required": true}})
+						</div>
+						@components.DialogFooter(components.Props{}) {
+							@cancelLink(p.CancelURL, "Cancelar")
+							@submit(components.ButtonPrimary, components.ButtonMd) {
+								Salvar
+							}
+						}
+					</form>
+				}
+			}
+		case "banir":
+			@components.AlertDialog(components.OverlayProps{Open: true, Attrs: components.Attr("aria-label", "Banir usuário")}) {
+				@components.DialogContent(components.Props{}) {
+					@components.DialogHeader(components.Props{}) {
+						@components.DialogTitle(components.Props{}) {
+							Banir usuário
+						}
+						@components.DialogDescription(components.Props{}) {
+							{ "Isso impedirá " + p.Name + " de fazer login e revogará todas as suas sessões. Você pode informar um motivo opcionalmente." }
+						}
+					}
+					<form { toastForm("/admin/usuarios/banir", "Banindo…")... } class="flex flex-col gap-4">
+						@panelHidden(p)
+						@components.Label(components.LabelProps{For: "ban-reason", Class: "sr-only"}) {
+							Motivo
+						}
+						@components.Input(components.InputProps{Attrs: components.Attr("type", "text", "name", "ban_reason", "id", "ban-reason", "placeholder", "Motivo")})
+						@components.DialogFooter(components.Props{}) {
+							@cancelLink(p.CancelURL, "Cancelar")
+							@submit(components.ButtonDestructive, components.ButtonMd) {
+								Banir usuário
+							}
+						}
+					</form>
+				}
+			}
+		case "desbanir":
+			@components.AlertDialog(components.OverlayProps{Open: true, Attrs: components.Attr("aria-label", "Revogar banimento")}) {
+				@components.DialogContent(components.Props{}) {
+					@components.DialogHeader(components.Props{}) {
+						@components.DialogTitle(components.Props{}) {
+							Revogar banimento
+						}
+						@components.DialogDescription(components.Props{}) {
+							{ "Isso permitirá que " + p.Name + " faça login novamente." }
+						}
+					}
+					<form { toastForm("/admin/usuarios/desbanir", "Desbanindo…")... }>
+						@panelHidden(p)
+						@components.DialogFooter(components.Props{}) {
+							@cancelLink(p.CancelURL, "Cancelar")
+							@submit(components.ButtonPrimary, components.ButtonMd) {
+								Revogar banimento
+							}
+						}
+					</form>
+				}
+			}
+		case "sessoes":
+			@components.Dialog(components.OverlayProps{Open: true, Attrs: components.Attr("aria-label", "Sessões de "+p.Name)}) {
+				@components.DialogContent(components.Props{}) {
+					@components.DialogHeader(components.Props{}) {
+						@components.DialogTitle(components.Props{}) {
+							{ "Sessões de " + p.Name }
+						}
+					}
+					if len(p.Sessions) > 0 {
+						<ul class="flex max-h-60 flex-col gap-2 overflow-y-auto">
+							for _, s := range p.Sessions {
+								<li class="flex items-start justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm">
+									<div class="min-w-0">
+										<p class="font-mono text-muted-foreground">{ s.ShortID }</p>
+										<p class="text-xs text-muted-foreground">{ "Criada " + s.CreatedAt }</p>
+										<p class="text-xs text-muted-foreground">{ "Expira " + s.ExpiresAt }</p>
+										<p class="truncate text-xs text-muted-foreground">{ s.IP }</p>
+										<p class="truncate text-xs text-muted-foreground">{ s.UA }</p>
+									</div>
+									<form { toastForm("/admin/usuarios/sessoes/revogar", "Revogando…")... }>
+										@hidden("session_id", s.ID)
+										@panelHidden(p)
+										@submit(components.ButtonGhost, components.ButtonSm) {
+											Revogar
+										}
+									</form>
+								</li>
+							}
+						</ul>
+					} else {
+						<p class="py-4 text-sm text-muted-foreground">Nenhuma sessão ativa.</p>
+					}
+					@components.DialogFooter(components.Props{}) {
+						@cancelLink(p.CancelURL, "Fechar")
+						if len(p.Sessions) > 0 {
+							<a href={ templ.SafeURL(p.RevokeURL) } class={ components.ButtonVariants(components.ButtonDestructive, components.ButtonMd) }>Revogar todas as sessões</a>
+						}
+					}
+				}
+			}
+		case "revogar_todas":
+			@components.AlertDialog(components.OverlayProps{Open: true, Attrs: components.Attr("aria-label", "Revogar todas as sessões")}) {
+				@components.DialogContent(components.Props{}) {
+					@components.DialogHeader(components.Props{}) {
+						@components.DialogTitle(components.Props{}) {
+							Revogar todas as sessões
+						}
+						@components.DialogDescription(components.Props{}) {
+							{ "Isso encerrará a sessão de " + p.Name + " em todos os dispositivos." }
+						}
+					}
+					<form { toastForm("/admin/usuarios/sessoes/revogar-todas", "Revogando…")... }>
+						@panelHidden(p)
+						@components.DialogFooter(components.Props{}) {
+							@cancelLink(p.CancelURL, "Cancelar")
+							@submit(components.ButtonDestructive, components.ButtonMd) {
+								Revogar todas
+							}
+						}
+					</form>
+				}
+			}
+		case "remover":
+			@components.AlertDialog(components.OverlayProps{Open: true, Attrs: components.Attr("aria-label", "Remover usuário")}) {
+				@components.DialogContent(components.Props{}) {
+					@components.DialogHeader(components.Props{}) {
+						@components.DialogTitle(components.Props{}) {
+							Remover usuário
+						}
+						@components.DialogDescription(components.Props{}) {
+							{ "Isso excluirá permanentemente " + p.Name + " e seus dados. Esta ação não pode ser desfeita." }
+						}
+					}
+					<form { toastForm("/admin/usuarios/remover", "Removendo…")... }>
+						@panelHidden(p)
+						@components.DialogFooter(components.Props{}) {
+							@cancelLink(p.CancelURL, "Cancelar")
+							@submit(components.ButtonDestructive, components.ButtonMd) {
+								Remover usuário
+							}
+						}
+					</form>
+				}
+			}
+	}
+}
+
+templ usersPage(d usersPageData) {
+	@components.Container(components.ContainerProps{}) {
+		@pageTitle("Gerenciamento de usuários", "Gerencie papéis, banimentos, sessões e representação de usuários.")
+		if d.Error != "" {
+			<div class="mb-6">
+				@components.Alert(components.AlertProps{Variant: components.AlertDestructive}) {
+					@components.AlertTitle(components.Props{}) {
+						{ d.Error }
+					}
+				}
+			</div>
+		}
+		@searchForm(userSearch(d.Dir.Q))
+		@userResults(d.Dir)
+		if d.Panel != nil {
+			@usersDialog(d.Panel)
+		}
+	}
+}

@@ -1,0 +1,84 @@
+package admin
+
+import (
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+	"github.com/wellington-vell/lindaflor/internal/web/format"
+)
+
+templ statCard(title, value string, destructive bool) {
+	@components.Card(components.Props{}) {
+		@components.CardContent(components.Props{}) {
+			<p class="text-sm text-muted-foreground">{ title }</p>
+			if destructive {
+				<p class="mt-2 text-3xl font-semibold text-destructive">{ value }</p>
+			} else {
+				<p class="mt-2 text-3xl font-semibold">{ value }</p>
+			}
+		}
+	}
+}
+
+templ dashboardPage(d store.AdminDashboard) {
+	@components.Container(components.ContainerProps{}) {
+		<h1 class="text-2xl font-semibold tracking-tight">Bem-vinda ao painel</h1>
+		<p class="text-muted-foreground">Gerencie produtos, estoque e pedidos da Linda Flor.</p>
+		<div class="grid gap-4 @sm/page:grid-cols-2 @lg/page:grid-cols-4">
+			@statCard("Total de Produtos", itoa(d.TotalProducts), false)
+			@statCard("Total de Pedidos", itoa(d.TotalOrders), false)
+			@statCard("Receita Total", reais(d.TotalRevenue), false)
+			@statCard("Estoque Baixo", itoa(d.LowStockCount), true)
+		</div>
+		@components.Card(components.Props{}) {
+			@components.CardHeader(components.Props{}) {
+				@components.CardTitle(components.Props{}) {
+					Pedidos Recentes
+				}
+			}
+			@components.CardContent(components.Props{}) {
+				@components.Table(components.Props{}) {
+					@components.TableHeader(components.Props{}) {
+						@components.TableRow(components.Props{}) {
+							@components.TableHead(components.Props{}) {
+								ID
+							}
+							@components.TableHead(components.Props{}) {
+								Cliente
+							}
+							@components.TableHead(components.Props{}) {
+								Status
+							}
+							@components.TableHead(components.Props{}) {
+								Total
+							}
+							@components.TableHead(components.Props{}) {
+								Data
+							}
+						}
+					}
+					@components.TableBody(components.Props{}) {
+						for _, o := range d.RecentOrders {
+							@components.TableRow(components.Props{}) {
+								@components.TableCell(components.Props{}) {
+									<a href={ templ.SafeURL("/admin/pedidos/" + o.ID.String()) } class="font-mono text-primary">{ o.ID.String() }</a>
+								}
+								@components.TableCell(components.Props{}) {
+									{ deref(o.GuestEmail) }
+								}
+								@components.TableCell(components.Props{}) {
+									{ o.Status }
+								}
+								@components.TableCell(components.Props{}) {
+									{ reais(o.TotalCents) }
+								}
+								@components.TableCell(components.Props{}) {
+									<span class="text-muted-foreground">{ format.DateTimeBR(o.CreatedAt) }</span>
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}

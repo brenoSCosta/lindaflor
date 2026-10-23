@@ -1,0 +1,270 @@
+package admin
+
+import (
+	"github.com/wellington-vell/lindaflor/internal/store"
+	"github.com/wellington-vell/lindaflor/internal/web/components"
+)
+
+const (
+	couponResultsID     = "coupon-results"
+	couponUserResultsID = "coupon-user-results"
+)
+
+templ errorAlert(message string) {
+	<div class="mb-6">
+		@components.Alert(components.AlertProps{Variant: components.AlertDestructive}) {
+			@components.AlertTitle(components.Props{}) {
+				{ message }
+			}
+		}
+	</div>
+}
+
+templ couponResults(l couponList) {
+	<div id={ couponResultsID } class="contents">
+		if l.Error != "" {
+			@errorAlert(l.Error)
+		}
+		if len(l.Rows) == 0 {
+			<p class="text-sm text-muted-foreground">Nenhum cupom cadastrado.</p>
+		} else {
+			@components.Table(components.Props{}) {
+				@components.TableHeader(components.Props{}) {
+					@components.TableRow(components.Props{}) {
+						@th("Código")
+						@th("Desconto")
+						@th("Mínimo")
+						@th("Máx.")
+						@th("Uso")
+						@th("Usos")
+						@th("Atribuídos")
+						@th("Validade")
+						@th("Status")
+						@th("Ações")
+					}
+				}
+				@components.TableBody(components.Props{}) {
+					for _, c := range l.Rows {
+						@components.TableRow(components.Props{}) {
+							@components.TableCell(components.Props{}) {
+								<span class="font-mono font-medium">{ c.Code }</span>
+							}
+							@components.TableCell(components.Props{}) {
+								@components.Badge(components.BadgeProps{Variant: variant(c.DiscountTone)}) {
+									{ c.DiscountLabel }
+								}
+							}
+							@td(c.MinLabel)
+							@td(c.MaxLabel)
+							@td(c.UsageLabel)
+							@td(itoa(c.UsesCount))
+							@td(itoa(c.AssigneeCount))
+							@components.TableCell(components.Props{}) {
+								<span class="text-muted-foreground">{ c.Validity }</span>
+							}
+							@components.TableCell(components.Props{}) {
+								@components.Badge(components.BadgeProps{Variant: variant(c.StatusTone)}) {
+									{ c.StatusLabel }
+								}
+							}
+							@components.TableCell(components.Props{}) {
+								<div class="flex items-center gap-2">
+									<a href={ templ.SafeURL(store.CouponsURL("", c.ID.String(), "")) } class={ components.ButtonVariants(components.ButtonOutline, components.ButtonSm) }>Atribuir</a>
+									<form method="post" action="/admin/cupons/toggle" class="inline">
+										@hidden("coupon_id", c.ID.String())
+										@hidden("q", l.Q)
+										@components.Button(components.ButtonProps{Variant: components.ButtonGhost, Size: components.ButtonSm, Attrs: templ.Attributes{
+											"type":       "submit",
+											"hx-post":    "/admin/cupons/toggle-proc",
+											"hx-target":  "#" + couponResultsID,
+											"hx-swap":    "outerHTML",
+											"hx-disable": "this",
+										}}) {
+											{ toggleLabel(c.Active) }
+										}
+									</form>
+									<form { toastForm("/admin/cupons/delete", "Excluindo…")... } class="inline">
+										@hidden("coupon_id", c.ID.String())
+										@hidden("q", l.Q)
+										@submit(components.ButtonDestructive, components.ButtonSm) {
+											Excluir
+										}
+									</form>
+								</div>
+							}
+						}
+					}
+				}
+			}
+		}
+	</div>
+}
+
+templ couponUserResults(u couponUsers) {
+	<div id={ couponUserResultsID } class="contents">
+		<p class="mt-1 text-xs text-muted-foreground">
+			{ "A busca redefine a seleção. Selecione e atribua em seguida. " + itoa(u.Total) + " usuário(s) encontrado(s)." }
+		</p>
+		if len(u.Users) == 0 {
+			<p class="text-sm text-muted-foreground">Nenhum usuário encontrado.</p>
+		} else {
+			@components.Table(components.Props{}) {
+				@components.TableHeader(components.Props{}) {
+					@components.TableRow(components.Props{}) {
+						@th("Atribuir")
+						@th("Nome")
+						@th("Email")
+						@th("Situação")
+					}
+				}
+				@components.TableBody(components.Props{}) {
+					for _, user := range u.Users {
+						@components.TableRow(components.Props{}) {
+							@components.TableCell(components.Props{}) {
+								if user.Assigned {
+									@components.Checkbox(components.Props{Attrs: templ.Attributes{"name": "user_ids", "value": user.ID, "checked": true, "disabled": true}})
+								} else {
+									@components.Checkbox(components.Props{Attrs: templ.Attributes{"name": "user_ids", "value": user.ID}})
+								}
+							}
+							@components.TableCell(components.Props{}) {
+								<span class="font-medium">{ user.Name }</span>
+							}
+							@components.TableCell(components.Props{}) {
+								<span class="text-muted-foreground">{ user.Email }</span>
+							}
+							@components.TableCell(components.Props{}) {
+								if user.Assigned {
+									@components.Badge(components.BadgeProps{Variant: components.BadgeSecondary}) {
+										Atribuído
+									}
+								} else {
+									<span class="text-muted-foreground">—</span>
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	</div>
+}
+
+func couponUserSearchAttrs(u couponUsers) templ.Attributes {
+	return templ.Attributes{
+		"id":          "coupon-user-search",
+		"type":        "search",
+		"name":        "uq",
+		"value":       u.UQ,
+		"placeholder": "Buscar usuário por nome ou e-mail",
+		"aria-label":  "Buscar usuários para atribuir",
+		"hx-get":      couponsUsersPath,
+		"hx-trigger":  "input changed delay:300ms, search",
+		"hx-target":   "#" + couponUserResultsID,
+		"hx-swap":     "outerHTML",
+		"hx-vals":     `{"cupom":"` + u.CouponID + `"}`,
+	}
+}
+
+templ couponCreateForm(q string) {
+	@cardTitled("Novo cupom") {
+		<form { toastForm("/admin/cupons/create", "Criando cupom…")... } class="grid gap-4 @xl/page:grid-cols-2 ">
+			@hidden("q", q)
+			<div class="space-y-2">
+				@components.Label(components.LabelProps{For: "code", Required: true}) {
+					Código
+				}
+				@components.Input(components.InputProps{Attrs: templ.Attributes{"type": "text", "name": "code", "id": "code", "placeholder": "VERAO10", "required": true, "maxlength": "32"}})
+			</div>
+			<div class="space-y-2">
+				@components.Label(components.LabelProps{For: "discount_type", Required: true}) {
+					Tipo de desconto
+				}
+				@components.Select(components.InputProps{Attrs: templ.Attributes{"name": "discount_type", "id": "discount_type", "required": true}}) {
+					<option value="percent">Percentual (1-50%)</option>
+					<option value="fixed">Valor fixo (centavos)</option>
+				}
+			</div>
+			<div class="space-y-2">
+				@components.Label(components.LabelProps{For: "discount_value", Required: true}) {
+					Valor do desconto
+				}
+				@components.Input(components.InputProps{Attrs: templ.Attributes{"type": "number", "name": "discount_value", "id": "discount_value", "min": "1", "max": "50", "required": true, "placeholder": "10"}})
+			</div>
+			@textField("min_subtotal_cents", "Subtotal mínimo (centavos)", templ.Attributes{"type": "number", "name": "min_subtotal_cents", "id": "min_subtotal_cents", "min": "0", "value": "0"})
+			@textField("max_discount_cents", "Desconto máximo (centavos)", templ.Attributes{"type": "number", "name": "max_discount_cents", "id": "max_discount_cents", "min": "1"})
+			<div class="space-y-2">
+				@components.Label(components.LabelProps{For: "usage_type", Required: true}) {
+					Uso
+				}
+				@components.Select(components.InputProps{Attrs: templ.Attributes{"name": "usage_type", "id": "usage_type", "required": true}}) {
+					<option value="unique">Único (1 uso global, exige atribuição)</option>
+					<option value="unlimited">Ilimitado</option>
+				}
+			</div>
+			@textField("max_uses", "Máx. usos", templ.Attributes{"type": "number", "name": "max_uses", "id": "max_uses", "min": "1"})
+			@textField("per_user_limit", "Limite por usuário", templ.Attributes{"type": "number", "name": "per_user_limit", "id": "per_user_limit", "min": "1"})
+			@textField("starts_at", "Início", templ.Attributes{"type": "datetime-local", "name": "starts_at", "id": "starts_at"})
+			@textField("expires_at", "Expira em", templ.Attributes{"type": "datetime-local", "name": "expires_at", "id": "expires_at"})
+			<div class="space-y-2">
+				@submit(components.ButtonPrimary, components.ButtonMd) {
+					Criar cupom
+				}
+			</div>
+		</form>
+	}
+}
+
+templ couponsPage(d couponsPageData) {
+	@components.Container(components.ContainerProps{}) {
+		@pageTitle("Cupons", "Crie cupons, acompanhe usos e atribua a usuários específicos.")
+		@couponCreateForm(d.List.Q)
+		@searchForm(searchBox{
+			FormID: "coupon-search-form", InputID: "coupon-search", Action: couponsPath, Fragment: couponsListPath,
+			Target: "#" + couponResultsID, Value: d.List.Q, Placeholder: "Buscar por código", AriaLabel: "Buscar cupons",
+		})
+		@couponResults(d.List)
+		if d.SelectedID != "" {
+			@cardTitled("Atribuir " + d.SelectedCode) {
+				<p class="text-sm text-muted-foreground">Somente usuários logados atribuídos aqui podem usar este cupom no checkout.</p>
+				if len(d.Assigned) > 0 {
+					<ul class="flex flex-col gap-2">
+						for _, u := range d.Assigned {
+							<li class="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2 text-sm">
+								<div class="min-w-0">
+									<p class="font-medium">{ u.Name }</p>
+									<p class="truncate text-xs text-muted-foreground">{ u.Email }</p>
+								</div>
+								<form { toastForm("/admin/cupons/unassign", "Removendo…")... }>
+									@hidden("coupon_id", d.SelectedID)
+									@hidden("user_id", u.ID.String())
+									@hidden("q", d.List.Q)
+									@hidden("cupom", d.SelectedID)
+									@hidden("uq", d.Users.UQ)
+									@submit(components.ButtonGhost, components.ButtonSm) {
+										Remover
+									}
+								</form>
+							</li>
+						}
+					</ul>
+				} else {
+					<p class="mb-6 text-sm text-muted-foreground">Nenhum usuário atribuído ainda.</p>
+				}
+				<form { toastForm("/admin/cupons/assign", "Atribuindo…")... }>
+					@hidden("coupon_id", d.SelectedID)
+					@hidden("q", d.List.Q)
+					@hidden("cupom", d.SelectedID)
+					@hidden("uq", d.Users.UQ)
+					@components.Input(components.InputProps{Attrs: couponUserSearchAttrs(d.Users)})
+					@couponUserResults(d.Users)
+					<div class="mt-4">
+						@submit(components.ButtonPrimary, components.ButtonMd) {
+							Atribuir selecionados
+						}
+					</div>
+				</form>
+			}
+		}
+	}
+}
