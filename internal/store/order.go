@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/wellington-vell/lindaflor/internal/audit"
+	"github.com/wellington-vell/lindaflor/internal/payments"
 )
 
 // The order state machine (src/app/store/order.rs). Apply is the only
@@ -90,7 +91,9 @@ func (e OrderEvent) ActionName() string { return string(e) }
 // Apply errors.
 var (
 	ErrOrderNotFound       = errors.New("Pedido não encontrado.")
-	ErrReopenInsufficient  = errors.New("Estoque insuficiente para reabrir o pedido.")
+	// ErrReopenInsufficient is payments.ErrInsufficientStock so the payments
+	// service can match a late approval without stock (errors.Is).
+	ErrReopenInsufficient = payments.ErrInsufficientStock
 	ErrTrackingRequired    = errors.New("Informe o código de rastreio para marcar como enviado.")
 )
 

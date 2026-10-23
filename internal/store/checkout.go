@@ -11,6 +11,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/wellington-vell/lindaflor/internal/payments"
+	"github.com/wellington-vell/lindaflor/internal/payments/pix"
 )
 
 // Checkout order service (src/app/store/checkout_service.rs): form
@@ -54,7 +57,7 @@ const MaxPendingOrders = 3
 var ErrCouponRemoved = errors.New("Cupom removido, revise o total.")
 
 // PaymentUnavailableMessage is shown while the PSP circuit is open.
-const PaymentUnavailableMessage = "Pagamento temporariamente indisponível. Tente novamente em instantes."
+const PaymentUnavailableMessage = payments.UnavailableMessage
 
 const (
 	maxEmailLen        = 254
@@ -133,32 +136,36 @@ func ValidatePayFields(in CheckoutInput) (string, error) {
 	return ResolveShippingUF(in.ZipCode, in.State)
 }
 
-// PaymentGateway is the slice of payments.Provider checkout needs
-// (payments.Provider satisfies it; kept local so store never imports
-// internal/payments, which imports store).
-type PaymentGateway interface {
-	// AcceptingCharges is false while the circuit breaker is open.
-	AcceptingCharges() bool
-}
-
 // CheckoutDeps wires checkout to the payment side.
 type CheckoutDeps struct {
-	// Provider is ProviderStaticPix or ProviderMercadoPago.
-	Provider string
-	// Gateway reports the MP circuit state (nil = always accepting).
-	Gateway PaymentGateway
-	// EnsureCharge creates the PSP charge after commit (Mercado Pago only;
-	// payments.EnsureCharge). Failures are logged; the order page retries.
-	EnsureCharge func(ctx context.Context, orderID uuid.UUID) error
+	// Payments is the configured provider (nil = static PIX).
+	Payments payments.Provider
+	// Service creates the Mercado Pago charge after commit
+	// (payments.Service.EnsureCharge); nil skips it (the order page
+	// retries lazily).
+	Service *payments.Service
+}
+
+// NewCheckoutDeps builds CheckoutDeps from the app wiring
+// (d.Pool, d.Payments, d.Orders).
+func NewCheckoutDeps(pool *pgxpool.Pool, provider payments.Provider, orders payments.OrderTransitioner) CheckoutDeps {
+	return CheckoutDeps{Payments: provider, Service: &payments.Service{Pool: pool, Provider: provider, Orders: orders}}
 }
 
 // StaticPixCheckout is the CheckoutDeps of the static PIX provider.
-var StaticPixCheckout = CheckoutDeps{Provider: ProviderStaticPix}
+var StaticPixCheckout = CheckoutDeps{Payments: payments.StaticPix{}}
+
+func (d CheckoutDeps) provider() string {
+	if d.Payments != nil && payments.IsMercadoPago(d.Payments) {
+		return ProviderMercadoPago
+	}
+	return ProviderStaticPix
+}
 
 // PaymentAvailable: MP with its breaker closed, or a configured PIX key.
 func PaymentAvailable(deps CheckoutDeps, s StoreSettings) bool {
-	if deps.Provider == ProviderMercadoPago {
-		return deps.Gateway == nil || deps.Gateway.AcceptingCharges()
+	if deps.provider() == ProviderMercadoPago {
+		return deps.Payments.AcceptingCharges()
 	}
 	return s.PixConfigured()
 }
@@ -185,14 +192,11 @@ func CreateOrder(ctx context.Context, pool *pgxpool.Pool, deps CheckoutDeps, car
 	if err != nil {
 		return CreatedOrder{}, err
 	}
-	provider := deps.Provider
-	if provider == "" {
-		provider = ProviderStaticPix
-	}
+	provider := deps.provider()
 	switch {
 	case provider == ProviderStaticPix && !settings.PixConfigured():
-		return CreatedOrder{}, userErr(PixUnavailableMessage)
-	case provider == ProviderMercadoPago && deps.Gateway != nil && !deps.Gateway.AcceptingCharges():
+		return CreatedOrder{}, userErr(pix.UnavailableMessage)
+	case provider == ProviderMercadoPago && !deps.Payments.AcceptingCharges():
 		// Circuit open: fail fast before holding stock for an unpayable order.
 		return CreatedOrder{}, userErr(PaymentUnavailableMessage)
 	}
@@ -212,8 +216,8 @@ func CreateOrder(ctx context.Context, pool *pgxpool.Pool, deps CheckoutDeps, car
 		return CreatedOrder{}, err
 	}
 	// Charge after commit (no PSP call while holding row locks).
-	if provider == ProviderMercadoPago && deps.EnsureCharge != nil {
-		if err := deps.EnsureCharge(ctx, created.ID); err != nil {
+	if provider == ProviderMercadoPago && deps.Service != nil {
+		if _, err := deps.Service.EnsureCharge(ctx, created.ID); err != nil {
 			slog.WarnContext(ctx, "charge creation deferred", "order_id", created.ID, "error", err)
 		}
 	}
@@ -335,11 +339,11 @@ func createOrderInTx(ctx context.Context, tx pgx.Tx, settings StoreSettings, p c
 	// Mercado Pago orders get their PIX code from the PSP after commit.
 	var pixCode *string
 	if p.provider == ProviderStaticPix {
-		code, err := GeneratePixPayload(deref(settings.PixKey), orDefault(settings.PixKeyType, "phone"),
+		code, err := pix.Payload(deref(settings.PixKey), orDefault(settings.PixKeyType, "phone"),
 			orDefault(settings.PixMerchantName, "Linda Flor"), orDefault(settings.PixMerchantCity, "Aracaju"),
 			total, p.order.ID.String())
 		if err != nil {
-			return err
+			return userErr(err.Error())
 		}
 		pixCode = &code
 	}

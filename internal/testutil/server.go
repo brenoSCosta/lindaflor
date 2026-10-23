@@ -27,6 +27,7 @@ import (
 	"github.com/wellington-vell/lindaflor/internal/mail"
 	"github.com/wellington-vell/lindaflor/internal/payments"
 	"github.com/wellington-vell/lindaflor/internal/storage"
+	"github.com/wellington-vell/lindaflor/internal/store"
 	"github.com/wellington-vell/lindaflor/internal/valkey"
 	"github.com/wellington-vell/lindaflor/internal/web"
 )
@@ -162,6 +163,7 @@ func NewServer(t testing.TB, opts Options) *Server {
 	d := &app.Deps{
 		Cfg: cfg, Pool: pool, Q: sqlc.New(pool), Valkey: vk,
 		Mailer: mail.LogMailer{}, Storage: mem, Payments: payments.StaticPix{},
+		Orders: store.OrderFSM{Pool: pool},
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 	if opts.MutateDeps != nil {

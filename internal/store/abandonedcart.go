@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/wellington-vell/lindaflor/internal/mail"
-	"github.com/wellington-vell/lindaflor/internal/store/links"
 )
 
 // Abandoned-cart reminders (src/app/store/abandoned_cart.rs), sent by the
@@ -152,15 +150,16 @@ func SendAbandonedCartReminders(ctx context.Context, pool *pgxpool.Pool, afterMi
 			if len(rows) == 0 {
 				return errSkip
 			}
-			lines := make([]CartReminderLine, 0, len(rows))
+			lines := make([]mail.CartReminderLine, 0, len(rows))
 			for _, r := range rows {
-				lines = append(lines, CartReminderLine{
+				lines = append(lines, mail.CartReminderLine{
 					ProductName: r.ProductName, VariantLabel: VariantLabel(r.Size, r.Color),
 					Quantity: r.Quantity, UnitPriceCents: r.UnitPriceCents,
 				})
 			}
-			e := renderer.AbandonedCart(deref(c.Name), lines, links.AbsoluteURL("/checkout"), links.UnsubscribeURL(c.Email))
-			if err := enqueueEmail(ctx, tx, mail.KindAbandonedCart, c.Email, e, ""); err != nil {
+			l := MailLinks()
+			e := mail.AbandonedCart(deref(c.Name), lines, l.AbsoluteURL("/checkout"), l.UnsubscribeURL(c.Email))
+			if err := mail.Enqueue(ctx, tx, e.Msg(mail.KindAbandonedCart, c.Email, "")); err != nil {
 				return err
 			}
 			queued = true
@@ -170,7 +169,7 @@ func SendAbandonedCartReminders(ctx context.Context, pool *pgxpool.Pool, afterMi
 			return sent, err
 		}
 		if queued {
-			slog.DebugContext(ctx, "abandoned-cart reminder queued", "cart_id", c.ID, "to", redactAddress(c.Email))
+			slog.DebugContext(ctx, "abandoned-cart reminder queued", "cart_id", c.ID, "to", mail.RedactAddress(c.Email))
 			sent++
 		}
 	}
@@ -183,16 +182,3 @@ var errSkip = skipError{}
 type skipError struct{}
 
 func (skipError) Error() string { return "skip" }
-
-// redactAddress is "a***@example.com".
-func redactAddress(address string) string {
-	local, domain, ok := strings.Cut(address, "@")
-	if !ok {
-		return "***"
-	}
-	first := "*"
-	if r := []rune(local); len(r) > 0 {
-		first = string(r[0])
-	}
-	return first + "***@" + domain
-}

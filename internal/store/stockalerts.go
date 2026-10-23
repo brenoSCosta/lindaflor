@@ -10,7 +10,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/wellington-vell/lindaflor/internal/mail"
-	"github.com/wellington-vell/lindaflor/internal/store/links"
 )
 
 // Back-in-stock alerts ("Avise-me", src/app/store/stock_alerts.rs).
@@ -109,7 +108,7 @@ func VariantSlug(ctx context.Context, q DBTX, variantID uuid.UUID) (string, erro
 
 // ProductVariantPath is /produtos/{slug}?variant={id} (redirect target).
 func ProductVariantPath(slug string, variantID uuid.UUID) string {
-	return fmt.Sprintf("/produtos/%s?variant=%s", links.EncodeQueryValue(slug), variantID)
+	return fmt.Sprintf("/produtos/%s?variant=%s", mail.EncodeQueryValue(slug), variantID)
 }
 
 // SubscribeStockAlert registers an alert. emailNorm must already be
@@ -155,11 +154,11 @@ func CancelStockAlerts(ctx context.Context, q DBTX, email string) (int64, error)
 }
 
 // StockAlertCancelURL is the absolute signed cancel link of an address.
-func StockAlertCancelURL(email string) string { return links.StockAlertCancelURL(email) }
+func StockAlertCancelURL(email string) string { return MailLinks().StockAlertCancelURL(email) }
 
 // VerifyStockAlertCancelToken checks the cancel link token.
 func VerifyStockAlertCancelToken(email, token string) bool {
-	return links.VerifyStockAlertCancelToken(email, token)
+	return MailLinks().VerifyStockAlertCancelToken(email, token)
 }
 
 type dueAlert struct {
@@ -183,10 +182,11 @@ func NotifyRestocked(ctx context.Context, pool *pgxpool.Pool) (int, error) {
 			return err
 		}
 		ids := make([]uuid.UUID, 0, len(due))
+		l := MailLinks()
 		for _, a := range due {
-			productURL := links.AbsoluteURL(fmt.Sprintf("/produtos/%s?variant=%s", links.EncodeQueryValue(a.ProductSlug), a.VariantID))
-			e := renderer.BackInStock(a.ProductName, VariantLabel(a.Size, a.Color), productURL, links.StockAlertCancelURL(a.EmailNorm))
-			if err := enqueueEmail(ctx, tx, mail.KindBackInStock, a.EmailNorm, e, "stock-alert:"+a.ID.String()); err != nil {
+			productURL := l.AbsoluteURL(ProductVariantPath(a.ProductSlug, a.VariantID))
+			e := mail.BackInStock(a.ProductName, VariantLabel(a.Size, a.Color), productURL, l.StockAlertCancelURL(a.EmailNorm))
+			if err := mail.Enqueue(ctx, tx, e.Msg(mail.KindBackInStock, a.EmailNorm, "stock-alert:"+a.ID.String())); err != nil {
 				return err
 			}
 			ids = append(ids, a.ID)

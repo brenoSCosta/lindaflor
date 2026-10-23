@@ -73,4 +73,18 @@ func runeLen(s string) int { return utf8.RuneCountInString(s) }
 
 func trimSpace(s string) string { return strings.TrimSpace(s) }
 
+func isHex(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
+}
+
+func digitsOnly(raw string) string {
+	var b strings.Builder
+	for _, r := range raw {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 func isBlank(s string) bool { return strings.TrimSpace(s) == "" }

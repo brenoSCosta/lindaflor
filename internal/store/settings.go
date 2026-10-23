@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/wellington-vell/lindaflor/internal/payments/pix"
 )
 
 // DefaultFreeShippingThresholdCents is the schema default (R$ 299,00).
@@ -169,9 +171,9 @@ func ValidateSettings(f SettingsForm) (SettingsWrite, error) {
 	case key == nil || keyType == "":
 		return w, userErr("Informe a chave e o tipo da chave PIX, ou deixe ambos em branco.")
 	default:
-		normalized, err := NormalizePixKey(keyType, *key)
+		normalized, err := pix.NormalizeKey(keyType, *key)
 		if err != nil {
-			return w, err
+			return w, userErr(err.Error())
 		}
 		w.PixKey, w.PixKeyType = &normalized, &keyType
 	}

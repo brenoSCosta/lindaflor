@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/wellington-vell/lindaflor/internal/mail"
-	"github.com/wellington-vell/lindaflor/internal/store/links"
 )
 
 // Newsletter (src/app/newsletter.rs, src/mail/newsletter.rs and
@@ -123,12 +122,7 @@ func SubscribeNewsletter(ctx context.Context, pool *pgxpool.Pool, email string, 
 			return err
 		}
 		out = NewsletterOutcome{Kind: NewsletterSubscribed, FirstPurchaseCode: code}
-		var codePtr *string
-		if code != "" {
-			codePtr = &code
-		}
-		e := renderer.NewsletterWelcome(deref(name), links.AbsoluteURL("/"), codePtr, links.UnsubscribeURL(email))
-		return enqueueEmail(ctx, tx, mail.KindNewsletterWelcome, email, e, "newsletter-welcome:"+strings.ToLower(strings.TrimSpace(email)))
+		return mail.SendNewsletterWelcome(ctx, tx, MailLinks(), email, deref(name), code)
 	})
 	if errors.Is(err, errSkip) {
 		err = nil
@@ -149,10 +143,12 @@ func UnsubscribeNewsletter(ctx context.Context, q DBTX, email string) (bool, err
 }
 
 // UnsubscribeURL is the absolute signed unsubscribe link.
-func UnsubscribeURL(email string) string { return links.UnsubscribeURL(email) }
+func UnsubscribeURL(email string) string { return MailLinks().UnsubscribeURL(email) }
 
 // VerifyUnsubscribeToken checks the unsubscribe token.
-func VerifyUnsubscribeToken(email, token string) bool { return links.VerifyUnsubscribeToken(email, token) }
+func VerifyUnsubscribeToken(email, token string) bool {
+	return MailLinks().VerifyUnsubscribeToken(email, token)
+}
 
 // NewsletterSubscriber is an admin list row.
 type NewsletterSubscriber struct {
