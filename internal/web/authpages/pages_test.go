@@ -3,6 +3,7 @@ package authpages_test
 import (
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -382,8 +383,40 @@ func TestCheckEmailPageAndResend(t *testing.T) {
 	}
 	wantRedirect(t, c.PostForm("/check-email/resend", url.Values{}), "/check-email")
 	var n int64
-	if err := s.Pool.QueryRow(t.Context(), `SELECT count(*) FROM email_outbox WHERE to_address = $1 AND kind = 'verify_email'`, u.email).Scan(&n); err != nil || n != 1 {
+	// One from the sign-up itself, one from the resend.
+	if err := s.Pool.QueryRow(t.Context(), `SELECT count(*) FROM email_outbox WHERE to_address = $1 AND kind = 'verify_email'`, u.email).Scan(&n); err != nil || n != 2 {
 		t.Fatalf("verify mail queued: %d %v", n, err)
+	}
+}
+
+// Regression: sign-up never queued the verification mail, so a new
+// customer had no way to confirm the address (nothing links to
+// /verify-email). Both the HTML form and the JSON API queue it now, and the
+// link in it verifies the account.
+func TestSignUpQueuesVerificationMail(t *testing.T) {
+	s := testutil.NewServer(t, testutil.Options{})
+	email := testutil.UniqueEmail("signup-verify")
+	res := s.Client(t).PostForm("/signup", url.Values{"name": {"Ana"}, "email": {email}, "password": {pw}})
+	if res.StatusCode != http.StatusSeeOther {
+		t.Fatalf("signup: %d", res.StatusCode)
+	}
+	var body string
+	if err := s.Pool.QueryRow(t.Context(), `SELECT text_body FROM email_outbox WHERE to_address = $1 AND kind = 'verify_email'`, email).Scan(&body); err != nil {
+		t.Fatalf("verify mail not queued: %v", err)
+	}
+	m := regexp.MustCompile(`/verify-email\?token=[^\s"]+`).FindString(body)
+	if m == "" {
+		t.Fatalf("no verify link in %q", body)
+	}
+	if p := s.Client(t).Get(m); !strings.Contains(p.Body, "E-mail verificado") {
+		t.Fatal("verify link did not verify")
+	}
+
+	api := testutil.UniqueEmail("signup-verify-api")
+	wantStatus(t, s.Client(t).SignUp("Bia", api, pw), http.StatusOK)
+	var n int64
+	if err := s.Pool.QueryRow(t.Context(), `SELECT count(*) FROM email_outbox WHERE to_address = $1 AND kind = 'verify_email'`, api).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("api sign-up verify mails: %d %v", n, err)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -156,6 +157,12 @@ func (s *Service) SignUpEmail(w http.ResponseWriter, r *http.Request, name, emai
 		UserID: user.ID, Password: &hash,
 	}); err != nil {
 		return nil, nil, fmt.Errorf("insert account: %w", err)
+	}
+	// The account is usable right away, but the address still has to be
+	// confirmed: queue the verification mail (best effort, the user can
+	// ask for another one on /verify-email).
+	if err := s.SendVerificationEmail(ctx, email, "/verify-email"); err != nil {
+		slog.WarnContext(ctx, "sign-up verification mail not queued", "user_id", user.ID, "error", err)
 	}
 	start := s.StartSession
 	if runHooks {
