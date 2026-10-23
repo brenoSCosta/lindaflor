@@ -449,6 +449,9 @@ func HydrateCartTx(ctx context.Context, tx DBTX, cartID uuid.UUID) (*HydratedCar
 	if err := normalizeSetGroups(ctx, tx, h, broken); err != nil {
 		return nil, err
 	}
+	if err := priceSetGroups(ctx, q, h.Items); err != nil {
+		return nil, err
+	}
 	return h, nil
 }
 
@@ -594,21 +597,58 @@ func QuoteCartForCheckout(ctx context.Context, tx DBTX, cartID uuid.UUID) ([]Car
 		if !slices.Equal(got, expected) {
 			return nil, ErrInsufficientStock
 		}
-		n := int64(len(idx))
-		base := *price / n
-		firstShare := *price - base*(n-1)
-		ordered := slices.Clone(idx)
-		slices.SortStableFunc(ordered, func(a, b int) int { return compareUUID(rows[a].VariantID, rows[b].VariantID) })
-		for pos, i := range ordered {
-			if pos == 0 {
-				items[i].UnitPriceCents = firstShare
-			} else {
-				items[i].UnitPriceCents = base
-			}
-			items[i].SetName = ptr(name)
-		}
+		splitSetPrice(items, idx, *price, name)
 	}
 	return items, nil
+}
+
+// splitSetPrice replaces the list prices of one set group's member lines
+// (items[idx]) with the bundle price split per unit: the first member by
+// variant id takes the remainder, so the shares sum to exactly price.
+func splitSetPrice(items []CartItem, idx []int, price int64, name string) {
+	n := int64(len(idx))
+	base := price / n
+	firstShare := price - base*(n-1)
+	ordered := slices.Clone(idx)
+	slices.SortStableFunc(ordered, func(a, b int) int { return compareUUID(items[a].VariantID, items[b].VariantID) })
+	for pos, i := range ordered {
+		if pos == 0 {
+			items[i].UnitPriceCents = firstShare
+		} else {
+			items[i].UnitPriceCents = base
+		}
+		items[i].SetName = ptr(name)
+	}
+}
+
+// priceSetGroups gives hydrated set lines the bundle price the checkout
+// quote will charge (QuoteCartForCheckout), so the cart sheet and the
+// checkout summary show the real total instead of the members' list
+// prices. Groups the quote would refuse (inactive or priceless set) keep
+// their list prices; the quote reports them at checkout.
+func priceSetGroups(ctx context.Context, q *sqlc.Queries, items []CartItem) error {
+	groups := map[uuid.UUID][]int{}
+	var order []uuid.UUID
+	for i, it := range items {
+		if it.SetID == nil {
+			continue
+		}
+		if _, ok := groups[*it.SetID]; !ok {
+			order = append(order, *it.SetID)
+		}
+		groups[*it.SetID] = append(groups[*it.SetID], i)
+	}
+	for _, setID := range order {
+		set, found, err := noRows(q.StoreQuoteSet(ctx, setID))
+		if err != nil {
+			return err
+		}
+		if !found || set.PriceInCents == nil || !set.Active {
+			continue
+		}
+		splitSetPrice(items, groups[setID], *set.PriceInCents, set.Name)
+	}
+	return nil
 }
 
 // CartCouponCode is the coupon stored on the cart ("" when none).

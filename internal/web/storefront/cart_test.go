@@ -2,6 +2,7 @@ package storefront_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/wellington-vell/lindaflor/internal/httpx/toast"
@@ -104,12 +105,17 @@ func TestSetCartGroup(t *testing.T) {
 	st := seedSet(t, s.Pool, "Conjunto Lua", 12000, top, bottom)
 	h := s.Client(t).HTMX()
 
+	// Regression: the sheet showed the members' list prices (R$ 130,00)
+	// while checkout charges the bundle price (R$ 120,00, split 60 + 60).
 	res := h.PostForm("/conjuntos/adicionar", form("set_id", st.ID.String(), "quantity", "1"))
 	wantStatus(t, res, http.StatusOK)
-	wantContains(t, res.Body, "Conjunto Lua", "Top Lua", "Calcinha Lua", "Diminuir conjunto", "R$ 130,00", ">2</span>")
+	wantContains(t, res.Body, "Conjunto Lua", "Top Lua", "Calcinha Lua", "Diminuir conjunto", "R$ 120,00", ">2</span>")
+	if strings.Contains(res.Body, "R$ 130,00") {
+		t.Fatal("set group priced at the members' list prices")
+	}
 
 	res = h.PostForm("/carrinho/conjunto/quantidade", form("set_id", st.ID.String(), "quantity", "2"))
-	wantContains(t, res.Body, "4 peças", "R$ 260,00")
+	wantContains(t, res.Body, "4 peças", "R$ 240,00")
 	// Capped at the scarcest member.
 	res = h.PostForm("/carrinho/conjunto/quantidade", form("set_id", st.ID.String(), "quantity", "5"))
 	wantContains(t, res.Body, "4 peças")
