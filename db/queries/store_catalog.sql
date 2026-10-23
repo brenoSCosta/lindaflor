@@ -179,3 +179,6 @@ LIMIT 30;
 
 -- name: StoreHasBanners :one
 SELECT EXISTS(SELECT 1 FROM home_banners WHERE active = true);
+
+-- name: StoreActiveProductSlug :one
+SELECT slug FROM products WHERE id = $1 AND active;

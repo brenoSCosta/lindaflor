@@ -11,6 +11,17 @@ import (
 	"github.com/google/uuid"
 )
 
+const storeActiveProductSlug = `-- name: StoreActiveProductSlug :one
+SELECT slug FROM products WHERE id = $1 AND active
+`
+
+func (q *Queries) StoreActiveProductSlug(ctx context.Context, id uuid.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, storeActiveProductSlug, id)
+	var slug string
+	err := row.Scan(&slug)
+	return slug, err
+}
+
 const storeCountProducts = `-- name: StoreCountProducts :one
 SELECT COUNT(*) FROM product_summaries ps
 WHERE ps.active = true
