@@ -25,17 +25,36 @@ import (
 //	})
 type LoginHook func(w http.ResponseWriter, r *http.Request, pool *pgxpool.Pool, userID uuid.UUID) error
 
+type registeredHook struct {
+	id int
+	fn LoginHook
+}
+
 var (
 	hooksMu    sync.RWMutex
-	loginHooks []LoginHook
+	loginHooks []registeredHook
+	nextHookID int
 )
 
-// RegisterLoginHook adds h to the hooks run after every regular login.
-// Call it from an init or Mount (idempotency is the caller's job).
-func RegisterLoginHook(h LoginHook) {
+// RegisterLoginHook adds h to the hooks run after every regular login and
+// returns a function that removes it again (tests). Call it once, from
+// an init or Mount.
+func RegisterLoginHook(h LoginHook) (unregister func()) {
 	hooksMu.Lock()
 	defer hooksMu.Unlock()
-	loginHooks = append(loginHooks, h)
+	id := nextHookID
+	nextHookID++
+	loginHooks = append(loginHooks, registeredHook{id: id, fn: h})
+	return func() {
+		hooksMu.Lock()
+		defer hooksMu.Unlock()
+		for i, rh := range loginHooks {
+			if rh.id == id {
+				loginHooks = append(loginHooks[:i:i], loginHooks[i+1:]...)
+				return
+			}
+		}
+	}
 }
 
 // LoginHookCount reports how many hooks are registered (tests).
@@ -47,10 +66,10 @@ func LoginHookCount() int {
 
 func runLoginHooks(w http.ResponseWriter, r *http.Request, pool *pgxpool.Pool, userID uuid.UUID) error {
 	hooksMu.RLock()
-	hooks := append([]LoginHook(nil), loginHooks...)
+	hooks := append([]registeredHook(nil), loginHooks...)
 	hooksMu.RUnlock()
 	for _, h := range hooks {
-		if err := h(w, r, pool, userID); err != nil {
+		if err := h.fn(w, r, pool, userID); err != nil {
 			return err
 		}
 	}
