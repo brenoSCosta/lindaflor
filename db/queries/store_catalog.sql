@@ -1,6 +1,6 @@
 -- Owner: store (storefront catalog, internal/store/catalog.go).
 --
--- Product cards come from the product_summaries view (00003).
+-- Product cards come from the product_summaries view (00001_init.sql).
 
 -- name: StoreListProducts :many
 -- Faceted listing. Every filter is optional (NULL / false / empty array =

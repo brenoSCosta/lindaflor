@@ -238,7 +238,7 @@ before `render.Page`. Private paths (`seo.IsPrivatePath`) are always noindex.
   `to_char`, `CASE`, aggregate, `x::text` of a nullable column) as NOT NULL,
   so a NULL fails the scan at runtime. Cast such an expression to a
   `null_<type>` domain (`null_text`, `null_int4`, `null_int8`, `null_bool`,
-  `null_uuid`, `null_timestamptz`; migration 00002) to get a pointer, or
+  `null_uuid`, `null_timestamptz`; defined in `00001_init.sql`) to get a pointer, or
   make it non-null with `COALESCE`. `date` maps to `time.Time`.
 - `make generate` (or `sqlc generate`) and commit `internal/db/sqlc/`;
   `make lint` runs `sqlc compile` + `sqlc vet`, `make drift` fails on stale

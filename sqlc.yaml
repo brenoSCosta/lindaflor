@@ -48,7 +48,7 @@ sql:
           - db_type: jsonb
             nullable: true
             go_type: encoding/json.RawMessage
-          # Nullable marker domains (db/migrations/00002_*): sqlc types every
+          # Nullable marker domains (db/migrations/00001_init.sql): sqlc types every
           # computed expression (scalar subquery, CASE, aggregate) as NOT
           # NULL; cast one that may be NULL to null_<type> to get a pointer.
           - db_type: null_text

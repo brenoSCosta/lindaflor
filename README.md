@@ -327,6 +327,9 @@ Notes:
 - **Fresh schema.** The Go release uses a consolidated goose schema; it does
   not upgrade a database created by the Rust/sqlx release. Deploy onto an
   empty `lindaflor` database (dump and recreate an old `pgdata` volume).
+  The baseline is a single `00001_init.sql`; a local database migrated by
+  an earlier Go build (versions 2–3) needs `db-reset` (devenv shell)
+  (or a fresh database) once.
 - **Migrations never run in the web process in production**; on other
   platforms run the migrate image as a release job / init container:
   `docker run --rm -e DATABASE_URL=… lindaflor:migrate`. Write migrations to
