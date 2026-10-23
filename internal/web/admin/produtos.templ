@@ -241,7 +241,17 @@ templ productEditPage(p *store.AdminProductEdit) {
 									@variantInput("Estoque baixo", templ.Attributes{"type": "number", "name": "variant_threshold[]", "value": itoa(v.LowStockThreshold), "min": "0"})
 								</div>
 							}
+							// Blank row: a new SKU here adds a variant (stock starts at 0;
+							// add it in /admin/estoque). Left blank, it is ignored.
+							<div class="grid grid-cols-1 gap-4 rounded-lg border border-dashed border-border p-4 @sm/page:grid-cols-2 @lg/page:grid-cols-6">
+								@variantInput("SKU (nova variante)", templ.Attributes{"type": "text", "name": "variant_sku[]", "placeholder": "SKU"})
+								@variantInput("Tamanho", templ.Attributes{"type": "text", "name": "variant_size[]", "placeholder": "pp, p, m, g, gg"})
+								@variantInput("Cor", templ.Attributes{"type": "text", "name": "variant_color[]", "placeholder": "Cor"})
+								@variantInput("Cor (hex)", templ.Attributes{"type": "text", "name": "variant_color_hex[]", "placeholder": "#000000"})
+								@variantInput("Estoque baixo", templ.Attributes{"type": "number", "name": "variant_threshold[]", "value": "5", "min": "0"})
+							</div>
 						</div>
+						<p class="text-xs text-muted-foreground">Preencha a última linha para adicionar uma variante; o estoque inicial é lançado em Estoque.</p>
 					</fieldset>
 					<fieldset class="space-y-4 rounded-xl border border-border p-2">
 						<legend class="px-2 font-medium">Complete o look</legend>

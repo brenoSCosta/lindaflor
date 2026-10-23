@@ -89,6 +89,38 @@ func TestProductCreateEditUpdate(t *testing.T) {
 		t.Fatal("image not deleted")
 	}
 
+	// Regression: the create form says "add more variants by editing the
+	// product", but the edit page had no row for a new one. Its blank row
+	// is ignored when empty and adds a variant (with an inventory row) when
+	// filled.
+	page = a.c.Get("/admin/produtos/" + id.String())
+	wantContains(t, page.Body, "SKU (nova variante)")
+	if n := strings.Count(page.Body, `name="variant_sku[]"`); n != 2 {
+		t.Fatalf("variant rows = %d, want the stored one + a blank one", n)
+	}
+	upd["variant_sku[]"] = []string{"NOVO-" + slug, ""}
+	upd["variant_size[]"] = []string{"g", ""}
+	upd["variant_color[]"] = []string{"Azul", ""}
+	upd["variant_color_hex[]"] = []string{"", ""}
+	upd["variant_threshold[]"] = []string{"3", "5"}
+	wantRedirect(t, postMultipart(t, a.c, "/admin/produtos/update", upd), "/admin/produtos/"+id.String())
+	if n := scalar[int64](t, s, `SELECT COUNT(*) FROM product_variants WHERE product_id = $1`, id); n != 1 {
+		t.Fatalf("blank row created a variant: %d", n)
+	}
+	upd["variant_sku[]"] = []string{"NOVO-" + slug, "EXTRA-" + slug}
+	upd["variant_size[]"] = []string{"g", "m"}
+	upd["variant_color[]"] = []string{"Azul", "Coral"}
+	wantRedirect(t, postMultipart(t, a.c, "/admin/produtos/update", upd), "/admin/produtos/"+id.String())
+	wantToast(t, a.c, toast.SuccessType, "Alterações salvas com sucesso.")
+	if n := scalar[int64](t, s, `SELECT COUNT(*) FROM product_variants v JOIN inventory i ON i.variant_id = v.id WHERE v.product_id = $1`, id); n != 2 {
+		t.Fatalf("variants with inventory = %d, want 2", n)
+	}
+	upd["variant_sku[]"] = []string{"NOVO-" + slug}
+	upd["variant_size[]"] = []string{"g"}
+	upd["variant_color[]"] = []string{"Azul"}
+	upd["variant_color_hex[]"] = []string{""}
+	upd["variant_threshold[]"] = []string{"3"}
+
 	// Unknown / invalid product ids go back to the list.
 	upd["product_id"] = []string{uuid.NewString()}
 	wantRedirect(t, postMultipart(t, a.c, "/admin/produtos/update", upd), "/admin/produtos")
