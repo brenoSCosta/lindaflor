@@ -564,7 +564,8 @@ var warnCaptchaOnce sync.Once
 // VerifyCaptchaToken fails open until the Turnstile siteverify integration
 // lands: when the gate is not required it returns true; when required, a
 // non-blank token is accepted (logged once) and a blank one rejected.
-// TODO(wave1-A): real siteverify (POST challenges.cloudflare.com, 5s timeout).
+// Same as the Rust app; real siteverify (POST challenges.cloudflare.com,
+// 5s timeout) is a follow-up before relying on TURNSTILE_ENFORCE.
 func VerifyCaptchaToken(required bool, token string) bool {
 	if !required {
 		return true

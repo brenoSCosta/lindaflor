@@ -32,8 +32,8 @@ type Deps struct {
 	Storage  storage.Store
 	Payments payments.Provider
 	// Orders is the order FSM seen by payments (webhook, sweep, admin
-	// sync/refund). TODO(wave1-C): wire internal/store's implementation;
-	// nil makes payment syncs fail with payments.ErrOrdersNotWired.
+	// sync/refund): store.OrderFSM in production; nil makes payment syncs
+	// fail with payments.ErrOrdersNotWired.
 	Orders payments.OrderTransitioner
 	Logger *slog.Logger
 	Shell  ShellLoader

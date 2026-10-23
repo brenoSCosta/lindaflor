@@ -7,9 +7,8 @@ import (
 )
 
 // Local ports of src/auth/validation.rs (validate_email / validate_name),
-// used by checkout, newsletter and stock alerts.
-// TODO(wave3): switch to auth.ValidateEmail / auth.ValidateName once
-// wave1-A lands, if they keep the same rules.
+// used by checkout, newsletter and stock alerts (the store package does not
+// import auth; the rules match auth.ValidateEmail / auth.ValidateName).
 
 const (
 	emailMax = 254

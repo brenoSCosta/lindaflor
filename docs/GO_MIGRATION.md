@@ -1,10 +1,22 @@
-# Go migration — guide for implementers
+# Go migration — record and conventions
 
-The Rust/Topcoat app (`src/`, `crates/`, `migrations/`, `assets/`,
-`styles.css`) is the **source of truth for behavior** until Wave 3 deletes
-it. The Go app lives alongside it: `go.mod` at the repo root, module
-`github.com/wellington-vell/lindaflor`. Plan:
-`~/.claude/plans/federated-honking-moonbeam.md`.
+**Status: complete.** Lindaflor was rewritten from Rust/Topcoat (sqlx,
+~65k lines) to Go 1.27 + chi + templ + htmx 4 + Alpine.js + Tailwind v4 +
+pgx/sqlc + goose on branch `migration-golang`, reaching route and test
+parity (verified by a parity audit: every Rust route mapped, the Rust test
+suite ported next to the Go code, a browser walk-through of the storefront,
+checkout, account and admin). The Rust tree (`src/`, `crates/`, `tests/`,
+`migrations/`, `assets/`, `styles.css`, `Cargo.*`, `.sqlx/`) was then
+deleted; it remains in git history (the `migration` branch and the commits
+before the deletion) as the behavioral reference.
+
+This document keeps what is useful for future work: the package layout,
+the shared contracts, the conventions every feature package follows, the
+deliberate behavior differences from the Rust app, and a short history of
+how the migration was run. Setup and deployment live in
+[`README.md`](../README.md); agent/contributor rules in
+[`AGENTS.md`](../AGENTS.md); htmx 4 specifics in
+[`htmx4-notes.md`](htmx4-notes.md).
 
 ## Toolchain & commands
 
@@ -24,8 +36,8 @@ tailwindcss 4.3, postgres 17, valkey 9.
 | Dev server | `devenv up` (postgres :4201, valkey :4202, rustfs :4203/4204, pgweb :4205, app :4200 via air) or `make dev` |
 | Migrate | `make migrate` (goose, `$DATABASE_URL`) — dev server also migrates on boot |
 
-**Gate before you finish:**
-`nix develop -c bash -c 'make generate && go build ./... && go vet ./... && golangci-lint run ./... && go test ./...'`
+**Gate before you finish** (CI runs the same):
+`nix develop -c bash -c 'make generate && go build ./... && go vet ./... && make lint && go test -race ./...'`
 
 Generated code is **committed**: `*_templ.go`, `internal/db/sqlc/`,
 `web/static/css/app.css`. Run `make generate` after editing `.templ`,
@@ -35,9 +47,9 @@ Generated code is **committed**: `*_templ.go`, `internal/db/sqlc/`,
 
 ```
 cmd/server         main: config → pool (migrate/verify) → valkey → router → http.Server (30s graceful) → jobs.Start
-cmd/seed           TODO(wave1-C)
-cmd/create-admin   TODO(wave1-A)
-db/migrations      goose SQL (00001_init.sql = consolidated Rust 0001..0030); embedded by package db (db/embed.go)
+cmd/seed           demo data: admin, settings, warehouse, catalog (data/catalog.json), looks, sets (idempotent)
+cmd/create-admin   create/promote an admin (password on stdin); ships in the runtime image
+db/migrations      goose SQL (00001_init.sql = fresh baseline: Rust 0001..0030 folded + sqlc domains + views); embedded by package db (db/embed.go)
 db/queries         sqlc query files, ONE FILE PER AREA (see below)
 internal/
   config           every env var (KEY or KEY_FILE), Load() validates production
@@ -45,38 +57,27 @@ internal/
   valkey           go-redis client + in-process fallback; lockouts, TOTP reuse, pending-2FA binding, enroll flash
   httpx            middleware (request id, client IP, recover, security headers, body limit, origin), redirects, htmx helpers
   httpx/toast      flash toasts (cookie for full pages, X-Toast header for htmx)
-  auth mail audit payments storage ratelimit seo metrics logging jobs   (contracts; see owners)
+  auth             argon2id, sessions, one-time tokens, TOTP/backup codes, step-up, Google OAuth (PKCE), middleware
+  mail audit payments storage ratelimit seo metrics logging   platform services (outbox, MP + static PIX, S3, GCRA limits, …)
+  store            domain logic: cart, inventory, coupons, pricing, checkout, order FSM, returns, reviews, reports, …
+  jobs maintenance background loops (outbox worker, reservation sweep, hygiene, stock alerts, abandoned carts)
   app              Deps container + ShellLoader type
-  web              router.go (middleware stack + Mount calls — do not edit in waves 1/2)
+  web              router.go (middleware stack + one Mount call per feature package)
   web/render       Page / Status / NotFound / Fragment
   web/layout       Root, StorefrontShell (+Header/Footer/AnnouncementBar/CartCount), AppShell, NotFound
   web/components   templ UI kit (port of src/components/*), lucide icons
   web/format       Price (R$ 1.234,56), DateTimeBR (UTC-3), DateBR, DateISO, TodayBR
   web/{authpages,authapi,storefront,checkout,account,admin,platform}   one Mount(r, d) each
   testutil         Postgres per test binary + template DB per test, miniredis, test server + cookie-jar client
-web/static         embedded assets (css/app.css generated, js/, vendor/) + URL()/Handler() cache busting
+web/static         embedded assets (css/app.css generated, img/, js/, vendor/) + URL()/Handler() cache busting
 web/styles         input.css (Tailwind v4 source)
 ```
 
-## Ownership (no two agents edit the same file)
+New migrations: add `db/migrations/000NN_<area>_<what>.sql` (next free
+number), forward-only, compatible with the previous release still running
+(expand → deploy → contract). Never edit an applied migration.
 
-| Agent | Owns |
-|---|---|
-| **wave1-A Auth** | `internal/auth/**`, `internal/web/authapi/**`, `internal/web/authpages/**`, `cmd/create-admin/**`, `db/queries/auth*.sql` (+ `users.sql`) |
-| **wave1-B Platform** | `internal/mail/**`, `internal/storage/**`, `internal/payments/**`, `internal/ratelimit/**`, `internal/logging/**`, `internal/metrics/**`, `internal/seo/**`, `internal/web/platform/**` (keep `/api/health` + `/api/readyz`), `db/queries/{mail,payments,seo,platform}.sql` |
-| **wave1-C Store domain** | `internal/store/**` (new), `internal/jobs/**`, `cmd/seed/**`, `db/queries/{store_*,maintenance,seed}.sql`; exposes domain functions (e.g. store settings, nav sets, cart count) that D calls from `ShellLoader` |
-| **wave2-D Storefront** | `internal/web/storefront/**` (incl. `ShellLoader`), page templ files there |
-| **wave2-E Checkout & account** | `internal/web/checkout/**`, `internal/web/account/**` |
-| **wave2-F Admin** | `internal/web/admin/**` |
-| **wave0 / orchestrator** | `internal/web/router.go`, `internal/app`, `internal/httpx/**`, `internal/web/{components,layout,render,format}`, `internal/config`, `internal/db/db.go`, `db/migrations/00001_init.sql`, `testutil`, nix/Makefile/CI |
-
-Need a change in a wave-0 file (new component variant, config field,
-middleware)? Prefer adding a **new file** in your own package. If a shared
-file must change, keep the edit minimal and mention it in your report — the
-orchestrator merges. New migrations: add `db/migrations/000NN_<area>_<what>.sql`
-(pick the next free number; renumber on merge if two collide), forward-only.
-
-## Contracts (Wave 0 signatures)
+## Contracts
 
 ```go
 // internal/app
@@ -84,7 +85,7 @@ type ShellLoader func(r *http.Request) (layout.ShellData, error)
 type Deps struct {
 	Cfg *config.Config; Pool *pgxpool.Pool; Q *sqlc.Queries; Valkey *valkey.Client
 	Mailer mail.Mailer; Storage storage.Store; Payments payments.Provider
-	Logger *slog.Logger; Shell ShellLoader
+	Orders payments.OrderTransitioner /* store.OrderFSM */; Logger *slog.Logger; Shell ShellLoader
 }
 // every feature package
 func Mount(r chi.Router, d *app.Deps)
@@ -96,8 +97,8 @@ type Session struct{ ID, UserID uuid.UUID; ExpiresAt time.Time; ImpersonatedBy *
 func CurrentUser(ctx) (*User, bool); func CurrentSession(ctx) (*Session, bool); func IsImpersonating(ctx) bool
 func WithUser(ctx, *User, *Session) context.Context        // middleware + tests
 type MiddlewareDeps struct{ Pool *pgxpool.Pool; Cfg *config.Config; Valkey *valkey.Client }
-func Middleware(MiddlewareDeps) func(http.Handler) http.Handler // placeholder: anonymous
-func RequireUser(http.Handler) http.Handler; func RequireAdmin(http.Handler) http.Handler
+func Middleware(MiddlewareDeps) func(http.Handler) http.Handler // resolves the session cookie
+func RequireUser(http.Handler) http.Handler /* → /login?next=… */; func RequireAdmin(http.Handler) http.Handler
 func SessionCookieName(secure bool) string                // "session" / "__Host-session"
 
 // internal/mail
@@ -123,7 +124,7 @@ type Store interface{ Put(ctx, key, body, contentType) error; Delete(ctx, key) e
 type Memory; NewMemory(); type Unavailable; IsUnavailable(Store) bool
 
 // internal/ratelimit
-func Limit(scope string, defaultPerMin uint32) func(http.Handler) http.Handler   // no-op until wave1-B
+func Limit(scope string, defaultPerMin uint32) func(http.Handler) http.Handler
 func MutationsOnly(scope string, defaultPerMin uint32) func(http.Handler) http.Handler
 func Global() func(http.Handler) http.Handler
 // Scope* and Default*PerMin constants; env override config.RateLimitFor(scope, def)
@@ -135,7 +136,7 @@ func SetHead(ctx, Head)        // call in the handler BEFORE render.Page
 func HeadFrom(ctx) (Head, bool); func Resolve(...) Resolved; IsPrivatePath; SiteOrigin; AbsoluteURL; JSONLDScriptBody; DecimalPrice; Summarize
 
 // internal/jobs
-func Start(ctx, d *app.Deps) *sync.WaitGroup               // TODO loops
+func Start(ctx, d *app.Deps) *sync.WaitGroup               // server shutdown waits on it
 
 // internal/valkey (complete port of src/valkey.rs)
 func Connect(ctx, url) (*Client, error); NewWithRedis(*redis.Client); NewFallbackOnly()
@@ -162,7 +163,7 @@ type ShellData struct{ User *auth.User; Impersonating bool; AvatarURL string; Ca
 layout.CartCount(n) /* #cart-count badge for <hx-partial> */; IsAppShellPath; WhatsappLink; Initials
 
 // web/static
-static.URL("css/app.css") → "/static/css/app.css?v=<hash>"
+static.URL("css/app.css") → "/static/css/app.css?v=<hash>"; static.Favicon (/favicon.ico)
 ```
 
 ## Conventions
@@ -171,10 +172,11 @@ static.URL("css/app.css") → "/static/css/app.css?v=<hash>"
 handler. Log with `slog` (`slog.ErrorContext(r.Context(), "msg", "error", err, …)`);
 never log secrets, tokens, cookie values or full emails. Unexpected errors
 → 500 (plain text in handlers is fine; the logging middleware records it).
-User-facing messages are pt-BR and copied verbatim from the Rust code.
+User-facing messages are pt-BR (copied verbatim from the Rust app where
+it had them).
 
 **Handlers.** `func(w http.ResponseWriter, r *http.Request)` closures that
-capture `d *app.Deps`, registered in your package's `Mount`. Parse forms
+capture `d *app.Deps`, registered in the package's `Mount`. Parse forms
 with `r.ParseForm()`; check `httpx.IsBodyTooLarge(err)` → `httpx.TooLarge(w)`.
 Per-route body limits: `r.With(httpx.BodyLimit(2<<20)).Post("/settings/avatar", h)`
 (product create/update: 20 MiB). Rate limits: `r.With(ratelimit.Limit(scope, def))`.
@@ -220,19 +222,18 @@ before `render.Page`. Private paths (`seo.IsPrivatePath`) are always noindex.
 - Config: `sqlc.yaml` (pgx/v5, uuid → `google/uuid`, timestamptz →
   `time.Time` / `*time.Time`, jsonb → `json.RawMessage`, nullable columns as
   pointers, JSON tags, enum `Valid()`).
-- Add queries to **your own file** `db/queries/<area>.sql` (create it), with
-  a header comment `-- Owner: <agent>`. Never edit another area's file;
-  name queries with an area-specific prefix to avoid collisions
-  (`CartGetByToken`, `AdminListOrders`, …).
+- Queries live in `db/queries/<area>.sql` (one file per area, header
+  comment `-- Owner: <package>`), named with an area prefix to avoid
+  collisions (`CartGetByToken`, `AdminListOrders`, …).
 - Live availability: use the view `inventory_live` (`live_available`
   column) or `inventory_live_available(i.id, i.quantity, i.reserved)` —
-  the Rust `LIVE_AVAILABLE_SQL`. Lock rows `ORDER BY i.id FOR UPDATE` as in Rust.
+  the Rust `LIVE_AVAILABLE_SQL`. Lock rows `ORDER BY i.id FOR UPDATE`.
 - No raw SQL strings in application code: every statement lives in
   `db/queries/*.sql` (tests may keep raw SQL fixtures). Arrays are
   `sqlc.arg(ids)::uuid[]`; optional filters `(sqlc.narg(x)::type IS NULL OR …)`.
 - Dynamic catalog filters: `sqlc.narg()` + `CASE` sort keys (see
   `StoreListProducts` in `store_catalog.sql`); product cards select from
-  the `product_summaries` view. Fall back to hand-written pgx in your
+  the `product_summaries` view. Fall back to hand-written pgx in the
   package only when sqlc cannot express it, with a comment saying why.
 - **Nullability:** sqlc types every computed expression (scalar subquery,
   `to_char`, `CASE`, aggregate, `x::text` of a nullable column) as NOT NULL,
@@ -246,7 +247,8 @@ before `render.Page`. Private paths (`seo.IsPrivatePath`) are always noindex.
 
 ## Tests
 
-- Port the Rust tests next to the Go code (`*_test.go`, same names in Go style).
+- Tests live next to the code (`*_test.go`); ported Rust tests keep their
+  names in Go style and usually cite the Rust test in a comment.
 - Unit tests: plain `go test`. Use `t.Setenv` for env (not with `t.Parallel`).
 - DB tests: `pool := testutil.NewPool(t)` (fresh migrated DB cloned from a
   template, dropped at cleanup).
@@ -259,16 +261,64 @@ before `render.Page`. Private paths (`seo.IsPrivatePath`) are always noindex.
   `s.Redis` (miniredis, `FastForward` for TTLs), `s.Store` (memory storage).
   Cookie assertions: `testutil.AssertHardenedCookie`,
   `AssertExpiredHardenedCookie(Dev)`, `FindSetCookie`, `RedactSetCookie`.
-  `c.SignUp/SignIn` hit `/api/auth/sign-*/email` (work once wave1-A lands).
+  `c.SignUp/SignIn` hit `/api/auth/sign-*/email`.
 - Add `func TestMain(m *testing.M) { testutil.Main(m) }` in packages that
   use the database (stops Postgres and removes its data dir).
 - Postgres comes from `initdb`/`postgres` on PATH (nix shell); without
   them, embedded-postgres downloads a server. Rate limits are relaxed for
   test servers unless `Options.KeepRateLimits`.
 
-## Not done in Wave 0 (by design)
+## Intentional differences from the Rust app
 
-Auth, mail worker/templates, S3, Mercado Pago, rate limiting, metrics,
-sitemap/robots/OpenAPI, store domain, jobs, seed/create-admin, every page
-except the placeholder home and the 404. Search for `TODO(wave` to find
-the hooks.
+Behavior is otherwise the same (paths, pt-BR copy, business rules, security
+defaults). These differences were chosen on purpose; don't "fix" them back.
+
+- **Upload limits.** Rust only raised the 1 MiB global body limit for
+  avatar (2 MiB) and product create/update (20 MiB), so set and banner
+  image uploads failed with 413. Go also raises set create/update to 20 MiB
+  (several images per form) and banner create to 3 MiB (one image).
+- **Page titles.** Every admin and app-shell page sets its own `<title>`
+  (`seo.SetHead`), where Rust reused a generic one.
+- **Settings tabs are links** (`/settings?tab=security`, …): each tab is a
+  real URL that works without JS, instead of client-only tab state.
+- **htmx toasts ride the `X-Toast` response header** (read by
+  `web/static/js/toast.js`), never the cookie. The toast cookie is only for
+  full-page (no-JS) POST → 303 → GET. Rust's `X-Toast-Promise` /
+  same-path cookie logic is gone because htmx never navigates the document.
+- **No-JS add to cart**: `POST /carrinho/adicionar` without htmx answers
+  303 → `/carrinho/sheet`, which renders the cart as a full page.
+- **`/pedido/{id}`** answers 404 (branded page) for an unknown order or a
+  denied access token, where Rust rendered a 200 "not found" page.
+- **Static PIX** shows the QR code too (rendered from the BR Code), not
+  just the copy-and-paste code.
+- **`auth.RequireUser`** redirects to `/login?next=<path>` so login returns
+  to the page the user wanted.
+- **Admin estoque/avaliações** actions answer 303 + toast (no-JS
+  POST/redirect/GET), with htmx enhancement on top.
+- **Schema**: one consolidated goose baseline (`00001_init.sql`), not the
+  29 sqlx migrations; it does not upgrade a Rust-era database.
+- **Dashboard order statuses** are shown with pt-BR labels
+  (`Aguardando pagamento`, `Pago`, …), not raw enum values.
+- **Small additions**: a favicon (`web/static/img/favicon.svg`, also at
+  `/favicon.ico`); the 2FA setup page shows the base32 secret under the QR
+  for manual entry.
+
+## History
+
+The migration followed the plan in
+`~/.claude/plans/federated-honking-moonbeam.md`, run as waves of parallel
+agents in isolated worktrees, each owning disjoint packages and merged by
+an orchestrator into `migration-golang`:
+
+- **Wave 0 — foundation**: flake/devenv, config, consolidated schema +
+  goose, sqlc, pgx pool, Valkey client, middleware stack, router with one
+  `Mount` per feature package, layouts, templ component kit, Tailwind,
+  vendored htmx 4/Alpine, toasts, `testutil`.
+- **Wave 1 — backend**: auth (`/api/auth/*`, pages, create-admin);
+  platform services (mail, S3, payments, rate limits, logging/metrics, SEO,
+  OpenAPI); store domain + jobs + seed.
+- **Wave 2 — UI**: storefront; checkout & account; admin.
+- **Wave 3 — integration**: server wiring and graceful shutdown, Docker
+  (distroless runtime + migrate image), compose, CI, docs, a parity audit
+  (routes, tests, Playwright walk-through) with fix-ups, then the deletion
+  of the Rust tree.
