@@ -3,7 +3,10 @@ package layout
 import "github.com/wellington-vell/lindaflor/internal/web/components"
 
 // StorefrontShell is the public chrome: announcement bar, header, the cart
-// sheet ($store.cart.open) and the footer (hidden on /login).
+// sheet ($store.cart.open) and the footer (hidden on /login). The header
+// cart button loads the sheet body (GET /carrinho/sheet) every time it
+// opens; cart procedures swap it in place and open it with the
+// HX-Trigger "cart-show" event.
 templ StorefrontShell(s ShellData, path string) {
 	<div class="flex min-h-screen flex-col bg-background text-foreground">
 		@AnnouncementBar(s.Settings)
@@ -14,12 +17,21 @@ templ StorefrontShell(s ShellData, path string) {
 		@components.Sheet(components.OverlayProps{
 			XOpen:   "$store.cart.open",
 			OnClose: "$store.cart.open = false",
-			Attrs:   components.Attr("id", "cart-sheet", "aria-label", "Carrinho"),
+			Attrs: templ.Attributes{
+				"id":                    "cart-sheet",
+				"aria-label":            "Carrinho",
+				"x-data":                true,
+				"x-on:cart-show.window": "$store.cart.open = true",
+			},
 		}) {
 			@components.SheetContent(components.SheetContentProps{Class: "[&]:overflow-hidden"}) {
 				<div id="cart-sheet-body" class="flex min-h-0 flex-1 flex-col">
 					if s.CartSheet != nil {
 						@s.CartSheet
+					} else {
+						<div class="flex flex-1 items-center justify-center py-10 text-muted-foreground">
+							@components.Spinner("Carregando…", "size-6")
+						</div>
 					}
 				</div>
 			}
@@ -134,6 +146,9 @@ templ Header(s ShellData) {
 						title="Carrinho"
 						x-data
 						x-on:click="$store.cart.open = true"
+						hx-get="/carrinho/sheet"
+						hx-target="#cart-sheet-body"
+						hx-swap="innerHTML"
 					>
 						@components.Icon("shopping-cart", "")
 						@CartCount(s.CartCount)
