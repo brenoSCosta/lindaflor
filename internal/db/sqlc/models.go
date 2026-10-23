@@ -652,6 +652,23 @@ type ProductReview struct {
 	ModeratedBy *uuid.UUID   `json:"moderated_by"`
 }
 
+type ProductSummary struct {
+	ID                    uuid.UUID       `json:"id"`
+	Name                  string          `json:"name"`
+	Slug                  string          `json:"slug"`
+	Description           *string         `json:"description"`
+	PriceInCents          int64           `json:"price_in_cents"`
+	CompareAtPriceInCents *int64          `json:"compare_at_price_in_cents"`
+	Category              ProductCategory `json:"category"`
+	Active                bool            `json:"active"`
+	Featured              bool            `json:"featured"`
+	CreatedAt             time.Time       `json:"created_at"`
+	ImageUrl              *string         `json:"image_url"`
+	SecondaryImageUrl     *string         `json:"secondary_image_url"`
+	AvailableTotal        int32           `json:"available_total"`
+	ColorsJson            string          `json:"colors_json"`
+}
+
 type ProductVariant struct {
 	ID                uuid.UUID   `json:"id"`
 	ProductID         uuid.UUID   `json:"product_id"`

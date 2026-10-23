@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 	"github.com/wellington-vell/lindaflor/internal/storage"
 )
 
@@ -28,36 +29,18 @@ type AdminSetRow struct {
 	ImageCount  int64
 }
 
-var sqlAdminSets = sqlText(`SELECT s.id, s.name, s.slug, s.price_in_cents, s.active,
-        (SELECT si.url FROM set_images si WHERE si.set_id = s.id ORDER BY si.sort_order ASC LIMIT 1) AS cover_url,
-        (SELECT COUNT(*) FROM set_members sm WHERE sm.set_id = s.id) AS member_count,
-        (SELECT COUNT(*) FROM set_images si WHERE si.set_id = s.id) AS image_count
- FROM sets s ORDER BY s.name ASC`)
-
 // ListAdminSets lists every set with its cover resolved.
 func ListAdminSets(ctx context.Context, q DBTX, st storage.Store) ([]AdminSetRow, error) {
-	type row struct {
-		ID          uuid.UUID `db:"id"`
-		Name        string    `db:"name"`
-		Slug        string    `db:"slug"`
-		Price       *int64    `db:"price_in_cents"`
-		Active      bool      `db:"active"`
-		Cover       *string   `db:"cover_url"`
-		MemberCount int64     `db:"member_count"`
-		ImageCount  int64     `db:"image_count"`
-	}
-	rows, err := collect[row](q.Query(ctx, sqlAdminSets))
+	rows, err := queries(q).StoreAdminSets(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]AdminSetRow, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, AdminSetRow{
-			ID: r.ID, Name: r.Name, Slug: r.Slug, Price: r.Price, Active: r.Active,
-			CoverURL: ResolveStorageURL(ctx, st, r.Cover), MemberCount: r.MemberCount, ImageCount: r.ImageCount,
-		})
-	}
-	return out, nil
+	return mapSlice(rows, func(r sqlc.StoreAdminSetsRow) AdminSetRow {
+		return AdminSetRow{
+			ID: r.ID, Name: r.Name, Slug: r.Slug, Price: r.PriceInCents, Active: r.Active,
+			CoverURL: ResolveStorageURL(ctx, st, r.CoverUrl), MemberCount: r.MemberCount, ImageCount: r.ImageCount,
+		}
+	}), nil
 }
 
 // ValidateSetName trims; 1..=200 chars.
@@ -162,16 +145,6 @@ func validateSetBase(f SetForm) (validSet, error) {
 	return v, nil
 }
 
-var (
-	sqlSetIDBySlug  = sqlText(`SELECT id FROM sets WHERE slug = $1`)
-	sqlSetSlugTaken = sqlText(`SELECT id FROM sets WHERE slug = $1 AND id != $2`)
-	sqlInsertSet    = sqlText(`INSERT INTO sets (id, name, slug, description, price_in_cents, compare_at_price_in_cents, active, created_at, updated_at)
- VALUES ($1, $2, $3, $4, $5, $6, $7, now(), now())`)
-	sqlToggleSet    = sqlText(`UPDATE sets SET active = NOT active, updated_at = now() WHERE id = $1`)
-	sqlSetImageKeys = sqlText(`SELECT url FROM set_images WHERE set_id = $1`)
-	sqlDeleteSet    = sqlText(`DELETE FROM sets WHERE id = $1`)
-)
-
 // CreateSetResult mirrors CreateProductResult.
 type CreateSetResult struct {
 	ID          uuid.UUID
@@ -198,15 +171,18 @@ func CreateSet(ctx context.Context, pool *pgxpool.Pool, st storage.Store, f SetF
 	if err := validateUploads(f.Images); err != nil {
 		return CreateSetResult{}, err
 	}
-	var existing uuid.UUID
-	err = pool.QueryRow(ctx, sqlSetIDBySlug, v.slug).Scan(&existing)
-	if found, err := optional(err); err != nil {
+	qs := queries(pool)
+	_, found, err := noRows(qs.StoreSetIDBySlug(ctx, v.slug))
+	if err != nil {
 		return CreateSetResult{}, err
 	} else if found {
 		return CreateSetResult{}, userErr("Este slug já está em uso por outro conjunto.")
 	}
 	id := uuid.Must(uuid.NewV7())
-	if _, err := pool.Exec(ctx, sqlInsertSet, id, v.name, v.slug, v.description, v.price, v.compare, f.Active); err != nil {
+	if err := qs.StoreInsertSet(ctx, sqlc.StoreInsertSetParams{
+		ID: id, Name: v.name, Slug: v.slug, Description: v.description, PriceInCents: v.price,
+		CompareAtPriceInCents: v.compare, Active: f.Active,
+	}); err != nil {
 		return CreateSetResult{}, err
 	}
 	res := CreateSetResult{ID: id}
@@ -221,17 +197,17 @@ func CreateSet(ctx context.Context, pool *pgxpool.Pool, st storage.Store, f SetF
 
 // ToggleSet flips a set's active flag ("Conjunto atualizado.").
 func ToggleSet(ctx context.Context, q DBTX, setID uuid.UUID) error {
-	_, err := q.Exec(ctx, sqlToggleSet, setID)
-	return err
+	return queries(q).StoreToggleSet(ctx, setID)
 }
 
 // DeleteSet deletes a set and its stored images ("Conjunto excluído.").
 func DeleteSet(ctx context.Context, q DBTX, st storage.Store, setID uuid.UUID) error {
-	keys, err := scalars[string](q.Query(ctx, sqlSetImageKeys, setID))
+	qs := queries(q)
+	keys, err := qs.StoreSetImageKeys(ctx, setID)
 	if err != nil {
 		return err
 	}
-	if _, err := q.Exec(ctx, sqlDeleteSet, setID); err != nil {
+	if err := qs.StoreDeleteSet(ctx, setID); err != nil {
 		return err
 	}
 	for _, k := range keys {
@@ -285,45 +261,25 @@ type NamedOption struct {
 	Label string
 }
 
-var (
-	sqlAdminSet        = sqlText(`SELECT id, name, slug, description, price_in_cents, compare_at_price_in_cents, active FROM sets WHERE id = $1`)
-	sqlAdminSetImages  = sqlText(`SELECT id, url FROM set_images WHERE set_id = $1 ORDER BY sort_order ASC`)
-	sqlAdminSetMembers = sqlText(`SELECT sm.product_id, p.name FROM set_members sm
-  INNER JOIN products p ON p.id = sm.product_id
-  WHERE sm.set_id = $1 ORDER BY sm.sort_order ASC`)
-	sqlSetProductOptions = sqlText(`SELECT id, name FROM products WHERE active = true ORDER BY name ASC LIMIT 100`)
-	sqlAdminSetSlots     = sqlText(`SELECT id, label FROM set_slots WHERE set_id = $1 ORDER BY sort_order ASC`)
-	sqlAdminSlotOptions  = sqlText(`SELECT slot_id, variant_id FROM set_slot_options WHERE slot_id = ANY($1)`)
-	sqlSetVariantOptions = sqlText(`SELECT pv.id, pv.sku, p.name AS product_name, pv.size::text AS size, pv.color
-   FROM product_variants pv
-   INNER JOIN products p ON p.id = pv.product_id
-   WHERE p.active = true
-   ORDER BY p.name ASC, pv.sku ASC LIMIT 200`)
-)
-
 // LoadAdminSet loads the edit page (nil when missing).
 func LoadAdminSet(ctx context.Context, q DBTX, st storage.Store, setID uuid.UUID) (*AdminSetEdit, error) {
-	var s AdminSetEdit
-	err := q.QueryRow(ctx, sqlAdminSet, setID).Scan(&s.ID, &s.Name, &s.Slug, &s.Description, &s.PriceInCents, &s.CompareAtPriceInCents, &s.Active)
-	if found, err := optional(err); err != nil || !found {
+	qs := queries(q)
+	r, found, err := noRows(qs.StoreAdminSet(ctx, setID))
+	if err != nil || !found {
 		return nil, err
 	}
-	type idURL struct {
-		ID  uuid.UUID `db:"id"`
-		URL string    `db:"url"`
+	s := AdminSetEdit{
+		ID: r.ID, Name: r.Name, Slug: r.Slug, Description: r.Description, PriceInCents: r.PriceInCents,
+		CompareAtPriceInCents: r.CompareAtPriceInCents, Active: r.Active,
 	}
-	imgs, err := collect[idURL](q.Query(ctx, sqlAdminSetImages, setID))
+	imgs, err := qs.StoreAdminSetImages(ctx, setID)
 	if err != nil {
 		return nil, err
 	}
 	for _, r := range imgs {
-		s.Images = append(s.Images, AdminImage{ID: r.ID, URL: ResolveStorageURL(ctx, st, &r.URL)})
+		s.Images = append(s.Images, AdminImage{ID: r.ID, URL: ResolveStorageURL(ctx, st, &r.Url)})
 	}
-	type member struct {
-		ProductID uuid.UUID `db:"product_id"`
-		Name      string    `db:"name"`
-	}
-	members, err := collect[member](q.Query(ctx, sqlAdminSetMembers, setID))
+	members, err := qs.StoreAdminSetMembers(ctx, setID)
 	if err != nil {
 		return nil, err
 	}
@@ -331,11 +287,7 @@ func LoadAdminSet(ctx context.Context, q DBTX, st storage.Store, setID uuid.UUID
 	for _, m := range members {
 		s.MemberIDs[m.ProductID] = true
 	}
-	type opt struct {
-		ID   uuid.UUID `db:"id"`
-		Name string    `db:"name"`
-	}
-	products, err := collect[opt](q.Query(ctx, sqlSetProductOptions))
+	products, err := qs.StoreSetProductOptions(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -349,11 +301,7 @@ func LoadAdminSet(ctx context.Context, q DBTX, st storage.Store, setID uuid.UUID
 			s.Products = append(s.Products, NamedOption{m.ProductID, m.Name + " (inativo)"})
 		}
 	}
-	type slot struct {
-		ID    uuid.UUID `db:"id"`
-		Label *string   `db:"label"`
-	}
-	slots, err := collect[slot](q.Query(ctx, sqlAdminSetSlots, setID))
+	slots, err := qs.StoreAdminSetSlots(ctx, setID)
 	if err != nil {
 		return nil, err
 	}
@@ -361,11 +309,7 @@ func LoadAdminSet(ctx context.Context, q DBTX, st storage.Store, setID uuid.UUID
 	for _, sl := range slots {
 		ids = append(ids, sl.ID)
 	}
-	type slotOpt struct {
-		SlotID    uuid.UUID `db:"slot_id"`
-		VariantID uuid.UUID `db:"variant_id"`
-	}
-	opts, err := collect[slotOpt](q.Query(ctx, sqlAdminSlotOptions, ids))
+	opts, err := qs.StoreAdminSlotOptions(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -381,19 +325,12 @@ func LoadAdminSet(ctx context.Context, q DBTX, st storage.Store, setID uuid.UUID
 		s.Slots = append(s.Slots, f)
 	}
 	s.Slots = append(s.Slots, SetSlotForm{})
-	type variantOpt struct {
-		ID          uuid.UUID `db:"id"`
-		SKU         string    `db:"sku"`
-		ProductName string    `db:"product_name"`
-		Size        string    `db:"size"`
-		Color       string    `db:"color"`
-	}
-	vars, err := collect[variantOpt](q.Query(ctx, sqlSetVariantOptions))
+	vars, err := qs.StoreSetVariantOptions(ctx)
 	if err != nil {
 		return nil, err
 	}
 	for _, v := range vars {
-		s.Variants = append(s.Variants, NamedOption{v.ID, fmt.Sprintf("%s — %s (%s/%s)", v.ProductName, v.SKU, v.Size, v.Color)})
+		s.Variants = append(s.Variants, NamedOption{v.ID, fmt.Sprintf("%s — %s (%s/%s)", v.ProductName, v.Sku, v.Size, v.Color)})
 	}
 	return &s, nil
 }
@@ -416,51 +353,38 @@ type SetWrite struct {
 	Slots       []SetSlot
 }
 
-var (
-	sqlUpdateSet = sqlText(`UPDATE sets SET name = $2, slug = $3, description = $4, price_in_cents = $5,
-  compare_at_price_in_cents = $6, active = $7, updated_at = now() WHERE id = $1`)
-	sqlDeleteSetMembers = sqlText(`DELETE FROM set_members WHERE set_id = $1`)
-	sqlInsertSetMembers = sqlText(`INSERT INTO set_members (set_id, product_id, sort_order)
- SELECT $1, p.id, (ids.ord - 1)::int
- FROM unnest($2::uuid[]) WITH ORDINALITY AS ids(id, ord)
- INNER JOIN products p ON p.id = ids.id
- ON CONFLICT DO NOTHING`)
-	sqlDeleteSetSlots   = sqlText(`DELETE FROM set_slots WHERE set_id = $1`)
-	sqlInsertSetSlot    = sqlText(`INSERT INTO set_slots (id, set_id, label, sort_order) VALUES ($1, $2, $3, $4)`)
-	sqlInsertSlotOption = sqlText(`INSERT INTO set_slot_options (slot_id, variant_id) VALUES ($1, $2)`)
-	sqlCountVariants    = sqlText(`SELECT COUNT(*) FROM product_variants WHERE id = ANY($1)`)
-	sqlSetExists        = sqlText(`SELECT id FROM sets WHERE id = $1`)
-	sqlSetImgCount      = sqlText(`SELECT COUNT(*) FROM set_images WHERE set_id = $1`)
-	sqlSetImageOwner    = sqlText(`SELECT set_id FROM set_images WHERE id = $1`)
-	sqlNextSetImgOrder  = sqlText(`SELECT (COALESCE(MAX(sort_order), -1) + 1)::int FROM set_images WHERE set_id = $1`)
-)
-
 // WriteSet rewrites a set's fields, members and slots in one transaction
 // (a failure keeps the previous set; checkout never sees a slotless set).
 func WriteSet(ctx context.Context, pool *pgxpool.Pool, setID uuid.UUID, w SetWrite) error {
 	return withTx(ctx, pool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, sqlUpdateSet, setID, w.Name, w.Slug, w.Description, w.Price, w.Compare, w.Active); err != nil {
+		q := queries(tx)
+		if err := q.StoreUpdateSet(ctx, sqlc.StoreUpdateSetParams{
+			ID: setID, Name: w.Name, Slug: w.Slug, Description: w.Description, PriceInCents: w.Price,
+			CompareAtPriceInCents: w.Compare, Active: w.Active,
+		}); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, sqlDeleteSetMembers, setID); err != nil {
+		if err := q.StoreDeleteSetMembers(ctx, setID); err != nil {
 			return err
 		}
 		members := w.MemberIDs
 		if members == nil {
 			members = []uuid.UUID{}
 		}
-		if _, err := tx.Exec(ctx, sqlInsertSetMembers, setID, members); err != nil {
+		if err := q.StoreInsertSetMembers(ctx, sqlc.StoreInsertSetMembersParams{SetID: setID, ProductIds: members}); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, sqlDeleteSetSlots, setID); err != nil {
+		if err := q.StoreDeleteSetSlots(ctx, setID); err != nil {
 			return err
 		}
 		for i, sl := range w.Slots {
 			slotID := uuid.Must(uuid.NewV7())
-			if _, err := tx.Exec(ctx, sqlInsertSetSlot, slotID, setID, sl.Label, int32(i)); err != nil { //nolint:gosec // small
+			if err := q.StoreInsertSetSlot(ctx, sqlc.StoreInsertSetSlotParams{
+				ID: slotID, SetID: setID, Label: sl.Label, SortOrder: int32(i), //nolint:gosec // small
+			}); err != nil {
 				return err
 			}
-			if _, err := tx.Exec(ctx, sqlInsertSlotOption, slotID, sl.VariantID); err != nil {
+			if err := q.StoreInsertSlotOption(ctx, sqlc.StoreInsertSlotOptionParams{SlotID: slotID, VariantID: sl.VariantID}); err != nil {
 				return err
 			}
 		}
@@ -474,9 +398,9 @@ var ErrSetNotFound = errors.New("Conjunto não encontrado.")
 // UpdateSet validates and saves the edit form, then handles images. Toasts
 // as UpdateProduct ("Alterações salvas com sucesso.").
 func UpdateSet(ctx context.Context, pool *pgxpool.Pool, st storage.Store, setID uuid.UUID, f SetForm) error {
-	var exists uuid.UUID
-	err := pool.QueryRow(ctx, sqlSetExists, setID).Scan(&exists)
-	if found, err := optional(err); err != nil {
+	qs := queries(pool)
+	_, found, err := noRows(qs.StoreSetExists(ctx, setID))
+	if err != nil {
 		return err
 	} else if !found {
 		return ErrSetNotFound
@@ -503,8 +427,8 @@ func UpdateSet(ctx context.Context, pool *pgxpool.Pool, st storage.Store, setID 
 		for _, s := range slots {
 			ids = append(ids, s.VariantID)
 		}
-		var found int64
-		if err := pool.QueryRow(ctx, sqlCountVariants, ids).Scan(&found); err != nil {
+		found, err := qs.StoreCountVariants(ctx, ids)
+		if err != nil {
 			return err
 		}
 		if found != int64(len(ids)) {
@@ -512,8 +436,8 @@ func UpdateSet(ctx context.Context, pool *pgxpool.Pool, st storage.Store, setID 
 		}
 	}
 	deleteIDs := parseUUIDs(f.DeleteImageIDs)
-	var current int64
-	if err := pool.QueryRow(ctx, sqlSetImgCount, setID).Scan(&current); err != nil {
+	current, err := qs.StoreSetImageCount(ctx, setID)
+	if err != nil {
 		return err
 	}
 	remaining := current - int64(len(deleteIDs)) + int64(len(f.Images))
@@ -523,9 +447,8 @@ func UpdateSet(ctx context.Context, pool *pgxpool.Pool, st storage.Store, setID 
 	if err := validateUploads(f.Images); err != nil {
 		return err
 	}
-	var taken uuid.UUID
-	err = pool.QueryRow(ctx, sqlSetSlugTaken, v.slug, setID).Scan(&taken)
-	if found, err := optional(err); err != nil {
+	_, found, err = noRows(qs.StoreSetSlugTaken(ctx, sqlc.StoreSetSlugTakenParams{Slug: v.slug, SetID: setID}))
+	if err != nil {
 		return err
 	} else if found {
 		return userErr("Este slug já está em uso por outro conjunto.")
@@ -537,9 +460,8 @@ func UpdateSet(ctx context.Context, pool *pgxpool.Pool, st storage.Store, setID 
 		return err
 	}
 	for _, imageID := range deleteIDs {
-		var owner uuid.UUID
-		err := pool.QueryRow(ctx, sqlSetImageOwner, imageID).Scan(&owner)
-		if found, err := optional(err); err != nil {
+		owner, found, err := noRows(qs.StoreSetImageOwner(ctx, imageID))
+		if err != nil {
 			return err
 		} else if found && owner == setID {
 			if err := DeleteSetImage(ctx, pool, st, imageID); err != nil {
@@ -547,8 +469,8 @@ func UpdateSet(ctx context.Context, pool *pgxpool.Pool, st storage.Store, setID 
 			}
 		}
 	}
-	var next int32
-	if err := pool.QueryRow(ctx, sqlNextSetImgOrder, setID).Scan(&next); err != nil {
+	next, err := qs.StoreNextSetImageOrder(ctx, setID)
+	if err != nil {
 		return err
 	}
 	for i, up := range f.Images {

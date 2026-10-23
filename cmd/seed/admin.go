@@ -11,6 +11,7 @@ import (
 
 	"github.com/wellington-vell/lindaflor/internal/auth"
 	"github.com/wellington-vell/lindaflor/internal/config"
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 )
 
 // credentialProviderID is accounts.provider_id for email/password.
@@ -20,8 +21,7 @@ const credentialProviderID = auth.CredentialProviderID
 func hashPassword(password string) (string, error) { return auth.HashPassword(password) }
 
 func seedAdmin(ctx context.Context, pool *pgxpool.Pool, admin config.SeedAdmin) error {
-	var existing uuid.UUID
-	err := pool.QueryRow(ctx, `SELECT id FROM users WHERE email = $1`, admin.Email).Scan(&existing)
+	_, err := sqlc.New(pool).SeedUserIDByEmail(ctx, admin.Email)
 	if err == nil {
 		slog.InfoContext(ctx, "Admin user already exists", "email", admin.Email)
 		return nil
@@ -43,12 +43,13 @@ func seedAdmin(ctx context.Context, pool *pgxpool.Pool, admin config.SeedAdmin) 
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if _, err := tx.Exec(ctx, `INSERT INTO users (id, name, email, email_verified, role, created_at, updated_at)
-		VALUES ($1, $2, $3, true, 'admin', now(), now())`, userID, admin.Name, admin.Email); err != nil {
+	q := sqlc.New(tx)
+	if err := q.SeedInsertAdminUser(ctx, sqlc.SeedInsertAdminUserParams{ID: userID, Name: admin.Name, Email: admin.Email}); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO accounts (id, account_id, provider_id, user_id, password, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, now(), now())`, accountID, userID.String(), credentialProviderID, userID, hash); err != nil {
+	if err := q.SeedInsertCredentialAccount(ctx, sqlc.SeedInsertCredentialAccountParams{
+		ID: accountID, AccountID: userID.String(), ProviderID: credentialProviderID, UserID: userID, Password: &hash,
+	}); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {

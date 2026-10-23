@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 )
 
 // Coupons (src/app/store/coupons.go): validation, discount math,
@@ -125,34 +127,26 @@ const (
 // it from the cart instead of blocking the order.
 var ErrCouponGone = errors.New(CouponGoneMessage)
 
-var (
-	sqlCouponByCode          = sqlText(`SELECT id, code, discount_type, discount_value, min_subtotal_cents, max_discount_cents, active, starts_at, expires_at, usage_type, max_uses, per_user_limit FROM coupons WHERE UPPER(code) = UPPER($1)`)
-	sqlCouponByCodeForUpdate = sqlText(`SELECT id, code, discount_type, discount_value, min_subtotal_cents, max_discount_cents, active, starts_at, expires_at, usage_type, max_uses, per_user_limit FROM coupons WHERE UPPER(code) = UPPER($1) FOR UPDATE`)
-	sqlCouponAssignmentCount = sqlText(`SELECT COUNT(*) FROM coupon_assignments WHERE coupon_id = $1`)
-	sqlCouponIsAssigned      = sqlText(`SELECT EXISTS(SELECT 1 FROM coupon_assignments WHERE coupon_id = $1 AND user_id = $2)`)
-	sqlCouponGlobalUses      = sqlText(`SELECT COUNT(*) FROM coupon_redemptions WHERE coupon_id = $1 AND refunded_at IS NULL`)
-	sqlUserEmail             = sqlText(`SELECT email FROM users WHERE id = $1`)
-	sqlCouponPersonalUses    = sqlText(`SELECT COUNT(*) FROM coupon_redemptions
- WHERE coupon_id = $1
-   AND refunded_at IS NULL
-   AND (user_id = $2::uuid OR email_norm = $3::text)`)
-	sqlFirstPurchaseCode = sqlText(`SELECT first_purchase_coupon_code FROM store_settings WHERE id`)
-	sqlHasPaidOrder      = sqlText(`SELECT EXISTS(
-   SELECT 1 FROM orders o
-   LEFT JOIN users u ON u.id = o.user_id
-   WHERE o.paid_at IS NOT NULL
-     AND (o.user_id = $1::uuid
-          OR lower(btrim(o.guest_email)) = ANY($2::text[])
-          OR lower(u.email) = ANY($2::text[]))
- )`)
-	sqlRecordRedemption = sqlText(`INSERT INTO coupon_redemptions
-   (id, coupon_id, user_id, order_id, guest_email, email_norm)
- VALUES ($1, $2, $3, $4, $5, $6)`)
-	sqlRestoreRedemption = sqlText(`UPDATE coupon_redemptions SET refunded_at = now()
- WHERE order_id = $1 AND refunded_at IS NULL`)
-	sqlReclaimRedemption = sqlText(`UPDATE coupon_redemptions SET refunded_at = NULL
- WHERE order_id = $1 AND refunded_at IS NOT NULL`)
-)
+// couponByCode looks a coupon up case-insensitively (nil when missing),
+// locking the row when forUpdate.
+func couponByCode(ctx context.Context, q *sqlc.Queries, code string, forUpdate bool) (*Coupon, error) {
+	var (
+		row   sqlc.StoreCouponByCodeRow
+		found bool
+		err   error
+	)
+	if forUpdate {
+		var locked sqlc.StoreCouponByCodeForUpdateRow
+		locked, found, err = noRows(q.StoreCouponByCodeForUpdate(ctx, code))
+		row = sqlc.StoreCouponByCodeRow(locked)
+	} else {
+		row, found, err = noRows(q.StoreCouponByCode(ctx, code))
+	}
+	if err != nil || !found {
+		return nil, err
+	}
+	return ptr(Coupon(row)), nil
+}
 
 // ResolveCoupon validates a code against the DB and computes its discount.
 //
@@ -171,11 +165,8 @@ func ResolveCoupon(ctx context.Context, tx DBTX, rawCode string, subtotalCents i
 	if code == "" {
 		return nil, nil
 	}
-	q := sqlCouponByCode
-	if forUpdate {
-		q = sqlCouponByCodeForUpdate
-	}
-	c, err := collectOne[Coupon](tx.Query(ctx, q, code))
+	q := queries(tx)
+	c, err := couponByCode(ctx, q, code, forUpdate)
 	if err != nil {
 		return nil, err
 	}
@@ -186,16 +177,16 @@ func ResolveCoupon(ctx context.Context, tx DBTX, rawCode string, subtotalCents i
 	if (c.StartsAt != nil && c.StartsAt.After(now)) || (c.ExpiresAt != nil && !c.ExpiresAt.After(now)) {
 		return nil, userErr(InvalidCouponMessage)
 	}
-	var assignments int64
-	if err := tx.QueryRow(ctx, sqlCouponAssignmentCount, c.ID).Scan(&assignments); err != nil {
+	assignments, err := q.StoreCouponAssignmentCount(ctx, c.ID)
+	if err != nil {
 		return nil, err
 	}
 	if assignments > 0 {
 		if userID == nil {
 			return nil, userErr(InvalidCouponMessage)
 		}
-		var member bool
-		if err := tx.QueryRow(ctx, sqlCouponIsAssigned, c.ID, *userID).Scan(&member); err != nil {
+		member, err := q.StoreCouponIsAssigned(ctx, sqlc.StoreCouponIsAssignedParams{CouponID: c.ID, UserID: *userID})
+		if err != nil {
 			return nil, err
 		}
 		if !member {
@@ -206,8 +197,8 @@ func ResolveCoupon(ctx context.Context, tx DBTX, rawCode string, subtotalCents i
 		return nil, userErr(fmt.Sprintf("Este cupom exige uma compra mínima de %s.", FormatPrice(c.MinSubtotalCents)))
 	}
 	if limit := c.EffectiveMaxUses(); limit != nil {
-		var uses int64
-		if err := tx.QueryRow(ctx, sqlCouponGlobalUses, c.ID).Scan(&uses); err != nil {
+		uses, err := q.StoreCouponGlobalUses(ctx, c.ID)
+		if err != nil {
 			return nil, err
 		}
 		if uses >= int64(*limit) {
@@ -216,9 +207,8 @@ func ResolveCoupon(ctx context.Context, tx DBTX, rawCode string, subtotalCents i
 	}
 	var accountEmail *string
 	if userID != nil {
-		var e string
-		err := tx.QueryRow(ctx, sqlUserEmail, *userID).Scan(&e)
-		if found, err := optional(err); err != nil {
+		e, found, err := noRows(q.StoreUserEmail(ctx, *userID))
+		if err != nil {
 			return nil, err
 		} else if found {
 			accountEmail = &e
@@ -244,8 +234,8 @@ func ResolveCoupon(ctx context.Context, tx DBTX, rawCode string, subtotalCents i
 			return nil, userErr(FirstPurchaseOnlyMessage)
 		}
 	}
-	var personal int64
-	if err := tx.QueryRow(ctx, sqlCouponPersonalUses, c.ID, userID, emailNorm).Scan(&personal); err != nil {
+	personal, err := q.StoreCouponPersonalUses(ctx, sqlc.StoreCouponPersonalUsesParams{CouponID: c.ID, UserID: userID, EmailNorm: emailNorm})
+	if err != nil {
 		return nil, err
 	}
 	if personal >= int64(c.PerUserLimit) {
@@ -262,9 +252,8 @@ func ResolveCoupon(ctx context.Context, tx DBTX, rawCode string, subtotalCents i
 // FirstPurchaseCode is store_settings.first_purchase_coupon_code trimmed,
 // "" when unset.
 func FirstPurchaseCode(ctx context.Context, q DBTX) (string, error) {
-	var code *string
-	err := q.QueryRow(ctx, sqlFirstPurchaseCode).Scan(&code)
-	if found, err := optional(err); err != nil || !found {
+	code, found, err := noRows(queries(q).StoreFirstPurchaseCode(ctx))
+	if err != nil || !found {
 		return "", err
 	}
 	return strings.TrimSpace(deref(code)), nil
@@ -296,26 +285,24 @@ func HasPaidOrder(ctx context.Context, q DBTX, userID *uuid.UUID, accountEmail, 
 			emails = append(emails, v)
 		}
 	}
-	var exists bool
-	err := q.QueryRow(ctx, sqlHasPaidOrder, userID, emails).Scan(&exists)
-	return exists, err
+	return queries(q).StoreHasPaidOrder(ctx, sqlc.StoreHasPaidOrderParams{UserID: userID, Emails: emails})
 }
 
 // RecordRedemption records that orderID consumed coupon. guestEmail is the
 // raw checkout email, kept for guests only.
 func RecordRedemption(ctx context.Context, tx DBTX, coupon *ResolvedCoupon, userID *uuid.UUID, orderID uuid.UUID, guestEmail *string) error {
-	_, err := tx.Exec(ctx, sqlRecordRedemption, uuid.Must(uuid.NewV7()), coupon.ID, userID, orderID, guestEmail, coupon.EmailNorm)
-	return err
+	return queries(tx).StoreRecordRedemption(ctx, sqlc.StoreRecordRedemptionParams{
+		ID: uuid.Must(uuid.NewV7()), CouponID: coupon.ID, UserID: userID, OrderID: orderID,
+		GuestEmail: guestEmail, EmailNorm: coupon.EmailNorm,
+	})
 }
 
 // RestoreRedemptionForOrder frees the coupon use of a cancelled order.
 func RestoreRedemptionForOrder(ctx context.Context, tx DBTX, orderID uuid.UUID) error {
-	_, err := tx.Exec(ctx, sqlRestoreRedemption, orderID)
-	return err
+	return queries(tx).StoreRestoreRedemption(ctx, orderID)
 }
 
 // ReclaimRedemptionForOrder consumes the coupon again after a reopen.
 func ReclaimRedemptionForOrder(ctx context.Context, tx DBTX, orderID uuid.UUID) error {
-	_, err := tx.Exec(ctx, sqlReclaimRedemption, orderID)
-	return err
+	return queries(tx).StoreReclaimRedemption(ctx, orderID)
 }

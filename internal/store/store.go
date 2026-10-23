@@ -7,10 +7,10 @@
 // src/app/{admin,pedido,conta,...}. No HTML lives here: functions return
 // view-ready structs and pt-BR messages copied verbatim from the Rust code.
 //
-// SQL is written inline (ported 1:1 from sqlx) and executed with pgx.
-// Every static statement is registered through sqlText so
-// TestStatementsPrepare checks it against the real schema, the way sqlx's
-// compile-time checks did; dynamic catalog SQL is covered by its tests.
+// SQL lives in db/queries/store_*.sql and runs through the sqlc-generated
+// internal/db/sqlc package (queries(q) wraps a pool, connection or
+// transaction). The only hand-built statement is the catalog listing in
+// catalog.go (see the comment there); it is covered by its tests.
 //
 // Concurrency rules (see inventory.go): inventory rows are always locked in
 // one `ORDER BY i.id FOR UPDATE` statement, and an order row is locked
@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/wellington-vell/lindaflor/internal/db"
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 )
 
 // DBTX is a pool, a connection or a transaction.
@@ -55,75 +56,34 @@ func IsUserError(err error) bool {
 	return ok
 }
 
-// statements registers every static SQL statement of the package (see
-// TestStatementsPrepare).
-var statements []string
+// queries returns the sqlc query set bound to q (pool, conn or tx).
+func queries(q DBTX) *sqlc.Queries { return sqlc.New(q) }
 
-// sqlText registers a static statement and returns it unchanged.
-func sqlText(s string) string {
-	statements = append(statements, s)
-	return s
+// mapSlice converts every element of in with f (never nil).
+func mapSlice[T, U any](in []T, f func(T) U) []U {
+	out := make([]U, 0, len(in))
+	for _, v := range in {
+		out = append(out, f(v))
+	}
+	return out
 }
 
-// Statements returns the registered static SQL (tests).
-func Statements() []string { return append([]string(nil), statements...) }
+// noRows maps pgx.ErrNoRows to (found=false, nil).
+func noRows[T any](v T, err error) (T, bool, error) {
+	if errors.Is(err, pgx.ErrNoRows) {
+		var zero T
+		return zero, false, nil
+	}
+	if err != nil {
+		var zero T
+		return zero, false, err
+	}
+	return v, true, nil
+}
 
 // withTx runs fn in a transaction on pool.
 func withTx(ctx context.Context, pool *pgxpool.Pool, fn func(tx pgx.Tx) error) error {
 	return db.WithTx(ctx, pool, fn)
-}
-
-// collect scans every row of a query into T by column name (`db` tags).
-func collect[T any](rows pgx.Rows, err error) ([]T, error) {
-	if err != nil {
-		return nil, err
-	}
-	out, err := pgx.CollectRows(rows, pgx.RowToStructByName[T])
-	if err != nil {
-		return nil, err
-	}
-	if out == nil {
-		out = []T{}
-	}
-	return out, nil
-}
-
-// collectOne scans exactly one row into T, (nil, nil) when there is none.
-func collectOne[T any](rows pgx.Rows, err error) (*T, error) {
-	if err != nil {
-		return nil, err
-	}
-	v, err := pgx.CollectOneRow(rows, pgx.RowToAddrOfStructByName[T])
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
-	}
-	return v, err
-}
-
-// scalars collects a single-column result.
-func scalars[T any](rows pgx.Rows, err error) ([]T, error) {
-	if err != nil {
-		return nil, err
-	}
-	out, err := pgx.CollectRows(rows, pgx.RowTo[T])
-	if err != nil {
-		return nil, err
-	}
-	if out == nil {
-		out = []T{}
-	}
-	return out, nil
-}
-
-// optional maps pgx.ErrNoRows to found=false.
-func optional(err error) (found bool, _ error) {
-	if errors.Is(err, pgx.ErrNoRows) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return true, nil
 }
 
 // ptr returns a pointer to v.

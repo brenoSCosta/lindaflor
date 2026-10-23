@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/wellington-vell/lindaflor/internal/audit"
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 )
 
 // Product reviews (src/app/store/reviews.rs): verified-buyer submission,
@@ -36,12 +37,6 @@ const (
 	ReviewSubmittedTitle       = "Obrigada pela avaliação!"
 	ReviewSubmittedDescription = "Ela aparece na página depois da moderação."
 )
-
-// receivedOrderSQL is the `orders o` predicate: owned by $1 and received.
-const receivedOrderSQL = `o.user_id = $1
-  AND (o.status = 'delivered'
-       OR (o.status = 'shipped'
-           AND o.shipped_at <= now() - make_interval(days => 21)))`
 
 // Fit is the size feedback.
 type Fit string
@@ -114,27 +109,11 @@ func ParseNewReview(rating, title, body string, fit *string) (NewReview, error) 
 	return out, nil
 }
 
-var (
-	sqlEligibleOrder = sqlText(`SELECT o.id FROM orders o
- WHERE ` + receivedOrderSQL + `
-   AND EXISTS (SELECT 1 FROM order_items oi
-               JOIN product_variants v ON v.id = oi.variant_id
-               WHERE oi.order_id = o.id AND v.product_id = $2)
- ORDER BY o.created_at DESC LIMIT 1`)
-	sqlOwnReviewStatus = sqlText(`SELECT status::text FROM product_reviews WHERE user_id = $1 AND product_id = $2`)
-	sqlInsertReview    = sqlText(`INSERT INTO product_reviews
-   (id, product_id, user_id, order_id, rating, title, body, fit)
- VALUES ($1, $2, $3, $4, $5, $6, $7, $8::text::review_fit)
- ON CONFLICT (user_id, product_id) DO NOTHING
- RETURNING id`)
-)
-
 // EligibleOrder is the user's most recent received order containing the
 // product, nil when none.
 func EligibleOrder(ctx context.Context, q DBTX, userID, productID uuid.UUID) (*uuid.UUID, error) {
-	var id uuid.UUID
-	err := q.QueryRow(ctx, sqlEligibleOrder, userID, productID).Scan(&id)
-	if found, err := optional(err); err != nil || !found {
+	id, found, err := noRows(queries(q).StoreEligibleOrder(ctx, sqlc.StoreEligibleOrderParams{UserID: userID, ProductID: productID}))
+	if err != nil || !found {
 		return nil, err
 	}
 	return &id, nil
@@ -143,12 +122,8 @@ func EligibleOrder(ctx context.Context, q DBTX, userID, productID uuid.UUID) (*u
 // OwnReviewStatus is the status of the user's review of the product ("" =
 // none).
 func OwnReviewStatus(ctx context.Context, q DBTX, userID, productID uuid.UUID) (string, error) {
-	var s string
-	err := q.QueryRow(ctx, sqlOwnReviewStatus, userID, productID).Scan(&s)
-	if found, err := optional(err); err != nil || !found {
-		return "", err
-	}
-	return s, nil
+	s, _, err := noRows(queries(q).StoreOwnReviewStatus(ctx, sqlc.StoreOwnReviewStatusParams{UserID: userID, ProductID: productID}))
+	return s, err
 }
 
 // SubmitReview stores a verified buyer's review as pending (one per user
@@ -172,9 +147,11 @@ func SubmitReview(ctx context.Context, q DBTX, userID, productID uuid.UUID, r Ne
 	if r.Fit != nil {
 		fit = ptr(string(*r.Fit))
 	}
-	var id uuid.UUID
-	err = q.QueryRow(ctx, sqlInsertReview, uuid.Must(uuid.NewV7()), productID, userID, *orderID, r.Rating, r.Title, r.Body, fit).Scan(&id)
-	if found, err := optional(err); err != nil {
+	id, found, err := noRows(queries(q).StoreInsertReview(ctx, sqlc.StoreInsertReviewParams{
+		ID: uuid.Must(uuid.NewV7()), ProductID: productID, UserID: userID, OrderID: orderID,
+		Rating: r.Rating, Title: r.Title, Body: r.Body, Fit: fit,
+	}))
+	if err != nil {
 		return uuid.Nil, err
 	} else if !found {
 		return uuid.Nil, ErrAlreadyReviewed
@@ -246,21 +223,10 @@ func StarsFilled(rating float64) int { return int(math.Min(math.Max(math.Round(r
 // StarsAriaLabel is "Nota 4,5 de 5".
 func StarsAriaLabel(rating float64) string { return "Nota " + FormatAverage(rating) + " de 5" }
 
-var sqlRatingSummary = sqlText(`SELECT AVG(rating)::float8 AS average,
-        COUNT(*) AS count,
-        COUNT(*) FILTER (WHERE fit = 'pequeno') AS fit_pequeno,
-        COUNT(*) FILTER (WHERE fit = 'ideal') AS fit_ideal,
-        COUNT(*) FILTER (WHERE fit = 'grande') AS fit_grande
- FROM product_reviews
- WHERE product_id = $1 AND status = 'approved'`)
-
 // LoadRatingSummary loads a product's aggregates.
 func LoadRatingSummary(ctx context.Context, q DBTX, productID uuid.UUID) (RatingSummary, error) {
-	var s RatingSummary
-	var avg *float64
-	err := q.QueryRow(ctx, sqlRatingSummary, productID).Scan(&avg, &s.Count, &s.FitPequeno, &s.FitIdeal, &s.FitGrande)
-	s.Average = deref(avg)
-	return s, err
+	s, err := queries(q).StoreRatingSummary(ctx, productID)
+	return RatingSummary(s), err
 }
 
 // AggregateRating is the schema.org input; nil without approved reviews.
@@ -284,24 +250,17 @@ type CardRating struct {
 	Count   int64
 }
 
-var sqlAllRatings = sqlText(`SELECT product_id, AVG(rating)::float8, COUNT(*)
- FROM product_reviews WHERE status = 'approved'
- GROUP BY product_id`)
-
 // AllRatings maps product → approved rating (one query per page).
 func AllRatings(ctx context.Context, q DBTX) (map[uuid.UUID]CardRating, error) {
-	rows, err := q.Query(ctx, sqlAllRatings)
+	rows, err := queries(q).StoreAllRatings(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := map[uuid.UUID]CardRating{}
-	var id uuid.UUID
-	var r CardRating
-	_, err = pgx.ForEachRow(rows, []any{&id, &r.Average, &r.Count}, func() error {
-		out[id] = r
-		return nil
-	})
-	return out, err
+	out := make(map[uuid.UUID]CardRating, len(rows))
+	for _, r := range rows {
+		out[r.ProductID] = CardRating{Average: r.Average, Count: r.Count}
+	}
+	return out, nil
 }
 
 // PublicReview is an approved review.
@@ -340,17 +299,13 @@ func PublicAuthor(name string) string {
 	return parts[0] + " " + strings.ToUpper(string(initial)) + "."
 }
 
-var sqlListApproved = sqlText(`SELECT r.id, r.rating, r.title, r.body, r.fit::text AS fit,
-        u.name AS author_name, r.created_at
- FROM product_reviews r
- JOIN users u ON u.id = r.user_id
- WHERE r.product_id = $1 AND r.status = 'approved'
- ORDER BY r.created_at DESC
- LIMIT $2 OFFSET $3`)
-
 // ListApprovedReviews pages approved reviews, newest first.
 func ListApprovedReviews(ctx context.Context, q DBTX, productID uuid.UUID, limit, offset int64) ([]PublicReview, error) {
-	return collect[PublicReview](q.Query(ctx, sqlListApproved, productID, limit, offset))
+	rows, err := queries(q).StoreListApprovedReviews(ctx, sqlc.StoreListApprovedReviewsParams{ProductID: productID, PageSize: limit, PageOffset: offset})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(rows, func(r sqlc.StoreListApprovedReviewsRow) PublicReview { return PublicReview(r) }), nil
 }
 
 // ReviewSection is the product page review block.
@@ -406,35 +361,19 @@ type ReviewableProduct struct {
 	Slug      string    `db:"slug"`
 }
 
-var (
-	sqlReviewableForOrder = sqlText(`SELECT DISTINCT p.id AS product_id, p.name, p.slug
- FROM orders o
- JOIN order_items oi ON oi.order_id = o.id
- JOIN product_variants v ON v.id = oi.variant_id
- JOIN products p ON p.id = v.product_id
- WHERE o.id = $2 AND ` + receivedOrderSQL + ` AND p.active
-   AND NOT EXISTS (SELECT 1 FROM product_reviews r
-                   WHERE r.user_id = $1 AND r.product_id = p.id)
- ORDER BY p.name`)
-	sqlReviewableOrders = sqlText(`SELECT DISTINCT o.id
- FROM orders o
- JOIN order_items oi ON oi.order_id = o.id
- JOIN product_variants v ON v.id = oi.variant_id
- JOIN products p ON p.id = v.product_id
- WHERE ` + receivedOrderSQL + ` AND p.active
-   AND NOT EXISTS (SELECT 1 FROM product_reviews r
-                   WHERE r.user_id = $1 AND r.product_id = p.id)`)
-)
-
 // ReviewableProductsForOrder lists the order's products the user may still
 // review ("Avalie suas compras" card).
 func ReviewableProductsForOrder(ctx context.Context, q DBTX, userID, orderID uuid.UUID) ([]ReviewableProduct, error) {
-	return collect[ReviewableProduct](q.Query(ctx, sqlReviewableForOrder, userID, orderID))
+	rows, err := queries(q).StoreReviewableForOrder(ctx, sqlc.StoreReviewableForOrderParams{UserID: userID, OrderID: orderID})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(rows, func(r sqlc.StoreReviewableForOrderRow) ReviewableProduct { return ReviewableProduct(r) }), nil
 }
 
 // ReviewableOrderIDs are the user's received orders with something to review.
 func ReviewableOrderIDs(ctx context.Context, q DBTX, userID uuid.UUID) (map[uuid.UUID]bool, error) {
-	ids, err := scalars[uuid.UUID](q.Query(ctx, sqlReviewableOrders, userID))
+	ids, err := queries(q).StoreReviewableOrders(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -476,34 +415,19 @@ func (r AdminReview) StatusBadge() (BadgeTone, string) {
 // AdminReviewsLimit is how many rows the moderation page shows.
 const AdminReviewsLimit = 200
 
-var (
-	sqlAdminReviews = sqlText(`SELECT r.id, p.name AS product_name, p.slug AS product_slug,
-        u.name AS author_name, u.email AS author_email,
-        r.rating, r.title, r.body, r.fit::text AS fit,
-        r.status::text AS status, r.created_at
- FROM product_reviews r
- JOIN products p ON p.id = r.product_id
- JOIN users u ON u.id = r.user_id
- ORDER BY (r.status = 'pending') DESC,
-          CASE WHEN r.status = 'pending' THEN r.created_at END ASC,
-          r.moderated_at DESC NULLS LAST, r.created_at DESC
- LIMIT $1`)
-	sqlPendingReviews = sqlText(`SELECT COUNT(*) FROM product_reviews WHERE status = 'pending'`)
-	sqlReviewLock     = sqlText(`SELECT status::text, product_id FROM product_reviews WHERE id = $1 FOR UPDATE`)
-	sqlModerateReview = sqlText(`UPDATE product_reviews SET status = $2::text::review_status, moderated_at = now(), moderated_by = $3 WHERE id = $1`)
-)
-
 // ListReviewsForAdmin is the moderation queue: pending first (FIFO), then
 // the most recently moderated.
 func ListReviewsForAdmin(ctx context.Context, q DBTX, limit int64) ([]AdminReview, error) {
-	return collect[AdminReview](q.Query(ctx, sqlAdminReviews, limit))
+	rows, err := queries(q).StoreAdminReviews(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(rows, func(r sqlc.StoreAdminReviewsRow) AdminReview { return AdminReview(r) }), nil
 }
 
 // CountPendingReviews is the moderation badge.
 func CountPendingReviews(ctx context.Context, q DBTX) (int64, error) {
-	var n int64
-	err := q.QueryRow(ctx, sqlPendingReviews).Scan(&n)
-	return n, err
+	return queries(q).StorePendingReviewCount(ctx)
 }
 
 // ModerateReview approves or rejects a review with an audit row; false when
@@ -516,14 +440,16 @@ func ModerateReview(ctx context.Context, pool *pgxpool.Pool, reviewID uuid.UUID,
 	}
 	found := false
 	err := withTx(ctx, pool, func(tx pgx.Tx) error {
-		var from string
-		var productID uuid.UUID
-		err := tx.QueryRow(ctx, sqlReviewLock, reviewID).Scan(&from, &productID)
-		if ok, err := optional(err); err != nil || !ok {
+		q := queries(tx)
+		locked, ok, err := noRows(q.StoreReviewLock(ctx, reviewID))
+		if err != nil || !ok {
 			return err
 		}
 		found = true
-		if _, err := tx.Exec(ctx, sqlModerateReview, reviewID, next, actorID); err != nil {
+		from, productID := locked.Status, locked.ProductID
+		if err := q.StoreModerateReview(ctx, sqlc.StoreModerateReviewParams{
+			ID: reviewID, Status: sqlc.ReviewStatus(next), ModeratedBy: actorID,
+		}); err != nil {
 			return err
 		}
 		return audit.Record(ctx, tx, audit.Event{

@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 )
 
 // Saved delivery addresses (src/app/store/addresses.rs), managed under
@@ -149,51 +151,27 @@ func validateAddress(in AddressInput) (validAddress, error) {
 	return v, nil
 }
 
-const addressColumns = `id, label, recipient_name, zip_code, street, number, complement,
-  neighborhood, city, state, phone, is_default`
-
-var (
-	sqlListAddresses = sqlText(`SELECT ` + addressColumns + ` FROM user_addresses WHERE user_id = $1
- ORDER BY is_default DESC, created_at DESC`)
-	sqlGetAddress     = sqlText(`SELECT ` + addressColumns + ` FROM user_addresses WHERE id = $1 AND user_id = $2`)
-	sqlLockUser       = sqlText(`SELECT id FROM users WHERE id = $1 FOR UPDATE`)
-	sqlClearDefault   = sqlText(`UPDATE user_addresses SET is_default = false, updated_at = now() WHERE user_id = $1 AND is_default`)
-	sqlCountAddresses = sqlText(`SELECT COUNT(*) FROM user_addresses WHERE user_id = $1`)
-	sqlInsertAddress  = sqlText(`INSERT INTO user_addresses (id, user_id, label, recipient_name, zip_code, street,
-   number, complement, neighborhood, city, state, phone, is_default)
- VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`)
-	sqlAddressIsDefault = sqlText(`SELECT is_default FROM user_addresses WHERE id = $1 AND user_id = $2`)
-	sqlUpdateAddress    = sqlText(`UPDATE user_addresses SET label = $3, recipient_name = $4, zip_code = $5,
-   street = $6, number = $7, complement = $8, neighborhood = $9, city = $10,
-   state = $11, phone = $12, is_default = $13, updated_at = now()
- WHERE id = $1 AND user_id = $2`)
-	sqlDeleteAddress = sqlText(`DELETE FROM user_addresses WHERE id = $1 AND user_id = $2 RETURNING is_default`)
-	sqlPromoteLatest = sqlText(`UPDATE user_addresses SET is_default = true, updated_at = now()
- WHERE id = (SELECT id FROM user_addresses WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1)`)
-	sqlAddressOwned = sqlText(`SELECT id FROM user_addresses WHERE id = $1 AND user_id = $2`)
-	sqlSetDefault   = sqlText(`UPDATE user_addresses SET is_default = true, updated_at = now() WHERE id = $1 AND user_id = $2`)
-	sqlCheckoutDupe = sqlText(`SELECT COUNT(*),
-        COALESCE(bool_or(zip_code = $2
-                         AND lower(street) = lower($3)
-                         AND lower(number) = lower($4)
-                         AND lower(complement) = lower($5)), false)
- FROM user_addresses WHERE user_id = $1`)
-)
-
 // ListAddresses lists the user's addresses, default first.
 func ListAddresses(ctx context.Context, q DBTX, userID uuid.UUID) ([]SavedAddress, error) {
-	return collect[SavedAddress](q.Query(ctx, sqlListAddresses, userID))
+	rows, err := queries(q).StoreListAddresses(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(rows, func(r sqlc.StoreListAddressesRow) SavedAddress { return SavedAddress(r) }), nil
 }
 
 // GetAddress loads one of the user's addresses (nil when not theirs).
 func GetAddress(ctx context.Context, q DBTX, userID, addressID uuid.UUID) (*SavedAddress, error) {
-	return collectOne[SavedAddress](q.Query(ctx, sqlGetAddress, addressID, userID))
+	r, found, err := noRows(queries(q).StoreGetAddress(ctx, sqlc.StoreGetAddressParams{ID: addressID, UserID: userID}))
+	if err != nil || !found {
+		return nil, err
+	}
+	return ptr(SavedAddress(r)), nil
 }
 
 func lockUser(ctx context.Context, tx DBTX, userID uuid.UUID) error {
-	var id uuid.UUID
-	err := tx.QueryRow(ctx, sqlLockUser, userID).Scan(&id)
-	if found, err := optional(err); err != nil {
+	_, found, err := noRows(queries(tx).StoreLockUser(ctx, userID))
+	if err != nil {
 		return err
 	} else if !found {
 		return ErrAddressNotFound
@@ -202,9 +180,11 @@ func lockUser(ctx context.Context, tx DBTX, userID uuid.UUID) error {
 }
 
 func insertAddress(ctx context.Context, tx DBTX, id, userID uuid.UUID, v validAddress, isDefault bool) error {
-	_, err := tx.Exec(ctx, sqlInsertAddress, id, userID, v.label, v.recipient, v.zip, v.street, v.number,
-		v.complement, v.neighborhood, v.city, v.state, v.phone, isDefault)
-	return err
+	return queries(tx).StoreInsertAddress(ctx, sqlc.StoreInsertAddressParams{
+		ID: id, UserID: userID, Label: v.label, RecipientName: v.recipient, ZipCode: v.zip, Street: v.street,
+		Number: v.number, Complement: v.complement, Neighborhood: v.neighborhood, City: v.city,
+		State: v.state, Phone: v.phone, IsDefault: isDefault,
+	})
 }
 
 // CreateAddress saves a new address (the first one is always default).
@@ -218,8 +198,9 @@ func CreateAddress(ctx context.Context, pool *pgxpool.Pool, userID uuid.UUID, in
 		if err := lockUser(ctx, tx, userID); err != nil {
 			return err
 		}
-		var count int64
-		if err := tx.QueryRow(ctx, sqlCountAddresses, userID).Scan(&count); err != nil {
+		q := queries(tx)
+		count, err := q.StoreCountAddresses(ctx, userID)
+		if err != nil {
 			return err
 		}
 		if count >= MaxAddressesPerUser {
@@ -227,7 +208,7 @@ func CreateAddress(ctx context.Context, pool *pgxpool.Pool, userID uuid.UUID, in
 		}
 		makeDefault := in.IsDefault || count == 0
 		if makeDefault {
-			if _, err := tx.Exec(ctx, sqlClearDefault, userID); err != nil {
+			if err := q.StoreClearDefaultAddress(ctx, userID); err != nil {
 				return err
 			}
 		}
@@ -250,22 +231,24 @@ func UpdateAddress(ctx context.Context, pool *pgxpool.Pool, userID, addressID uu
 		if err := lockUser(ctx, tx, userID); err != nil {
 			return err
 		}
-		var was bool
-		err := tx.QueryRow(ctx, sqlAddressIsDefault, addressID, userID).Scan(&was)
-		if found, err := optional(err); err != nil {
+		q := queries(tx)
+		was, found, err := noRows(q.StoreAddressIsDefault(ctx, sqlc.StoreAddressIsDefaultParams{ID: addressID, UserID: userID}))
+		if err != nil {
 			return err
 		} else if !found {
 			return ErrAddressNotFound
 		}
 		makeDefault := was || in.IsDefault
 		if makeDefault && !was {
-			if _, err := tx.Exec(ctx, sqlClearDefault, userID); err != nil {
+			if err := q.StoreClearDefaultAddress(ctx, userID); err != nil {
 				return err
 			}
 		}
-		_, err = tx.Exec(ctx, sqlUpdateAddress, addressID, userID, v.label, v.recipient, v.zip, v.street,
-			v.number, v.complement, v.neighborhood, v.city, v.state, v.phone, makeDefault)
-		return err
+		return q.StoreUpdateAddress(ctx, sqlc.StoreUpdateAddressParams{
+			ID: addressID, UserID: userID, Label: v.label, RecipientName: v.recipient, ZipCode: v.zip,
+			Street: v.street, Number: v.number, Complement: v.complement, Neighborhood: v.neighborhood,
+			City: v.city, State: v.state, Phone: v.phone, IsDefault: makeDefault,
+		})
 	})
 }
 
@@ -276,17 +259,17 @@ func DeleteAddress(ctx context.Context, pool *pgxpool.Pool, userID, addressID uu
 		if err := lockUser(ctx, tx, userID); err != nil {
 			return err
 		}
-		var was bool
-		err := tx.QueryRow(ctx, sqlDeleteAddress, addressID, userID).Scan(&was)
-		if found, err := optional(err); err != nil {
+		q := queries(tx)
+		was, found, err := noRows(q.StoreDeleteAddress(ctx, sqlc.StoreDeleteAddressParams{ID: addressID, UserID: userID}))
+		if err != nil {
 			return err
 		} else if !found {
 			return ErrAddressNotFound
 		}
 		if was {
-			_, err = tx.Exec(ctx, sqlPromoteLatest, userID)
+			return q.StorePromoteLatestAddress(ctx, userID)
 		}
-		return err
+		return nil
 	})
 }
 
@@ -296,18 +279,17 @@ func SetDefaultAddress(ctx context.Context, pool *pgxpool.Pool, userID, addressI
 		if err := lockUser(ctx, tx, userID); err != nil {
 			return err
 		}
-		var id uuid.UUID
-		err := tx.QueryRow(ctx, sqlAddressOwned, addressID, userID).Scan(&id)
-		if found, err := optional(err); err != nil {
+		q := queries(tx)
+		_, found, err := noRows(q.StoreAddressOwned(ctx, sqlc.StoreAddressOwnedParams{ID: addressID, UserID: userID}))
+		if err != nil {
 			return err
 		} else if !found {
 			return ErrAddressNotFound
 		}
-		if _, err := tx.Exec(ctx, sqlClearDefault, userID); err != nil {
+		if err := q.StoreClearDefaultAddress(ctx, userID); err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, sqlSetDefault, addressID, userID)
-		return err
+		return q.StoreSetDefaultAddress(ctx, sqlc.StoreSetDefaultAddressParams{ID: addressID, UserID: userID})
 	})
 }
 
@@ -324,16 +306,17 @@ func SaveAddressFromCheckout(ctx context.Context, pool *pgxpool.Pool, userID uui
 		if err := lockUser(ctx, tx, userID); err != nil {
 			return err
 		}
-		var count int64
-		var dup bool
-		if err := tx.QueryRow(ctx, sqlCheckoutDupe, userID, v.zip, v.street, v.number, v.complement).Scan(&count, &dup); err != nil {
+		d, err := queries(tx).StoreCheckoutAddressDupe(ctx, sqlc.StoreCheckoutAddressDupeParams{
+			UserID: userID, ZipCode: v.zip, Street: v.street, Number: v.number, Complement: v.complement,
+		})
+		if err != nil {
 			return err
 		}
-		if dup || count >= MaxAddressesPerUser {
+		if d.Dup || d.Count >= MaxAddressesPerUser {
 			return nil
 		}
 		added = true
-		return insertAddress(ctx, tx, uuid.Must(uuid.NewV7()), userID, v, count == 0)
+		return insertAddress(ctx, tx, uuid.Must(uuid.NewV7()), userID, v, d.Count == 0)
 	})
 	return added, err
 }

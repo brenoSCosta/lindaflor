@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 	"github.com/wellington-vell/lindaflor/internal/web/format"
 )
 
@@ -26,8 +27,6 @@ const (
 	CSVMaxOrders     = 20000
 	ReportTopLimit   = 10
 )
-
-const saleStatuses = `('paid', 'processing', 'shipped', 'delivered')`
 
 // Date is a calendar day (UTC midnight).
 type Date = time.Time
@@ -105,13 +104,6 @@ func (r DateRange) Period() string {
 	return fmt.Sprintf("%s a %s (%d dias, horário de Brasília)", FormatDateBR(r.From), FormatDateBR(r.To), r.Days())
 }
 
-func (r DateRange) args() []any { return []any{r.From, r.To} }
-
-const (
-	rangeStart = `(($1::date)::timestamp AT TIME ZONE 'America/Sao_Paulo')`
-	rangeEnd   = `((($2::date) + 1)::timestamp AT TIME ZONE 'America/Sao_Paulo')`
-)
-
 // ReportSummary is the headline block.
 type ReportSummary struct {
 	RevenueCents       int64 `db:"revenue_cents"`
@@ -136,41 +128,10 @@ func (s ReportSummary) AOVCents() int64 {
 // NetRevenueCents is revenue minus partial refunds.
 func (s ReportSummary) NetRevenueCents() int64 { return s.RevenueCents - s.PartialRefundCents }
 
-var sqlReportSummary = sqlText(`WITH sales AS (
-     SELECT COALESCE(SUM(o.total_cents), 0)::bigint AS revenue_cents,
-            COUNT(*) AS orders,
-            COALESCE(SUM(o.discount_cents), 0)::bigint AS discount_cents,
-            COALESCE(SUM(o.pix_discount_cents), 0)::bigint AS pix_discount_cents,
-            COALESCE(SUM(o.shipping_cents), 0)::bigint AS shipping_cents
-     FROM orders o
-     WHERE o.status IN ` + saleStatuses + `
-       AND COALESCE(o.paid_at, o.created_at) >= ` + rangeStart + `
-       AND COALESCE(o.paid_at, o.created_at) < ` + rangeEnd + `
- ),
- created AS (
-     SELECT COUNT(*) FILTER (WHERE o.status = 'pending_payment') AS pending_orders,
-            COUNT(*) FILTER (WHERE o.status = 'cancelled' AND o.paid_at IS NULL) AS abandoned_orders,
-            COUNT(*) FILTER (WHERE o.status = 'refunded') AS refunded_orders
-     FROM orders o
-     WHERE o.created_at >= ` + rangeStart + ` AND o.created_at < ` + rangeEnd + `
- ),
- partial AS (
-     SELECT COALESCE(SUM(r.refund_cents), 0)::bigint AS partial_refund_cents
-     FROM return_requests r
-     JOIN orders o ON o.id = r.order_id
-     WHERE r.status = 'resolved' AND r.resolution = 'refunded'
-       AND o.status <> 'refunded'
-       AND r.resolved_at >= ` + rangeStart + ` AND r.resolved_at < ` + rangeEnd + `
- )
- SELECT sales.*, created.*, partial.* FROM sales, created, partial`)
-
 // LoadReportSummary loads the headline figures.
 func LoadReportSummary(ctx context.Context, q DBTX, r DateRange) (ReportSummary, error) {
-	s, err := collectOne[ReportSummary](q.Query(ctx, sqlReportSummary, r.args()...))
-	if err != nil || s == nil {
-		return ReportSummary{}, err
-	}
-	return *s, nil
+	s, _, err := noRows(queries(q).StoreReportSummary(ctx, sqlc.StoreReportSummaryParams{FromDay: r.From, ToDay: r.To}))
+	return ReportSummary(s), err
 }
 
 // DayRow is one day of revenue.
@@ -180,27 +141,13 @@ type DayRow struct {
 	RevenueCents int64 `db:"revenue_cents"`
 }
 
-var sqlRevenueByDay = sqlText(`WITH days AS (
-     SELECT generate_series($1::date, $2::date, interval '1 day')::date AS day
- ),
- sales AS (
-     SELECT (COALESCE(o.paid_at, o.created_at) AT TIME ZONE 'America/Sao_Paulo')::date AS day,
-            COUNT(*) AS orders,
-            SUM(o.total_cents)::bigint AS revenue_cents
-     FROM orders o
-     WHERE o.status IN ` + saleStatuses + `
-       AND COALESCE(o.paid_at, o.created_at) >= ` + rangeStart + `
-       AND COALESCE(o.paid_at, o.created_at) < ` + rangeEnd + `
-     GROUP BY 1
- )
- SELECT d.day, COALESCE(s.orders, 0) AS orders,
-        COALESCE(s.revenue_cents, 0)::bigint AS revenue_cents
- FROM days d LEFT JOIN sales s ON s.day = d.day
- ORDER BY d.day`)
-
 // RevenueByDay is one row per day of the range (zero-filled).
 func RevenueByDay(ctx context.Context, q DBTX, r DateRange) ([]DayRow, error) {
-	return collect[DayRow](q.Query(ctx, sqlRevenueByDay, r.args()...))
+	rows, err := queries(q).StoreRevenueByDay(ctx, sqlc.StoreRevenueByDayParams{FromDay: r.From, ToDay: r.To})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(rows, func(r sqlc.StoreRevenueByDayRow) DayRow { return DayRow(r) }), nil
 }
 
 // BarPercent scales a bar to the best day (0..100).
@@ -228,34 +175,21 @@ const (
 	TopProductRevenue
 )
 
-func topSQL(group, sel, order string) string {
-	return `SELECT ` + sel + `,
-        SUM(oi.quantity)::bigint AS units,
-        SUM(oi.quantity * oi.unit_price_cents)::bigint AS revenue_cents
- FROM orders o
- JOIN order_items oi ON oi.order_id = o.id
- JOIN product_variants v ON v.id = oi.variant_id
- WHERE o.status IN ` + saleStatuses + `
-   AND COALESCE(o.paid_at, o.created_at) >= ` + rangeStart + `
-   AND COALESCE(o.paid_at, o.created_at) < ` + rangeEnd + `
- GROUP BY ` + group + `
- ORDER BY ` + order + `, name
- LIMIT $3`
-}
-
-var (
-	sqlTopVariants = sqlText(topSQL("oi.variant_id", "MAX(oi.product_name) AS name, MAX(oi.variant_label) AS detail", "units DESC, revenue_cents DESC"))
-	sqlTopProducts = sqlText(topSQL("v.product_id", "MAX(oi.product_name) AS name, ''::text AS detail", "revenue_cents DESC, units DESC"))
-)
-
 // TopSellers ranks variants by units or products by item revenue
 // (quantity × unit price, before order-level discounts).
 func TopSellers(ctx context.Context, q DBTX, r DateRange, by TopBy, limit int64) ([]TopRow, error) {
-	query := sqlTopVariants
 	if by == TopProductRevenue {
-		query = sqlTopProducts
+		rows, err := queries(q).StoreTopProducts(ctx, sqlc.StoreTopProductsParams{FromDay: r.From, ToDay: r.To, MaxRows: limit})
+		if err != nil {
+			return nil, err
+		}
+		return mapSlice(rows, func(r sqlc.StoreTopProductsRow) TopRow { return TopRow(r) }), nil
 	}
-	return collect[TopRow](q.Query(ctx, query, r.From, r.To, limit))
+	rows, err := queries(q).StoreTopVariants(ctx, sqlc.StoreTopVariantsParams{FromDay: r.From, ToDay: r.To, MaxRows: limit})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(rows, func(r sqlc.StoreTopVariantsRow) TopRow { return TopRow(r) }), nil
 }
 
 // CouponUsageRow is one coupon's use on sales.
@@ -266,22 +200,13 @@ type CouponUsageRow struct {
 	RevenueCents  int64  `db:"revenue_cents"`
 }
 
-var sqlCouponUsage = sqlText(`SELECT upper(COALESCE(c.code, o.payment_meta->>'coupon_code')) AS code,
-        COUNT(*) AS orders,
-        SUM(o.discount_cents)::bigint AS discount_cents,
-        SUM(o.total_cents)::bigint AS revenue_cents
- FROM orders o
- LEFT JOIN coupons c ON c.id = o.coupon_id
- WHERE o.status IN ` + saleStatuses + `
-   AND COALESCE(o.paid_at, o.created_at) >= ` + rangeStart + `
-   AND COALESCE(o.paid_at, o.created_at) < ` + rangeEnd + `
-   AND COALESCE(c.code, NULLIF(o.payment_meta->>'coupon_code', '')) IS NOT NULL
- GROUP BY 1
- ORDER BY orders DESC, discount_cents DESC, code`)
-
 // CouponUsage lists coupon use on sales in range.
 func CouponUsage(ctx context.Context, q DBTX, r DateRange) ([]CouponUsageRow, error) {
-	return collect[CouponUsageRow](q.Query(ctx, sqlCouponUsage, r.args()...))
+	rows, err := queries(q).StoreCouponUsage(ctx, sqlc.StoreCouponUsageParams{FromDay: r.From, ToDay: r.To})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(rows, func(r sqlc.StoreCouponUsageRow) CouponUsageRow { return CouponUsageRow(r) }), nil
 }
 
 // ProviderRow is the revenue split by payment provider.
@@ -294,18 +219,13 @@ type ProviderRow struct {
 // Label is the provider label.
 func (p ProviderRow) Label() string { return ProviderLabel(p.Provider) }
 
-var sqlProviderSplit = sqlText(`SELECT o.payment_provider AS provider, COUNT(*) AS orders,
-        SUM(o.total_cents)::bigint AS revenue_cents
- FROM orders o
- WHERE o.status IN ` + saleStatuses + `
-   AND COALESCE(o.paid_at, o.created_at) >= ` + rangeStart + `
-   AND COALESCE(o.paid_at, o.created_at) < ` + rangeEnd + `
- GROUP BY 1
- ORDER BY revenue_cents DESC`)
-
 // ProviderSplit splits sales by provider.
 func ProviderSplit(ctx context.Context, q DBTX, r DateRange) ([]ProviderRow, error) {
-	return collect[ProviderRow](q.Query(ctx, sqlProviderSplit, r.args()...))
+	rows, err := queries(q).StoreProviderSplit(ctx, sqlc.StoreProviderSplitParams{FromDay: r.From, ToDay: r.To})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(rows, func(r sqlc.StoreProviderSplitRow) ProviderRow { return ProviderRow(r) }), nil
 }
 
 // ReportPage is everything /admin/relatorios renders.
@@ -382,41 +302,21 @@ type CSVOrder struct {
 	DeliveredAt      *string   `db:"delivered_at"`
 }
 
-const csvTS = `'YYYY-MM-DD HH24:MI'`
-
-var sqlCSVOrders = sqlText(`SELECT o.id,
-        to_char(o.created_at AT TIME ZONE 'America/Sao_Paulo', ` + csvTS + `) AS created_at,
-        to_char(o.paid_at AT TIME ZONE 'America/Sao_Paulo', ` + csvTS + `) AS paid_at,
-        o.status::text AS status,
-        COALESCE(NULLIF(btrim(o.guest_email), ''), u.email) AS email,
-        o.shipping_address->>'state' AS uf,
-        o.shipping_address->>'city' AS city,
-        items.summary AS items,
-        COALESCE(items.units, 0)::bigint AS units,
-        o.subtotal_cents, o.shipping_cents, o.discount_cents,
-        o.pix_discount_cents, o.total_cents,
-        o.payment_provider AS provider,
-        COALESCE(c.code, NULLIF(o.payment_meta->>'coupon_code', '')) AS coupon,
-        o.carrier, o.tracking_code,
-        to_char(o.shipped_at AT TIME ZONE 'America/Sao_Paulo', ` + csvTS + `) AS shipped_at,
-        to_char(o.delivered_at AT TIME ZONE 'America/Sao_Paulo', ` + csvTS + `) AS delivered_at
- FROM orders o
- LEFT JOIN users u ON u.id = o.user_id
- LEFT JOIN coupons c ON c.id = o.coupon_id
- LEFT JOIN LATERAL (
-     SELECT string_agg(
-                oi.quantity || 'x ' || oi.product_name || ' (' || oi.variant_label || ')',
-                '; ' ORDER BY oi.created_at, oi.id) AS summary,
-            SUM(oi.quantity) AS units
-     FROM order_items oi WHERE oi.order_id = o.id
- ) items ON true
- WHERE o.created_at >= ` + rangeStart + ` AND o.created_at < ` + rangeEnd + `
- ORDER BY o.created_at, o.id
- LIMIT $3`)
-
 // CSVOrders lists orders created in range, oldest first, at most limit.
 func CSVOrders(ctx context.Context, q DBTX, r DateRange, limit int64) ([]CSVOrder, error) {
-	return collect[CSVOrder](q.Query(ctx, sqlCSVOrders, r.From, r.To, limit))
+	rows, err := queries(q).StoreCSVOrders(ctx, sqlc.StoreCSVOrdersParams{FromDay: r.From, ToDay: r.To, MaxRows: limit})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(rows, func(o sqlc.StoreCSVOrdersRow) CSVOrder {
+		return CSVOrder{
+			ID: o.ID, CreatedAt: o.CreatedAt, PaidAt: o.PaidAt, Status: o.Status, Email: o.Email,
+			UF: o.Uf, City: o.City, Items: o.Items, Units: o.Units, SubtotalCents: o.SubtotalCents,
+			ShippingCents: o.ShippingCents, DiscountCents: o.DiscountCents, PixDiscountCents: o.PixDiscountCents,
+			TotalCents: o.TotalCents, Provider: o.Provider, Coupon: o.Coupon, Carrier: o.Carrier,
+			TrackingCode: o.TrackingCode, ShippedAt: o.ShippedAt, DeliveredAt: o.DeliveredAt,
+		}
+	}), nil
 }
 
 // CSVField quotes one field (RFC 4180) and neutralises spreadsheet

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 	"github.com/wellington-vell/lindaflor/internal/mail"
 )
 
@@ -79,30 +80,13 @@ func ValidateNewsletterForm(rawEmail, rawName string) (email string, name *strin
 	return email, name, ""
 }
 
-var (
-	sqlSubscribe = sqlText(`INSERT INTO newsletter_subscribers (id, email, name, created_at)
-   VALUES (gen_random_uuid(), $1, $2, now())
-   ON CONFLICT (lower(email)) DO UPDATE
-     SET unsubscribed_at = NULL,
-         name = COALESCE(EXCLUDED.name, newsletter_subscribers.name)
-     WHERE newsletter_subscribers.unsubscribed_at IS NOT NULL
-   RETURNING (xmax::text = '0') AS inserted`)
-	sqlUnsubscribe = sqlText(`INSERT INTO newsletter_subscribers (id, email, created_at, unsubscribed_at)
-   VALUES (gen_random_uuid(), $1, now(), now())
-   ON CONFLICT (lower(email)) DO UPDATE
-     SET unsubscribed_at = now()
-     WHERE newsletter_subscribers.unsubscribed_at IS NULL
-   RETURNING (xmax::text <> '0') AS cancelled`)
-)
-
 // SubscribeNewsletter inserts the subscriber and queues the welcome mail
 // atomically; an unsubscribed address is reactivated (no second welcome).
 // Only an active duplicate is AlreadySubscribed; other errors propagate.
 func SubscribeNewsletter(ctx context.Context, pool *pgxpool.Pool, email string, name *string) (NewsletterOutcome, error) {
 	var out NewsletterOutcome
 	err := withTx(ctx, pool, func(tx pgx.Tx) error {
-		var inserted bool
-		err := tx.QueryRow(ctx, sqlSubscribe, email, name).Scan(&inserted)
+		inserted, err := queries(tx).StoreNewsletterSubscribe(ctx, sqlc.StoreNewsletterSubscribeParams{Email: email, Name: name})
 		var pgErr *pgconn.PgError
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
@@ -134,12 +118,8 @@ func SubscribeNewsletter(ctx context.Context, pool *pgxpool.Pool, email string, 
 // true when an active subscription was cancelled. Unknown addresses get a
 // suppression row.
 func UnsubscribeNewsletter(ctx context.Context, q DBTX, email string) (bool, error) {
-	var cancelled bool
-	err := q.QueryRow(ctx, sqlUnsubscribe, strings.ToLower(strings.TrimSpace(email))).Scan(&cancelled)
-	if found, err := optional(err); err != nil || !found {
-		return false, err
-	}
-	return cancelled, nil
+	cancelled, _, err := noRows(queries(q).StoreNewsletterUnsubscribe(ctx, strings.ToLower(strings.TrimSpace(email))))
+	return cancelled, err
 }
 
 // UnsubscribeURL is the absolute signed unsubscribe link.
@@ -169,13 +149,7 @@ func (s NewsletterSubscriber) StatusLabel() string {
 
 func iso8601(t time.Time) string { return t.UTC().Format("2006-01-02T15:04:05.000000000Z07:00") }
 
-var (
-	sqlAllSubscribers = sqlText(`SELECT id, email, name, created_at, unsubscribed_at
- FROM newsletter_subscribers ORDER BY created_at DESC`)
-	sqlActiveSubscribers = sqlText(`SELECT id, email, name, created_at, unsubscribed_at
- FROM newsletter_subscribers WHERE unsubscribed_at IS NULL
- ORDER BY created_at DESC`)
-)
+func toSubscriber(s sqlc.NewsletterSubscriber) NewsletterSubscriber { return NewsletterSubscriber(s) }
 
 // NewsletterAdmin is /admin/newsletter.
 type NewsletterAdmin struct {
@@ -186,10 +160,11 @@ type NewsletterAdmin struct {
 
 // LoadNewsletterAdmin lists every subscriber with counts.
 func LoadNewsletterAdmin(ctx context.Context, q DBTX) (NewsletterAdmin, error) {
-	subs, err := collect[NewsletterSubscriber](q.Query(ctx, sqlAllSubscribers))
+	rows, err := queries(q).StoreAllSubscribers(ctx)
 	if err != nil {
 		return NewsletterAdmin{}, err
 	}
+	subs := mapSlice(rows, toSubscriber)
 	out := NewsletterAdmin{Subscribers: subs}
 	for _, s := range subs {
 		if s.UnsubscribedAt == nil {
@@ -202,7 +177,11 @@ func LoadNewsletterAdmin(ctx context.Context, q DBTX) (NewsletterAdmin, error) {
 
 // ActiveSubscribers lists active subscribers (CSV export).
 func ActiveSubscribers(ctx context.Context, q DBTX) ([]NewsletterSubscriber, error) {
-	return collect[NewsletterSubscriber](q.Query(ctx, sqlActiveSubscribers))
+	rows, err := queries(q).StoreActiveSubscribers(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(rows, toSubscriber), nil
 }
 
 // newsletterCSVField quotes and neutralises formulas (= + - @).

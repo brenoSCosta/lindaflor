@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/wellington-vell/lindaflor/internal/audit"
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 )
 
 // Returns and exchanges (src/app/store/returns.rs): the customer opens a
@@ -207,21 +208,13 @@ type ReturnableItem struct {
 	Returnable     int32     `db:"returnable"`
 }
 
-var sqlReturnableItems = sqlText(`SELECT oi.id AS order_item_id, oi.product_name, oi.variant_label,
-        oi.quantity, oi.unit_price_cents,
-        GREATEST(oi.quantity - COALESCE((
-            SELECT SUM(ri.quantity)
-            FROM return_request_items ri
-            JOIN return_requests r ON r.id = ri.return_request_id
-            WHERE ri.order_item_id = oi.id AND r.status <> 'rejected'
-        ), 0), 0)::int AS returnable
- FROM order_items oi
- WHERE oi.order_id = $1
- ORDER BY oi.created_at, oi.id`)
-
 // ReturnableItems lists the order's lines with claimable units.
 func ReturnableItems(ctx context.Context, q DBTX, orderID uuid.UUID) ([]ReturnableItem, error) {
-	return collect[ReturnableItem](q.Query(ctx, sqlReturnableItems, orderID))
+	rows, err := queries(q).StoreReturnableItems(ctx, orderID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(rows, func(r sqlc.StoreReturnableItemsRow) ReturnableItem { return ReturnableItem(r) }), nil
 }
 
 // ReturnLine is (order item, quantity).
@@ -246,21 +239,6 @@ func cleanText(raw string, maxChars int) (string, bool) {
 	}
 	return t, true
 }
-
-var (
-	sqlReturnOrderLock = sqlText(`SELECT status::text AS status, access_token,
-        access_token_expires_at <= now() AS token_expired, user_id,
-        delivered_at, shipped_at, now() AS now
- FROM orders WHERE id = $1 FOR UPDATE`)
-	sqlReturnOpenExists = sqlText(`SELECT EXISTS (SELECT 1 FROM return_requests
-                WHERE order_id = $1
-                  AND status IN ('requested', 'approved', 'received'))`)
-	sqlInsertReturn = sqlText(`INSERT INTO return_requests
-     (id, order_id, user_id, kind, reason, desired_size)
- VALUES ($1, $2, $3, $4, $5, $6)`)
-	sqlInsertReturnItem = sqlText(`INSERT INTO return_request_items (return_request_id, order_item_id, quantity)
- VALUES ($1, $2, $3)`)
-)
 
 func recordReturnAudit(ctx context.Context, tx DBTX, returnID uuid.UUID, actor Actor, meta map[string]any) error {
 	return audit.Record(ctx, tx, audit.Event{
@@ -293,26 +271,21 @@ func CreateReturnRequest(ctx context.Context, pool *pgxpool.Pool, orderID uuid.U
 	}
 	returnID := uuid.Must(uuid.NewV7())
 	err := withTx(ctx, pool, func(tx pgx.Tx) error {
-		var status string
-		var token uuid.UUID
-		var expired bool
-		var owner *uuid.UUID
-		var delivered, shipped *time.Time
-		var now time.Time
-		err := tx.QueryRow(ctx, sqlReturnOrderLock, orderID).Scan(&status, &token, &expired, &owner, &delivered, &shipped, &now)
-		if found, err := optional(err); err != nil {
+		q := queries(tx)
+		o, found, err := noRows(q.StoreReturnOrderLock(ctx, orderID))
+		if err != nil {
 			return err
 		} else if !found {
 			return ErrReturnNotFound
 		}
-		if !TokenOrOwnerAllows(token, expired, owner, queryToken, sessionUserID) {
+		if !TokenOrOwnerAllows(o.AccessToken, o.TokenExpired, o.UserID, queryToken, sessionUserID) {
 			return ErrReturnNotFound
 		}
-		if _, err := CheckReturnEligibility(status, in.Kind, delivered, shipped, now); err != nil {
+		if _, err := CheckReturnEligibility(o.Status, in.Kind, o.DeliveredAt, o.ShippedAt, o.Now); err != nil {
 			return err
 		}
-		var open bool
-		if err := tx.QueryRow(ctx, sqlReturnOpenExists, orderID).Scan(&open); err != nil {
+		open, err := q.StoreReturnOpenExists(ctx, orderID)
+		if err != nil {
 			return err
 		}
 		if open {
@@ -348,12 +321,16 @@ func CreateReturnRequest(ctx context.Context, pool *pgxpool.Pool, orderID uuid.U
 		if len(lines) == 0 {
 			return userErr("Escolha pelo menos um item e a quantidade.")
 		}
-		if _, err := tx.Exec(ctx, sqlInsertReturn, returnID, orderID, sessionUserID, string(in.Kind), reason, desired); err != nil {
+		if err := q.StoreInsertReturn(ctx, sqlc.StoreInsertReturnParams{
+			ID: returnID, OrderID: orderID, UserID: sessionUserID, Kind: string(in.Kind), Reason: reason, DesiredSize: desired,
+		}); err != nil {
 			return err
 		}
 		metaItems := make([]map[string]any, 0, len(lines))
 		for _, l := range lines {
-			if _, err := tx.Exec(ctx, sqlInsertReturnItem, returnID, l.OrderItemID, l.Quantity); err != nil {
+			if err := q.StoreInsertReturnItem(ctx, sqlc.StoreInsertReturnItemParams{
+				ReturnRequestID: returnID, OrderItemID: l.OrderItemID, Quantity: l.Quantity,
+			}); err != nil {
 				return err
 			}
 			metaItems = append(metaItems, map[string]any{"order_item_id": l.OrderItemID, "quantity": l.Quantity})
@@ -413,14 +390,13 @@ func (r ReturnSummary) StatusTone() BadgeTone {
 	return s.Tone()
 }
 
-var sqlRequestsForOrder = sqlText(`SELECT r.id, r.order_id, r.kind, r.status, r.resolution,
-  r.created_at, r.refund_cents, r.instructions, r.rejection_reason
- FROM return_requests r
- WHERE r.order_id = $1 ORDER BY r.created_at DESC`)
-
 // RequestsForOrder lists an order's requests, newest first.
 func RequestsForOrder(ctx context.Context, q DBTX, orderID uuid.UUID) ([]ReturnSummary, error) {
-	return collect[ReturnSummary](q.Query(ctx, sqlRequestsForOrder, orderID))
+	rows, err := queries(q).StoreRequestsForOrder(ctx, orderID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(rows, func(r sqlc.StoreRequestsForOrderRow) ReturnSummary { return ReturnSummary(r) }), nil
 }
 
 // OpenKind is a kind still inside its window.
@@ -452,17 +428,13 @@ func (o OrderReturns) ReturnDeadline() (time.Time, bool) {
 	return time.Time{}, false
 }
 
-var sqlOrderReturnState = sqlText(`SELECT status::text, delivered_at, shipped_at, now() FROM orders WHERE id = $1`)
-
 // LoadOrderReturns builds OrderReturns (the caller already checked access).
 func LoadOrderReturns(ctx context.Context, q DBTX, orderID uuid.UUID) (OrderReturns, error) {
-	var status string
-	var delivered, shipped *time.Time
-	var now time.Time
-	err := q.QueryRow(ctx, sqlOrderReturnState, orderID).Scan(&status, &delivered, &shipped, &now)
-	if found, err := optional(err); err != nil || !found {
+	state, found, err := noRows(queries(q).StoreOrderReturnState(ctx, orderID))
+	if err != nil || !found {
 		return OrderReturns{Requests: []ReturnSummary{}}, err
 	}
+	status, delivered, shipped, now := state.Status, state.DeliveredAt, state.ShippedAt, state.Now
 	requests, err := RequestsForOrder(ctx, q, orderID)
 	if err != nil {
 		return OrderReturns{}, err
@@ -556,58 +528,23 @@ func AdminReturnTransition(from ReturnStatus, kind ReturnKind, action ReturnActi
 	return "", false
 }
 
-var (
-	sqlLockReturn    = sqlText(`SELECT order_id, kind, status FROM return_requests WHERE id = $1 FOR UPDATE`)
-	sqlReturnedLines = sqlText(`SELECT oi.variant_id, ri.quantity, oi.unit_price_cents
- FROM return_request_items ri
- JOIN order_items oi ON oi.id = ri.order_item_id
- WHERE ri.return_request_id = $1
- ORDER BY oi.variant_id`)
-	sqlCoversWholeOrder = sqlText(`SELECT NOT EXISTS (
-     SELECT 1 FROM order_items oi
-     JOIN return_requests r ON r.order_id = oi.order_id
-     LEFT JOIN return_request_items ri
-       ON ri.order_item_id = oi.id AND ri.return_request_id = r.id
-     WHERE r.id = $1 AND COALESCE(ri.quantity, 0) <> oi.quantity
- )`)
-	sqlRefundOptions = sqlText(`SELECT o.status::text, o.payment_provider, o.total_cents,
-        COALESCE((SELECT SUM(ri.quantity * oi.unit_price_cents)
-                  FROM return_request_items ri
-                  JOIN order_items oi ON oi.id = ri.order_item_id
-                  WHERE ri.return_request_id = r.id), 0)::bigint
- FROM return_requests r JOIN orders o ON o.id = r.order_id
- WHERE r.id = $1`)
-	sqlReturnTouch          = sqlText(`UPDATE return_requests SET updated_at = now() WHERE id = $1`)
-	sqlReturnApprove        = sqlText(`UPDATE return_requests SET status = 'approved', instructions = $2, approved_at = now(), updated_at = now() WHERE id = $1`)
-	sqlReturnReject         = sqlText(`UPDATE return_requests SET status = 'rejected', rejection_reason = $2, updated_at = now() WHERE id = $1`)
-	sqlReturnReceive        = sqlText(`UPDATE return_requests SET status = 'received', received_at = now(), updated_at = now() WHERE id = $1`)
-	sqlReturnResolve        = sqlText(`UPDATE return_requests SET status = 'resolved', resolution = $2, refund_cents = $3, resolved_at = now(), updated_at = now() WHERE id = $1`)
-	sqlOrderProvider        = sqlText(`SELECT payment_provider FROM orders WHERE id = $1`)
-	sqlOrderTotal           = sqlText(`SELECT total_cents FROM orders WHERE id = $1`)
-	sqlOrderStatusTotalLock = sqlText(`SELECT status::text, total_cents FROM orders WHERE id = $1 FOR UPDATE`)
-)
-
 func lockReturn(ctx context.Context, tx DBTX, returnID uuid.UUID) (uuid.UUID, ReturnKind, ReturnStatus, error) {
-	var orderID uuid.UUID
-	var kindRaw, statusRaw string
-	err := tx.QueryRow(ctx, sqlLockReturn, returnID).Scan(&orderID, &kindRaw, &statusRaw)
-	if found, err := optional(err); err != nil {
+	r, found, err := noRows(queries(tx).StoreLockReturn(ctx, returnID))
+	if err != nil {
 		return uuid.Nil, "", "", err
 	} else if !found {
 		return uuid.Nil, "", "", ErrReturnNotFound
 	}
-	kind, ok1 := ParseReturnKind(kindRaw)
-	status, ok2 := ParseReturnStatus(statusRaw)
+	kind, ok1 := ParseReturnKind(r.Kind)
+	status, ok2 := ParseReturnStatus(r.Status)
 	if !ok1 || !ok2 {
 		return uuid.Nil, "", "", ErrReturnNotFound
 	}
-	return orderID, kind, status, nil
+	return r.OrderID, kind, status, nil
 }
 
 func coversWholeOrder(ctx context.Context, q DBTX, returnID uuid.UUID) (bool, error) {
-	var whole bool
-	err := q.QueryRow(ctx, sqlCoversWholeOrder, returnID).Scan(&whole)
-	return whole, err
+	return queries(q).StoreCoversWholeOrder(ctx, returnID)
 }
 
 // RefundOptions are the refund paths offered for a received request.
@@ -623,11 +560,11 @@ type RefundOptions struct {
 
 // LoadRefundOptions computes RefundOptions.
 func LoadRefundOptions(ctx context.Context, q DBTX, returnID uuid.UUID) (RefundOptions, error) {
-	var status, provider string
-	var total, items int64
-	if err := q.QueryRow(ctx, sqlRefundOptions, returnID).Scan(&status, &provider, &total, &items); err != nil {
+	o, err := queries(q).StoreRefundOptions(ctx, returnID)
+	if err != nil {
 		return RefundOptions{}, err
 	}
+	status, provider, total, items := o.Status, o.PaymentProvider, o.TotalCents, o.ItemsCents
 	whole, err := coversWholeOrder(ctx, q, returnID)
 	if err != nil {
 		return RefundOptions{}, err
@@ -641,8 +578,7 @@ func LoadRefundOptions(ctx context.Context, q DBTX, returnID uuid.UUID) (RefundO
 }
 
 func resolveReturn(ctx context.Context, tx DBTX, returnID uuid.UUID, resolution string, refund *int64) error {
-	_, err := tx.Exec(ctx, sqlReturnResolve, returnID, resolution, refund)
-	return err
+	return queries(tx).StoreReturnResolve(ctx, sqlc.StoreReturnResolveParams{ID: returnID, Resolution: resolution, RefundCents: refund})
 }
 
 // AdminApplyReturn runs one admin step in a transaction: status change,
@@ -668,6 +604,7 @@ func adminApplyReturnTx(ctx context.Context, tx DBTX, returnID uuid.UUID, action
 	if !ok {
 		return "", ErrReturnIllegalTransition
 	}
+	q := queries(tx)
 	meta := map[string]any{
 		"action": string(action.Kind), "order_id": orderID,
 		"from": string(from), "to": string(next),
@@ -679,7 +616,7 @@ func adminApplyReturnTx(ctx context.Context, tx DBTX, returnID uuid.UUID, action
 			return "", userErr("Escreva a observação.")
 		}
 		meta["note"] = text
-		if _, err := tx.Exec(ctx, sqlReturnTouch, returnID); err != nil {
+		if err := q.StoreReturnTouch(ctx, returnID); err != nil {
 			return "", err
 		}
 		return next, recordReturnAudit(ctx, tx, returnID, actor, meta)
@@ -688,7 +625,7 @@ func adminApplyReturnTx(ctx context.Context, tx DBTX, returnID uuid.UUID, action
 		if !ok {
 			return "", userErr("Informe as instruções de envio (código de postagem, endereço, prazo).")
 		}
-		if _, err := tx.Exec(ctx, sqlReturnApprove, returnID, instructions); err != nil {
+		if err := q.StoreReturnApprove(ctx, sqlc.StoreReturnApproveParams{ID: returnID, Instructions: instructions}); err != nil {
 			return "", err
 		}
 		if err := enqueueReturnMail(ctx, tx, returnID, ReturnMailStep{Kind: "approved", Instructions: instructions}); err != nil {
@@ -700,14 +637,14 @@ func adminApplyReturnTx(ctx context.Context, tx DBTX, returnID uuid.UUID, action
 			return "", userErr("Informe o motivo da recusa para o cliente.")
 		}
 		meta["reason"] = reason
-		if _, err := tx.Exec(ctx, sqlReturnReject, returnID, reason); err != nil {
+		if err := q.StoreReturnReject(ctx, sqlc.StoreReturnRejectParams{ID: returnID, RejectionReason: reason}); err != nil {
 			return "", err
 		}
 		if err := enqueueReturnMail(ctx, tx, returnID, ReturnMailStep{Kind: "rejected", Reason: reason}); err != nil {
 			return "", err
 		}
 	case ReturnActionReceive:
-		if _, err := tx.Exec(ctx, sqlReturnReceive, returnID); err != nil {
+		if err := q.StoreReturnReceive(ctx, returnID); err != nil {
 			return "", err
 		}
 	case ReturnActionResolveSwap:
@@ -718,8 +655,8 @@ func adminApplyReturnTx(ctx context.Context, tx DBTX, returnID uuid.UUID, action
 			return "", err
 		}
 	case ReturnActionRefundOrder:
-		var provider string
-		if err := tx.QueryRow(ctx, sqlOrderProvider, orderID).Scan(&provider); err != nil {
+		provider, err := q.StoreOrderProvider(ctx, orderID)
+		if err != nil {
 			return "", err
 		}
 		if provider == ProviderMercadoPago {
@@ -735,8 +672,8 @@ func adminApplyReturnTx(ctx context.Context, tx DBTX, returnID uuid.UUID, action
 		if _, err := ApplyWithAudit(ctx, tx, orderID, EventRefund, WithRestock(action.Restock), actor); err != nil {
 			return "", err
 		}
-		var total int64
-		if err := tx.QueryRow(ctx, sqlOrderTotal, orderID).Scan(&total); err != nil {
+		total, err := q.StoreOrderTotal(ctx, orderID)
+		if err != nil {
 			return "", err
 		}
 		meta["restock"] = action.Restock
@@ -748,12 +685,12 @@ func adminApplyReturnTx(ctx context.Context, tx DBTX, returnID uuid.UUID, action
 			return "", err
 		}
 	case ReturnActionRecordRefund:
-		var status string
-		var total int64
-		if err := tx.QueryRow(ctx, sqlOrderStatusTotalLock, orderID).Scan(&status, &total); err != nil {
+		o, err := q.StoreOrderStatusTotalLock(ctx, orderID)
+		if err != nil {
 			return "", err
 		}
-		refunded := status == "refunded"
+		total := o.TotalCents
+		refunded := o.Status == "refunded"
 		if !refunded {
 			whole, err := coversWholeOrder(ctx, tx, returnID)
 			if err != nil {
@@ -763,12 +700,7 @@ func adminApplyReturnTx(ctx context.Context, tx DBTX, returnID uuid.UUID, action
 				return "", userErr("A solicitação cobre o pedido inteiro: use o estorno do pedido.")
 			}
 		}
-		type returnedLine struct {
-			VariantID      uuid.UUID `db:"variant_id"`
-			Quantity       int32     `db:"quantity"`
-			UnitPriceCents int64     `db:"unit_price_cents"`
-		}
-		lines, err := collect[returnedLine](tx.Query(ctx, sqlReturnedLines, returnID))
+		lines, err := q.StoreReturnedLines(ctx, returnID)
 		if err != nil {
 			return "", err
 		}
@@ -850,12 +782,12 @@ func FinishMPRefund(ctx context.Context, pool *pgxpool.Pool, returnID uuid.UUID,
 		if !ok {
 			return ErrReturnIllegalTransition
 		}
-		var status string
-		var total int64
-		if err := tx.QueryRow(ctx, sqlOrderStatusTotalLock, orderID).Scan(&status, &total); err != nil {
+		o, err := queries(tx).StoreOrderStatusTotalLock(ctx, orderID)
+		if err != nil {
 			return err
 		}
-		if status != "refunded" {
+		total := o.TotalCents
+		if o.Status != "refunded" {
 			return userErr(`O pedido ainda não consta como estornado. Use "Sincronizar com Mercado Pago" no pedido.`)
 		}
 		if restock {

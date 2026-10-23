@@ -36,8 +36,44 @@ sql:
             go_type:
               type: time.Time
               pointer: true
+          - db_type: date
+            go_type: time.Time
+          - db_type: date
+            nullable: true
+            go_type:
+              type: time.Time
+              pointer: true
           - db_type: jsonb
             go_type: encoding/json.RawMessage
           - db_type: jsonb
             nullable: true
             go_type: encoding/json.RawMessage
+          # Nullable marker domains (db/migrations/00002_*): sqlc types every
+          # computed expression (scalar subquery, CASE, aggregate) as NOT
+          # NULL; cast one that may be NULL to null_<type> to get a pointer.
+          - db_type: null_text
+            go_type:
+              type: string
+              pointer: true
+          - db_type: null_int4
+            go_type:
+              type: int32
+              pointer: true
+          - db_type: null_int8
+            go_type:
+              type: int64
+              pointer: true
+          - db_type: null_bool
+            go_type:
+              type: bool
+              pointer: true
+          - db_type: null_uuid
+            go_type:
+              import: github.com/google/uuid
+              type: UUID
+              pointer: true
+          - db_type: null_timestamptz
+            go_type:
+              import: time
+              type: Time
+              pointer: true

@@ -83,10 +83,10 @@ func Enqueue(ctx context.Context, db sqlc.DBTX, msg Msg) error {
 	if msg.DedupeKey != "" {
 		dedupe = &msg.DedupeKey
 	}
-	_, err = db.Exec(ctx, `INSERT INTO email_outbox (id, kind, to_address, subject, html_body, text_body, dedupe_key)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		ON CONFLICT (dedupe_key) WHERE dedupe_key IS NOT NULL DO NOTHING`,
-		id, msg.Kind, strings.TrimSpace(msg.To), msg.Subject, msg.HTML, msg.Text, dedupe)
+	err = sqlc.New(db).MailEnqueue(ctx, sqlc.MailEnqueueParams{
+		ID: id, Kind: msg.Kind, ToAddress: strings.TrimSpace(msg.To), Subject: msg.Subject,
+		HtmlBody: msg.HTML, TextBody: msg.Text, DedupeKey: dedupe,
+	})
 	if err != nil {
 		return fmt.Errorf("enqueue mail: %w", err)
 	}

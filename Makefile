@@ -37,6 +37,7 @@ test-race:
 ## lint: golangci-lint (v2) + sqlc vet + templ fmt check
 lint:
 	golangci-lint run ./...
+	sqlc compile
 	sqlc vet
 	templ fmt -fail .
 
@@ -50,6 +51,7 @@ vet:
 
 ## drift: fail when generated code is stale (CI)
 drift: generate
+	sqlc diff
 	git diff --exit-code -- '*_templ.go' internal/db/sqlc $(CSS_OUT)
 
 ## dev: live reload (air) — rebuilds templ/css/go on change

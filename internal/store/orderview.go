@@ -10,6 +10,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 )
 
 // Customer order pages: /pedido/{id} (guest token or owner), status
@@ -207,40 +209,38 @@ func (o *OrderDetail) Code() string { return OrderCode(o.ID) }
 // StatusLabel is the heading label ("Aguardando pagamento" when pending).
 func (o *OrderDetail) StatusLabel() string { return OrderStatusLabel(o.Status) }
 
-var (
-	sqlOrderDetail = sqlText(`SELECT id, status::text AS status, user_id, access_token,
-        access_token_expires_at <= now() AS token_expired,
-        guest_email, subtotal_cents, shipping_cents,
-        discount_cents, pix_discount_cents, total_cents, payment_provider, shipping_address, payment_meta,
-        to_char(created_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS created_at
- FROM orders WHERE id = $1`)
-	sqlOrderItems    = sqlText(`SELECT product_name, variant_label, quantity, unit_price_cents FROM order_items WHERE order_id = $1`)
-	sqlOrderProgress = sqlText(`SELECT ` + ProgressColumns + ` FROM orders o WHERE o.id = $1`)
-)
-
-// GetOrder loads an order regardless of access (nil when missing).
-func GetOrder(ctx context.Context, q DBTX, id uuid.UUID) (*OrderDetail, error) {
-	var o OrderDetail
-	var guest *string
-	var addr, meta []byte
-	err := q.QueryRow(ctx, sqlOrderDetail, id).Scan(&o.ID, &o.Status, &o.UserID, &o.AccessToken, &o.TokenExpired,
-		&guest, &o.SubtotalCents, &o.ShippingCents, &o.DiscountCents, &o.PixDiscountCents, &o.TotalCents,
-		&o.PaymentProvider, &addr, &meta, &o.CreatedAt)
-	if found, err := optional(err); err != nil || !found {
-		return nil, err
-	}
-	o.GuestEmail = deref(guest)
-	o.Address = parseAddress(addr)
-	o.Meta = parseMeta(meta)
-	if o.Items, err = collect[OrderItemView](q.Query(ctx, sqlOrderItems, id)); err != nil {
-		return nil, err
-	}
-	p, err := collectOne[OrderProgress](q.Query(ctx, sqlOrderProgress, id))
+// orderItems lists an order's lines.
+func orderItems(ctx context.Context, q DBTX, orderID uuid.UUID) ([]OrderItemView, error) {
+	rows, err := queries(q).StoreOrderItems(ctx, orderID)
 	if err != nil {
 		return nil, err
 	}
-	if p != nil {
-		o.Progress = *p
+	return mapSlice(rows, func(r sqlc.StoreOrderItemsRow) OrderItemView { return OrderItemView(r) }), nil
+}
+
+// GetOrder loads an order regardless of access (nil when missing).
+func GetOrder(ctx context.Context, q DBTX, id uuid.UUID) (*OrderDetail, error) {
+	qs := queries(q)
+	r, found, err := noRows(qs.StoreOrderDetail(ctx, id))
+	if err != nil || !found {
+		return nil, err
+	}
+	o := OrderDetail{
+		ID: r.ID, Status: r.Status, UserID: r.UserID, AccessToken: r.AccessToken, TokenExpired: r.TokenExpired,
+		GuestEmail: deref(r.GuestEmail), SubtotalCents: r.SubtotalCents, ShippingCents: r.ShippingCents,
+		DiscountCents: r.DiscountCents, PixDiscountCents: r.PixDiscountCents, TotalCents: r.TotalCents,
+		PaymentProvider: r.PaymentProvider, Address: parseAddress(r.ShippingAddress), Meta: parseMeta(r.PaymentMeta),
+		CreatedAt: r.CreatedAt,
+	}
+	if o.Items, err = orderItems(ctx, q, id); err != nil {
+		return nil, err
+	}
+	p, found, err := noRows(qs.StoreOrderProgress(ctx, id))
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		o.Progress = OrderProgress(p)
 	}
 	return &o, nil
 }
@@ -272,13 +272,17 @@ func OrderWhatsappURL(s StoreSettings, orderID uuid.UUID, totalCents int64) stri
 	return WhatsappLink(number, msg)
 }
 
-var sqlStatusAccess = sqlText(`SELECT status::text AS status, access_token,
-        access_token_expires_at <= now() AS token_expired, user_id
- FROM orders WHERE id = $1`)
+// orderAccessRow is an order's status and access columns.
+type orderAccessRow = sqlc.StoreStatusAccessRow
 
-var sqlStatusAccessLock = sqlText(`SELECT status::text AS status, access_token,
-        access_token_expires_at <= now() AS token_expired, user_id
- FROM orders WHERE id = $1 FOR UPDATE`)
+// statusAccess reads (or, with lock, locks) an order's access columns.
+func statusAccess(ctx context.Context, q DBTX, orderID uuid.UUID, lock bool) (orderAccessRow, bool, error) {
+	if lock {
+		r, found, err := noRows(queries(q).StoreStatusAccessLock(ctx, orderID))
+		return orderAccessRow(r), found, err
+	}
+	return noRows(queries(q).StoreStatusAccess(ctx, orderID))
+}
 
 // RefreshOrderStatus is the "Atualizar status" button: the current status,
 // or "unknown" for an unknown order / denied viewer.
@@ -287,12 +291,8 @@ func RefreshOrderStatus(ctx context.Context, q DBTX, rawOrderID, accessToken str
 	if err != nil {
 		return "unknown", nil
 	}
-	var status string
-	var token uuid.UUID
-	var expired bool
-	var owner *uuid.UUID
-	err = q.QueryRow(ctx, sqlStatusAccess, id).Scan(&status, &token, &expired, &owner)
-	if found, err := optional(err); err != nil {
+	a, found, err := statusAccess(ctx, q, id, false)
+	if err != nil {
 		return "", err
 	} else if !found {
 		return "unknown", nil
@@ -301,10 +301,10 @@ func RefreshOrderStatus(ctx context.Context, q DBTX, rawOrderID, accessToken str
 	if v := strings.TrimSpace(accessToken); v != "" {
 		t = &v
 	}
-	if !TokenOrOwnerAllows(token, expired, owner, t, sessionUserID) {
+	if !TokenOrOwnerAllows(a.AccessToken, a.TokenExpired, a.UserID, t, sessionUserID) {
 		return "unknown", nil
 	}
-	return status, nil
+	return a.Status, nil
 }
 
 // CustomerCancelOutcome is the result of CancelUnpaidOrder.
@@ -335,18 +335,14 @@ func (o CustomerCancelOutcome) Message() (string, bool) {
 func CancelUnpaidOrder(ctx context.Context, pool *pgxpool.Pool, orderID uuid.UUID, queryToken *string, sessionUserID *uuid.UUID) (CustomerCancelOutcome, error) {
 	out := CustomerCancelNotFound
 	err := withTx(ctx, pool, func(tx pgx.Tx) error {
-		var status string
-		var token uuid.UUID
-		var expired bool
-		var owner *uuid.UUID
-		err := tx.QueryRow(ctx, sqlStatusAccessLock, orderID).Scan(&status, &token, &expired, &owner)
-		if found, err := optional(err); err != nil || !found {
+		a, found, err := statusAccess(ctx, tx, orderID, true)
+		if err != nil || !found {
 			return err
 		}
-		if !TokenOrOwnerAllows(token, expired, owner, queryToken, sessionUserID) {
+		if !TokenOrOwnerAllows(a.AccessToken, a.TokenExpired, a.UserID, queryToken, sessionUserID) {
 			return nil
 		}
-		if status != string(StatusPendingPayment) {
+		if a.Status != string(StatusPendingPayment) {
 			out = CustomerCancelNotPending
 			return nil
 		}
@@ -361,15 +357,11 @@ func CancelUnpaidOrder(ctx context.Context, pool *pgxpool.Pool, orderID uuid.UUI
 
 // OrderAccess checks guest/owner access to an order (troca page).
 func OrderAccess(ctx context.Context, q DBTX, orderID uuid.UUID, queryToken *string, sessionUserID *uuid.UUID) (bool, error) {
-	var status string
-	var token uuid.UUID
-	var expired bool
-	var owner *uuid.UUID
-	err := q.QueryRow(ctx, sqlStatusAccess, orderID).Scan(&status, &token, &expired, &owner)
-	if found, err := optional(err); err != nil || !found {
+	a, found, err := statusAccess(ctx, q, orderID, false)
+	if err != nil || !found {
 		return false, err
 	}
-	return TokenOrOwnerAllows(token, expired, owner, queryToken, sessionUserID), nil
+	return TokenOrOwnerAllows(a.AccessToken, a.TokenExpired, a.UserID, queryToken, sessionUserID), nil
 }
 
 // RecentOrder is a dashboard / order history row.
@@ -398,17 +390,13 @@ func (o RecentOrder) TrackingLink() string {
 	return u
 }
 
-var (
-	sqlRecentOrders = sqlText(`SELECT id, guest_email, status::text AS status, total_cents, created_at, carrier, tracking_code
- FROM orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT 5`)
-	sqlUserOrderCount = sqlText(`SELECT COUNT(*) FROM orders WHERE user_id = $1`)
-	sqlUserOrdersPage = sqlText(`SELECT id, guest_email, status::text AS status, total_cents, created_at, carrier, tracking_code
- FROM orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`)
-)
-
 // LoadRecentOrders is the dashboard's last 5 orders.
 func LoadRecentOrders(ctx context.Context, q DBTX, userID uuid.UUID) ([]RecentOrder, error) {
-	return collect[RecentOrder](q.Query(ctx, sqlRecentOrders, userID))
+	rows, err := queries(q).StoreRecentOrders(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(rows, func(r sqlc.StoreRecentOrdersRow) RecentOrder { return RecentOrder(r) }), nil
 }
 
 // Pagination is a computed page window.
@@ -474,15 +462,17 @@ type MyOrdersPage struct {
 
 // LoadMyOrders loads one page (20 per page) of the user's orders.
 func LoadMyOrders(ctx context.Context, q DBTX, userID uuid.UUID, page int64) (MyOrdersPage, error) {
-	var total int64
-	if err := q.QueryRow(ctx, sqlUserOrderCount, userID).Scan(&total); err != nil {
-		return MyOrdersPage{}, err
-	}
-	pager := Paginate(page, 20, total)
-	orders, err := collect[RecentOrder](q.Query(ctx, sqlUserOrdersPage, userID, pager.PageSize, pager.Offset()))
+	qs := queries(q)
+	total, err := qs.StoreUserOrderCount(ctx, userID)
 	if err != nil {
 		return MyOrdersPage{}, err
 	}
+	pager := Paginate(page, 20, total)
+	rows, err := qs.StoreUserOrdersPage(ctx, sqlc.StoreUserOrdersPageParams{UserID: userID, PageSize: pager.PageSize, PageOffset: pager.Offset()})
+	if err != nil {
+		return MyOrdersPage{}, err
+	}
+	orders := mapSlice(rows, func(r sqlc.StoreUserOrdersPageRow) RecentOrder { return RecentOrder(r) })
 	reviewable, err := ReviewableOrderIDs(ctx, q, userID)
 	if err != nil {
 		return MyOrdersPage{}, err

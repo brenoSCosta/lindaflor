@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -17,26 +16,6 @@ import (
 func TestMain(m *testing.M) { testutil.Main(m) }
 
 var ctx = context.Background()
-
-// TestStatementsPrepare checks every static statement against the schema
-// (what sqlx's compile-time checks did for the Rust code).
-func TestStatementsPrepare(t *testing.T) {
-	pool := testutil.NewPool(t)
-	conn, err := pool.Acquire(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Release()
-	stmts := store.Statements()
-	if len(stmts) < 150 {
-		t.Fatalf("only %d statements registered", len(stmts))
-	}
-	for i, sql := range stmts {
-		if _, err := conn.Conn().Prepare(ctx, fmt.Sprintf("s%d", i), sql); err != nil {
-			t.Errorf("statement %d does not prepare: %v\n%s", i, err, sql)
-		}
-	}
-}
 
 // --- fixtures ---
 

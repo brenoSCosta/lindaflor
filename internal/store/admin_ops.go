@@ -14,6 +14,7 @@ import (
 
 	"github.com/wellington-vell/lindaflor/internal/audit"
 	"github.com/wellington-vell/lindaflor/internal/db"
+	"github.com/wellington-vell/lindaflor/internal/db/sqlc"
 )
 
 // Admin operations: dashboard stats, stock, orders, returns
@@ -30,52 +31,36 @@ type AdminDashboard struct {
 	RecentOrders  []AdminOrderRow
 }
 
-var (
-	sqlCountProducts = sqlText(`SELECT COUNT(*) FROM products`)
-	sqlCountOrders   = sqlText(`SELECT COUNT(*) FROM orders`)
-	sqlTotalRevenue  = sqlText(`SELECT COALESCE(SUM(total_cents), 0)::bigint FROM orders WHERE status IN ('paid', 'shipped', 'delivered')`)
-	sqlLowStock      = sqlText(`SELECT COUNT(*) FROM (
-   SELECT v.id
-   FROM product_variants v
-   INNER JOIN products p ON p.id = v.product_id
-   LEFT JOIN inventory i
-     ON i.variant_id = v.id
-    AND i.warehouse_id IN (SELECT id FROM warehouses WHERE active)
-   WHERE p.active
-   GROUP BY v.id, v.low_stock_threshold
-   HAVING COALESCE(SUM(i.quantity - i.reserved), 0) <= v.low_stock_threshold
- ) low`)
-	sqlRecentAdminOrders = sqlText(`SELECT o.id, o.guest_email, o.status::text AS status, o.total_cents, o.created_at,
-        o.carrier, o.tracking_code, 0::bigint AS item_count
- FROM orders o ORDER BY o.created_at DESC LIMIT 10`)
-)
-
 // CountLowStockVariants counts variants of active products whose available
 // stock (quantity - reserved over active warehouses; none = 0) is at or
 // below their own low_stock_threshold.
 func CountLowStockVariants(ctx context.Context, q DBTX) (int64, error) {
-	var n int64
-	err := q.QueryRow(ctx, sqlLowStock).Scan(&n)
-	return n, err
+	return queries(q).StoreAdminLowStockCount(ctx)
 }
 
 // LoadAdminDashboard loads the admin home figures.
 func LoadAdminDashboard(ctx context.Context, q DBTX) (AdminDashboard, error) {
 	var d AdminDashboard
-	for _, s := range []struct {
-		sql string
-		dst *int64
-	}{{sqlCountProducts, &d.TotalProducts}, {sqlCountOrders, &d.TotalOrders}, {sqlTotalRevenue, &d.TotalRevenue}} {
-		if err := q.QueryRow(ctx, s.sql).Scan(s.dst); err != nil {
-			return d, err
-		}
-	}
+	qs := queries(q)
 	var err error
+	if d.TotalProducts, err = qs.StoreAdminCountProducts(ctx); err != nil {
+		return d, err
+	}
+	if d.TotalOrders, err = qs.StoreAdminCountOrders(ctx); err != nil {
+		return d, err
+	}
+	if d.TotalRevenue, err = qs.StoreAdminTotalRevenue(ctx); err != nil {
+		return d, err
+	}
 	if d.LowStockCount, err = CountLowStockVariants(ctx, q); err != nil {
 		return d, err
 	}
-	d.RecentOrders, err = collect[AdminOrderRow](q.Query(ctx, sqlRecentAdminOrders))
-	return d, err
+	rows, err := qs.StoreAdminRecentOrders(ctx)
+	if err != nil {
+		return d, err
+	}
+	d.RecentOrders = mapSlice(rows, func(r sqlc.StoreAdminRecentOrdersRow) AdminOrderRow { return AdminOrderRow(r) })
+	return d, nil
 }
 
 // --- Stock ---
@@ -115,28 +100,27 @@ type StockDirectory struct {
 	Warehouses []Warehouse
 }
 
-var (
-	sqlStockRows = sqlText(`SELECT i.id, i.variant_id, i.warehouse_id, i.quantity, i.reserved,
-            p.name AS product_name, pv.sku, pv.size::text AS size, pv.color,
-            w.name AS warehouse_name, w.code AS warehouse_code
-     FROM inventory i
-     JOIN product_variants pv ON pv.id = i.variant_id
-     JOIN products p ON p.id = pv.product_id
-     JOIN warehouses w ON w.id = i.warehouse_id
-     WHERE ($1::text = '' OR p.name ILIKE '%' || $1::text || '%' ESCAPE '\' OR pv.sku ILIKE '%' || $1::text || '%' ESCAPE '\')
-     ORDER BY p.name, pv.sku`)
-	sqlWarehouses = sqlText(`SELECT id, code, name, is_default FROM warehouses ORDER BY name`)
-)
-
 // LoadStockDirectory searches inventory by product name or SKU.
 func LoadStockDirectory(ctx context.Context, q DBTX, query string) (StockDirectory, error) {
 	out := StockDirectory{Query: ClampAdminQuery(query, stockQueryMax)}
-	var err error
-	if out.Rows, err = collect[StockRow](q.Query(ctx, sqlStockRows, db.EscapeLike(out.Query))); err != nil {
+	qs := queries(q)
+	rows, err := qs.StoreAdminStockRows(ctx, db.EscapeLike(out.Query))
+	if err != nil {
 		return out, err
 	}
-	out.Warehouses, err = collect[Warehouse](q.Query(ctx, sqlWarehouses))
-	return out, err
+	out.Rows = mapSlice(rows, func(r sqlc.StoreAdminStockRowsRow) StockRow {
+		return StockRow{
+			ID: r.ID, VariantID: r.VariantID, WarehouseID: r.WarehouseID, Quantity: r.Quantity, Reserved: r.Reserved,
+			ProductName: r.ProductName, SKU: r.Sku, Size: &r.Size, Color: r.Color,
+			WarehouseName: r.WarehouseName, WarehouseCode: r.WarehouseCode,
+		}
+	})
+	warehouses, err := qs.StoreAdminWarehouses(ctx)
+	if err != nil {
+		return out, err
+	}
+	out.Warehouses = mapSlice(warehouses, func(r sqlc.StoreAdminWarehousesRow) Warehouse { return Warehouse(r) })
+	return out, nil
 }
 
 // AdjustStockWithAudit validates the adjust form (inventory id, delta,
@@ -214,19 +198,6 @@ func (o AdminOrderRow) StatusTone() BadgeTone { return AdminOrderStatusTone(o.St
 // Code is the short reference.
 func (o AdminOrderRow) Code() string { return OrderCode(o.ID) }
 
-var (
-	sqlAdminOrderCount = sqlText(`SELECT COUNT(*) FROM orders o WHERE ($1::text = '' OR o.guest_email ILIKE '%' || $1::text || '%' ESCAPE '\' OR o.tracking_code ILIKE '%' || $1::text || '%' ESCAPE '\') AND ($2::text = 'all' OR o.status::text = $2::text)`)
-	sqlAdminOrderList  = sqlText(`SELECT o.id, o.guest_email, o.status::text AS status, o.total_cents, o.created_at,
-        o.carrier, o.tracking_code,
-        (SELECT COUNT(*) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
- FROM orders o
- WHERE ($1::text = '' OR o.guest_email ILIKE '%' || $1::text || '%' ESCAPE '\'
-        OR o.tracking_code ILIKE '%' || $1::text || '%' ESCAPE '\')
-   AND ($2::text = 'all' OR o.status::text = $2::text)
- ORDER BY o.created_at DESC
- LIMIT $3 OFFSET $4`)
-)
-
 // AdminOrderDirectory is /admin/pedidos.
 type AdminOrderDirectory struct {
 	Query  string
@@ -240,14 +211,20 @@ type AdminOrderDirectory struct {
 func LoadAdminOrders(ctx context.Context, q DBTX, query, status string, page int64) (AdminOrderDirectory, error) {
 	out := AdminOrderDirectory{Query: ClampAdminQuery(query, 80), Status: ClampOrderStatus(status)}
 	like := db.EscapeLike(out.Query)
-	var total int64
-	if err := q.QueryRow(ctx, sqlAdminOrderCount, like, out.Status).Scan(&total); err != nil {
+	qs := queries(q)
+	total, err := qs.StoreAdminOrderCount(ctx, sqlc.StoreAdminOrderCountParams{Query: like, Status: out.Status})
+	if err != nil {
 		return out, err
 	}
 	out.Pager = Paginate(page, 20, total)
-	var err error
-	out.Orders, err = collect[AdminOrderRow](q.Query(ctx, sqlAdminOrderList, like, out.Status, out.Pager.PageSize, out.Pager.Offset()))
-	return out, err
+	rows, err := qs.StoreAdminOrderList(ctx, sqlc.StoreAdminOrderListParams{
+		Query: like, Status: out.Status, PageSize: out.Pager.PageSize, PageOffset: out.Pager.Offset(),
+	})
+	if err != nil {
+		return out, err
+	}
+	out.Orders = mapSlice(rows, func(r sqlc.StoreAdminOrderListRow) AdminOrderRow { return AdminOrderRow(r) })
+	return out, nil
 }
 
 // AdminOrderDetail is /admin/pedidos/{id}.
@@ -300,31 +277,21 @@ func (o *AdminOrderDetail) ManualOverride() (status, label string, restock, ok b
 	return ManualOverrideAction(o.Status, o.Reopenable())
 }
 
-var sqlAdminOrder = sqlText(`SELECT id, status::text AS status, guest_email, subtotal_cents, shipping_cents,
-        discount_cents, total_cents, payment_provider, shipping_address, payment_meta,
-        paid_at IS NOT NULL,
-        to_char(reservation_expires_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS reservation_expires_at,
-        to_char(created_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS created_at,
-        carrier, tracking_code,
-        to_char(shipped_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS shipped_at,
-        to_char(delivered_at AT TIME ZONE 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') AS delivered_at
- FROM orders WHERE id = $1`)
-
 // LoadAdminOrder loads the admin order page (nil when missing). The
 // Mercado Pago payment panel comes from internal/payments.
 func LoadAdminOrder(ctx context.Context, q DBTX, id uuid.UUID) (*AdminOrderDetail, error) {
-	var o AdminOrderDetail
-	var guest, expires *string
-	var addr, meta []byte
-	err := q.QueryRow(ctx, sqlAdminOrder, id).Scan(&o.ID, &o.Status, &guest, &o.SubtotalCents, &o.ShippingCents,
-		&o.DiscountCents, &o.TotalCents, &o.PaymentProvider, &addr, &meta, &o.Paid, &expires, &o.CreatedAt,
-		&o.Carrier, &o.TrackingCode, &o.ShippedAt, &o.DeliveredAt)
-	if found, err := optional(err); err != nil || !found {
+	r, found, err := noRows(queries(q).StoreAdminOrder(ctx, id))
+	if err != nil || !found {
 		return nil, err
 	}
-	o.GuestEmail, o.ReservationExpiresAt = deref(guest), deref(expires)
-	o.Address, o.Meta = parseAddress(addr), parseMeta(meta)
-	if o.Items, err = collect[OrderItemView](q.Query(ctx, sqlOrderItems, id)); err != nil {
+	o := AdminOrderDetail{
+		ID: r.ID, Status: r.Status, GuestEmail: deref(r.GuestEmail), SubtotalCents: r.SubtotalCents,
+		ShippingCents: r.ShippingCents, DiscountCents: r.DiscountCents, TotalCents: r.TotalCents,
+		PaymentProvider: r.PaymentProvider, Address: parseAddress(r.ShippingAddress), Meta: parseMeta(r.PaymentMeta),
+		Paid: r.Paid, ReservationExpiresAt: deref(r.ReservationExpiresAt), CreatedAt: r.CreatedAt,
+		Carrier: r.Carrier, TrackingCode: r.TrackingCode, ShippedAt: r.ShippedAt, DeliveredAt: r.DeliveredAt,
+	}
+	if o.Items, err = orderItems(ctx, q, id); err != nil {
 		return nil, err
 	}
 	o.Returns, err = RequestsForOrder(ctx, q, id)
@@ -414,9 +381,8 @@ func AdminUpdateOrder(ctx context.Context, pool *pgxpool.Pool, orderID uuid.UUID
 	if !ok {
 		return "", userErr("Status inválido.")
 	}
-	var provider string
-	err := pool.QueryRow(ctx, sqlOrderProvider, orderID).Scan(&provider)
-	if _, err := optional(err); err != nil {
+	provider, _, err := noRows(queries(pool).StoreOrderProvider(ctx, orderID))
+	if err != nil {
 		return "", err
 	}
 	if ManualMoneyEventBlocked(provider == ProviderMercadoPago, event) {
@@ -486,38 +452,23 @@ type AdminReturnRow struct {
 	Units int64
 }
 
-var sqlAdminReturns = sqlText(`SELECT r.id, r.order_id, r.kind, r.status, r.resolution, r.created_at,
-        r.refund_cents, r.instructions, r.rejection_reason,
-        COALESCE(NULLIF(btrim(o.guest_email), ''), u.email) AS email,
-        COALESCE((SELECT SUM(ri.quantity) FROM return_request_items ri
-                  WHERE ri.return_request_id = r.id), 0)::bigint AS units
- FROM return_requests r
- JOIN orders o ON o.id = r.order_id
- LEFT JOIN users u ON u.id = o.user_id
- WHERE CASE $1::text
-         WHEN 'todas' THEN true
-         WHEN 'abertas' THEN r.status IN ('requested', 'approved', 'received')
-         ELSE r.status = $1::text
-       END
- ORDER BY r.created_at DESC
- LIMIT $2`)
-
 // ListAdminReturns lists requests for a filter (200 max).
 func ListAdminReturns(ctx context.Context, q DBTX, filter string) ([]AdminReturnRow, error) {
-	type row struct {
-		ReturnSummary
-		Email *string `db:"email"`
-		Units int64   `db:"units"`
-	}
-	rows, err := collect[row](q.Query(ctx, sqlAdminReturns, ClampReturnFilter(filter), 200))
+	rows, err := queries(q).StoreAdminReturns(ctx, sqlc.StoreAdminReturnsParams{Filter: ClampReturnFilter(filter), MaxRows: 200})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]AdminReturnRow, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, AdminReturnRow(r))
-	}
-	return out, nil
+	return mapSlice(rows, func(r sqlc.StoreAdminReturnsRow) AdminReturnRow {
+		return AdminReturnRow{
+			ReturnSummary: ReturnSummary{
+				ID: r.ID, OrderID: r.OrderID, Kind: r.Kind, Status: r.Status, Resolution: r.Resolution,
+				CreatedAt: r.CreatedAt, RefundCents: r.RefundCents, Instructions: r.Instructions,
+				RejectionReason: r.RejectionReason,
+			},
+			Email: r.Email,
+			Units: r.Units,
+		}
+	}), nil
 }
 
 // ReturnItemView is a returned line.
@@ -593,27 +544,6 @@ func (d AdminReturnDetail) PartialRefund() bool {
 // DefaultReturnInstructions pre-fills the approve form.
 const DefaultReturnInstructions = "Poste a peça nos Correios em até 7 dias usando o código de postagem: \nEnvie na embalagem original, com etiquetas, e inclua o número do pedido."
 
-var (
-	sqlAdminReturn = sqlText(`SELECT r.id, r.order_id, r.kind, r.status, r.resolution, r.created_at,
-        r.refund_cents, r.instructions, r.rejection_reason, r.reason,
-        r.desired_size,
-        COALESCE(NULLIF(btrim(o.guest_email), ''), u.email) AS email,
-        o.status::text AS order_status, o.total_cents AS order_total_cents
- FROM return_requests r
- JOIN orders o ON o.id = r.order_id
- LEFT JOIN users u ON u.id = o.user_id
- WHERE r.id = $1`)
-	sqlAdminReturnItems = sqlText(`SELECT oi.product_name, oi.variant_label, ri.quantity,
-        oi.quantity AS ordered, oi.unit_price_cents
- FROM return_request_items ri
- JOIN order_items oi ON oi.id = ri.order_item_id
- WHERE ri.return_request_id = $1
- ORDER BY oi.created_at, oi.id`)
-	sqlAdminReturnAudit = sqlText(`SELECT occurred_at, actor_name, metadata FROM audit_events
- WHERE aggregate_type = 'return' AND aggregate_id = $1
- ORDER BY occurred_at, id`)
-)
-
 // ReturnActionLabel labels an audit action.
 func ReturnActionLabel(action string) string {
 	switch action {
@@ -657,35 +587,37 @@ func returnAuditDetail(meta map[string]any) string {
 
 // LoadAdminReturn loads the request page (nil when missing).
 func LoadAdminReturn(ctx context.Context, q DBTX, returnID uuid.UUID) (*AdminReturnDetail, error) {
-	var d AdminReturnDetail
-	s := &d.Summary
-	err := q.QueryRow(ctx, sqlAdminReturn, returnID).Scan(&s.ID, &s.OrderID, &s.Kind, &s.Status, &s.Resolution, &s.CreatedAt,
-		&s.RefundCents, &s.Instructions, &s.RejectionReason, &d.Reason, &d.DesiredSize, &d.Email, &d.OrderStatus, &d.OrderTotalCents)
-	if found, err := optional(err); err != nil || !found {
+	qs := queries(q)
+	r, found, err := noRows(qs.StoreAdminReturn(ctx, returnID))
+	if err != nil || !found {
 		return nil, err
 	}
-	if d.Items, err = collect[ReturnItemView](q.Query(ctx, sqlAdminReturnItems, returnID)); err != nil {
-		return nil, err
+	d := AdminReturnDetail{
+		Summary: ReturnSummary{
+			ID: r.ID, OrderID: r.OrderID, Kind: r.Kind, Status: r.Status, Resolution: r.Resolution,
+			CreatedAt: r.CreatedAt, RefundCents: r.RefundCents, Instructions: r.Instructions,
+			RejectionReason: r.RejectionReason,
+		},
+		Reason: r.Reason, DesiredSize: r.DesiredSize, Email: r.Email,
+		OrderStatus: r.OrderStatus, OrderTotalCents: r.OrderTotalCents,
 	}
-	rows, err := q.Query(ctx, sqlAdminReturnAudit, returnID.String())
+	items, err := qs.StoreAdminReturnItems(ctx, returnID)
 	if err != nil {
 		return nil, err
 	}
-	var at time.Time
-	var actor *string
-	var raw []byte
-	_, err = pgx.ForEachRow(rows, []any{&at, &actor, &raw}, func() error {
+	d.Items = mapSlice(items, func(r sqlc.StoreAdminReturnItemsRow) ReturnItemView { return ReturnItemView(r) })
+	audits, err := qs.StoreAdminReturnAudit(ctx, returnID.String())
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range audits {
 		meta := map[string]any{}
-		_ = json.Unmarshal(raw, &meta)
+		_ = json.Unmarshal(a.Metadata, &meta)
 		action, _ := meta["action"].(string)
 		d.Audit = append(d.Audit, ReturnAuditEntry{
-			OccurredAt: at, ActorName: actor, Action: action,
+			OccurredAt: a.OccurredAt, ActorName: a.ActorName, Action: action,
 			Label: ReturnActionLabel(action), Detail: returnAuditDetail(meta),
 		})
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
 	if d.CanRefund() {
 		opts, err := LoadRefundOptions(ctx, q, returnID)
