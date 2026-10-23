@@ -154,6 +154,16 @@ templ homePage(d homeData) {
 			</div>
 		</section>
 	}
+	<section id="newsletter" class="border-y border-border px-4 py-16 md:px-8">
+		<div class="mx-auto grid max-w-3xl gap-6 md:grid-cols-2 md:items-center">
+			<div class="space-y-3">
+				<p class="text-[10px] tracking-widest text-primary uppercase">Newsletter</p>
+				<h2 class="font-serif text-3xl leading-tight text-foreground">Novidades e promoções no seu e-mail</h2>
+				<p class="text-sm text-muted-foreground">Lançamentos, reposições e cupons exclusivos. Cancele quando quiser.</p>
+			</div>
+			@NewsletterForm()
+		</div>
+	</section>
 	<section id="sobre" data-reveal class="mx-auto grid max-w-7xl scroll-mt-28 items-center gap-10 px-4 py-24 md:grid-cols-2 md:px-8">
 		<div class="overflow-hidden rounded-2xl">
 			<img

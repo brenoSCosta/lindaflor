@@ -29,6 +29,15 @@ func TestHomeRendersSectionsShellAndHead(t *testing.T) {
 	)
 }
 
+// Regression: NewsletterForm was never rendered anywhere (Rust had the same
+// gap), so nobody could subscribe; the home page carries it now.
+func TestHomeHasNewsletterSignup(t *testing.T) {
+	s := newServer(t)
+	res := s.Client(t).Get("/")
+	wantStatus(t, res, http.StatusOK)
+	wantContains(t, res.Body, `id="newsletter"`, `action="/newsletter"`, `name="email"`, "Inscrever")
+}
+
 func TestHomeShowsBannerCarouselInsteadOfStaticHero(t *testing.T) {
 	s := newServer(t)
 	exec(t, s.Pool, `INSERT INTO home_banners (id, title, subtitle, image_url, active) VALUES ($1, 'Coleção Sol', 'Peças novas', 'https://cdn.example.com/b.jpg', true)`, newID())

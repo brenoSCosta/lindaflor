@@ -424,20 +424,28 @@ func homePage(d homeData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<section id=\"sobre\" data-reveal class=\"mx-auto grid max-w-7xl scroll-mt-28 items-center gap-10 px-4 py-24 md:grid-cols-2 md:px-8\"><div class=\"overflow-hidden rounded-2xl\"><img src=\"https://images.unsplash.com/photo-1544551763-46a013bb70d5?auto=format&fit=crop&w=1400&q=80\" alt=\"Praia em Aracaju\" class=\"aspect-[4/5] w-full object-cover\"></div><div class=\"space-y-6\" data-reveal style=\"transition-delay:120ms\"><p class=\"text-[10px] tracking-widest text-primary uppercase\">Nossa história</p><h2 class=\"font-serif text-4xl leading-tight text-foreground md:text-5xl\">Moda praia feita com carinho em Aracaju</h2><p class=\"leading-relaxed text-muted-foreground\">A Linda Flor nasceu para vestir mulheres que querem se sentir lindas na praia, na piscina e no pôr do sol. Qualidade no tecido, modelagem que valoriza o corpo e um atendimento próximo de quem entende moda praia de verdade.</p><p class=\"text-[10px] tracking-wider text-primary uppercase\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<section id=\"newsletter\" class=\"border-y border-border px-4 py-16 md:px-8\"><div class=\"mx-auto grid max-w-3xl gap-6 md:grid-cols-2 md:items-center\"><div class=\"space-y-3\"><p class=\"text-[10px] tracking-widest text-primary uppercase\">Newsletter</p><h2 class=\"font-serif text-3xl leading-tight text-foreground\">Novidades e promoções no seu e-mail</h2><p class=\"text-sm text-muted-foreground\">Lançamentos, reposições e cupons exclusivos. Cancele quando quiser.</p></div>")
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = NewsletterForm().Render(ctx, templ_7745c5c3_Buffer)
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</div></section><section id=\"sobre\" data-reveal class=\"mx-auto grid max-w-7xl scroll-mt-28 items-center gap-10 px-4 py-24 md:grid-cols-2 md:px-8\"><div class=\"overflow-hidden rounded-2xl\"><img src=\"https://images.unsplash.com/photo-1544551763-46a013bb70d5?auto=format&fit=crop&w=1400&q=80\" alt=\"Praia em Aracaju\" class=\"aspect-[4/5] w-full object-cover\"></div><div class=\"space-y-6\" data-reveal style=\"transition-delay:120ms\"><p class=\"text-[10px] tracking-widest text-primary uppercase\">Nossa história</p><h2 class=\"font-serif text-4xl leading-tight text-foreground md:text-5xl\">Moda praia feita com carinho em Aracaju</h2><p class=\"leading-relaxed text-muted-foreground\">A Linda Flor nasceu para vestir mulheres que querem se sentir lindas na praia, na piscina e no pôr do sol. Qualidade no tecido, modelagem que valoriza o corpo e um atendimento próximo de quem entende moda praia de verdade.</p><p class=\"text-[10px] tracking-wider text-primary uppercase\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var19 string
 		templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs("@biquinislindaflor")
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/storefront/home.templ`, Line: 173, Col: 86}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/storefront/home.templ`, Line: 183, Col: 86}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</p></div></section><section class=\"border-t border-border bg-foreground px-4 py-16 text-center text-background md:px-8\"><p class=\"text-[10px] tracking-[0.24em] uppercase\">Atendimento personalizado</p><h2 class=\"font-serif mt-3 text-4xl md:text-5xl\">Fale com a gente no WhatsApp</h2><p class=\"mx-auto mt-4 max-w-xl text-sm leading-relaxed text-background/70\">Tire dúvidas sobre tamanhos, cores e disponibilidade. Estamos em Aracaju, de segunda a sexta, das 9h às 18h.</p>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "</p></div></section><section class=\"border-t border-border bg-foreground px-4 py-16 text-center text-background md:px-8\"><p class=\"text-[10px] tracking-[0.24em] uppercase\">Atendimento personalizado</p><h2 class=\"font-serif mt-3 text-4xl md:text-5xl\">Fale com a gente no WhatsApp</h2><p class=\"mx-auto mt-4 max-w-xl text-sm leading-relaxed text-background/70\">Tire dúvidas sobre tamanhos, cores e disponibilidade. Estamos em Aracaju, de segunda a sexta, das 9h às 18h.</p>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -447,20 +455,20 @@ func homePage(d homeData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<a href=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var21 templ.SafeURL
 			templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(d.WhatsappURL))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/storefront/home.templ`, Line: 184, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/storefront/home.templ`, Line: 194, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\" target=\"_blank\" rel=\"noreferrer\" class=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\" target=\"_blank\" rel=\"noreferrer\" class=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -473,12 +481,12 @@ func homePage(d homeData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "\">Chamar no WhatsApp</a>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "\">Chamar no WhatsApp</a>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "</section>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "</section>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
