@@ -82,17 +82,25 @@ export async function adminCatalog({ state }) {
     state.productImageKeys = keys;
   });
 
-  await step(a, 'edit: delete an image and change the price', async () => {
+  await step(a, 'edit: delete an image, change the price, add a variant', async () => {
     await goto(a, `/admin/produtos/${state.productID}`);
     const p = a.page;
     await p.locator('input[name="delete_image_id"]').first().check();
     await p.fill('#price', '149.90');
+    // The blank last row adds a variant (stock 0, restocked in the jobs flow).
+    const last = (sel) => p.locator(sel).last();
+    await last('input[name="variant_sku[]"]').fill(`E2E-${uniq}-GG-AZUL`.toUpperCase());
+    await last('input[name="variant_size[]"]').fill('gg');
+    await last('input[name="variant_color[]"]').fill('Azul');
+    await last('input[name="variant_color_hex[]"]').fill('#1e90ff');
     await Promise.all([p.waitForLoadState('networkidle'), p.getByRole('button', { name: 'Salvar alterações' }).click()]);
     await p.waitForTimeout(500);
     const row = sql(`select price_in_cents from products where id='${state.productID}'`);
     expect(row === '14990', `price_in_cents = ${row}`);
     const n = sql(`select count(*) from product_images where product_id='${state.productID}'`);
     expect(n === '2', `images after delete = ${n}`);
+    const nv = sql(`select count(*) from product_variants v join inventory i on i.variant_id=v.id where v.product_id='${state.productID}'`);
+    expect(nv === '5', `variants after edit = ${nv}`);
     const keys = sql(`select string_agg(url, ' ') from product_images where product_id='${state.productID}'`).split(' ');
     const gone = state.productImageKeys.find((k) => !keys.includes(k));
     const listed = await s3List();
